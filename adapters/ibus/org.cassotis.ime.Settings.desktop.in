@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Cassotis IME Settings
+Name[zh_CN]=言泉输入法设置
+Comment=Configure Cassotis IME
+Comment[zh_CN]=配置言泉输入法
+Exec=@SETUP@
+Icon=input-keyboard
+Terminal=false
+Categories=Settings;
+StartupNotify=true

@@ -1,0 +1,11 @@
+[Addon]
+Name=Cassotis IME
+Name[zh_CN]=言泉输入法
+Category=InputMethod
+Version=@VERSION@
+Library=@LIBRARY@
+Type=SharedLibrary
+OnDemand=True
+
+[Addon/Dependencies]
+0=core:@FCITX_VERSION@
