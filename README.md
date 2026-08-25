@@ -1,5 +1,13 @@
 # Cassotis IME for Linux
 
+<p align="center">
+  <img src="cassotis_ime_yanquan.png" alt="Cassotis IME logo" width="280">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License: GPL-3.0"></a>
+</p>
+
 English | [简体中文](README.CN.md)
 
 Cassotis IME for Linux is a native Chinese pinyin input method for both IBus

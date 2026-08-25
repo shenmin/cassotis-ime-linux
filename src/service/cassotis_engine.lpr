@@ -22,28 +22,6 @@ uses
 {$ENDIF}
     ;
 
-function default_dictionary_path: string;
-var
-    data_home: string;
-    home_directory: string;
-begin
-    Result := GetEnvironmentVariable('CASSOTIS_DICTIONARY');
-    if Result <> '' then
-        Exit;
-    data_home := GetEnvironmentVariable('XDG_DATA_HOME');
-    if data_home <> '' then
-        Result := IncludeTrailingPathDelimiter(data_home) +
-            'cassotis-ime' + PathDelim + 'dict_sc.db'
-    else
-    begin
-        home_directory := GetEnvironmentVariable('HOME');
-        if home_directory <> '' then
-            Result := IncludeTrailingPathDelimiter(home_directory) +
-                '.local' + PathDelim + 'share' + PathDelim + 'cassotis-ime' +
-                PathDelim + 'dict_sc.db';
-    end;
-end;
-
 function default_socket_path: string;
 var
     runtime_directory: string;
@@ -53,28 +31,6 @@ begin
         Exit('');
     Result := IncludeTrailingPathDelimiter(runtime_directory) +
         'cassotis-ime' + PathDelim + 'engine.sock';
-end;
-
-function default_user_dictionary_path: string;
-var
-    data_home: string;
-    home_directory: string;
-begin
-    Result := GetEnvironmentVariable('CASSOTIS_USER_DICTIONARY');
-    if Result <> '' then
-        Exit;
-    data_home := GetEnvironmentVariable('XDG_DATA_HOME');
-    if data_home <> '' then
-        Result := IncludeTrailingPathDelimiter(data_home) +
-            'cassotis-ime' + PathDelim + 'user_dict.db'
-    else
-    begin
-        home_directory := GetEnvironmentVariable('HOME');
-        if home_directory <> '' then
-            Result := IncludeTrailingPathDelimiter(home_directory) +
-                '.local' + PathDelim + 'share' + PathDelim + 'cassotis-ime' +
-                PathDelim + 'user_dict.db';
-    end;
 end;
 
 procedure run_server(const dictionary_path: string;
@@ -341,9 +297,9 @@ procedure parse_server_options(out dictionary_path: string;
 var
     index: Integer;
 begin
-    dictionary_path := default_dictionary_path;
+    dictionary_path := get_default_dictionary_path_simplified;
     traditional_dictionary_path := get_default_dictionary_path_traditional;
-    user_dictionary_path := default_user_dictionary_path;
+    user_dictionary_path := get_default_user_dictionary_path;
     socket_path := default_socket_path;
     index := 2;
     while index <= ParamCount do

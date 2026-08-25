@@ -39,10 +39,27 @@ begin
         PathDelim + file_name;
 end;
 
+function get_install_data_path(const file_name: string): string;
+var
+    executable_directory: string;
+    candidate_path: string;
+begin
+    Result := '';
+    executable_directory := ExtractFileDir(ExpandFileName(ParamStr(0)));
+    if executable_directory = '' then
+        Exit;
+    candidate_path := ExpandFileName(IncludeTrailingPathDelimiter(
+        executable_directory) + '..' + PathDelim + '..' + PathDelim +
+        'share' + PathDelim + 'cassotis-ime' + PathDelim + file_name);
+    if FileExists(candidate_path) then
+        Result := candidate_path;
+end;
+
 function get_base_dictionary_path(const environment_name: string;
     const file_name: string): string;
 var
     user_path: string;
+    install_path: string;
 begin
     Result := GetEnvironmentVariable(environment_name);
     if Result <> '' then
@@ -50,6 +67,9 @@ begin
     user_path := get_user_data_path(file_name);
     if (user_path <> '') and FileExists(user_path) then
         Exit(user_path);
+    install_path := get_install_data_path(file_name);
+    if install_path <> '' then
+        Exit(install_path);
     Result := '/usr/share/cassotis-ime/' + file_name;
 end;
 

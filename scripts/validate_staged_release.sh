@@ -126,13 +126,11 @@ chmod 0700 "$runtime_dir"
 
 "$engine" --self-test
 NO_AT_BRIDGE=1 "$settings" --check-ui
-CASSOTIS_DICTIONARY="$data/dict_sc.db" \
 CASSOTIS_USER_DICTIONARY="$temporary_dir/ibus-user.db" \
 CASSOTIS_ENGINE_PATH="$engine" \
 CASSOTIS_ENGINE_SOCKET="$socket_path" \
 XDG_RUNTIME_DIR="$runtime_dir" \
     "$ibus_adapter" --self-test
-CASSOTIS_DICTIONARY="$data/dict_sc.db" \
 CASSOTIS_USER_DICTIONARY="$temporary_dir/control-user.db" \
 CASSOTIS_ENGINE_PATH="$engine" \
 CASSOTIS_ENGINE_SOCKET="$socket_path" \
