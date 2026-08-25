@@ -133,10 +133,11 @@ cc -std=gnu11 -O2 -g -Wall -Wextra -Werror \
 cassotis_require_executable "$bin_dir/cassotis-control"
 
 printf '[build] libcassotis.so (Fcitx 5)\n'
-fcitx_candidate_comment_flags=()
+fcitx_compat_flags=()
 if pkg-config --atleast-version=5.1.9 Fcitx5Core; then
-    fcitx_candidate_comment_flags+=(
+    fcitx_compat_flags+=(
         -DCASSOTIS_FCITX_HAS_CANDIDATE_COMMENT=1
+        -DCASSOTIS_FCITX_HAS_BULK_CURSOR=1
     )
 fi
 cc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fPIC \
@@ -152,7 +153,7 @@ cc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fPIC \
 c++ -std=c++20 -O2 -g -Wall -Wextra -Werror -fPIC -shared \
     -I"$cassotis_root/adapters/common" \
     -I"$cassotis_root/adapters/ibus" \
-    "${fcitx_candidate_comment_flags[@]}" \
+    "${fcitx_compat_flags[@]}" \
     $(pkg-config --cflags Fcitx5Core glib-2.0) \
     "$cassotis_root/adapters/fcitx5/fcitx5_engine_cassotis.cpp" \
     "$unit_dir/cassotis_protocol_fcitx5.o" \
@@ -164,6 +165,7 @@ c++ -std=c++20 -O2 -g -Wall -Wextra -Werror -fPIC -shared \
 
 printf '[build] cassotis-fcitx5-smoke\n'
 c++ -std=c++20 -O2 -g -Wall -Wextra -Werror \
+    "${fcitx_compat_flags[@]}" \
     $(pkg-config --cflags Fcitx5Core glib-2.0) \
     "$cassotis_root/tools/integration/cassotis_fcitx5_smoke.cpp" \
     -o "$bin_dir/cassotis-fcitx5-smoke" \

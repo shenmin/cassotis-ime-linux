@@ -142,6 +142,16 @@ private:
                             : nullptr;
     }
 
+    int selectedCandidateIndex(
+        const std::shared_ptr<fcitx::CandidateList> &list) {
+#ifdef CASSOTIS_FCITX_HAS_BULK_CURSOR
+        auto *bulkCursor = list ? list->toBulkCursor() : nullptr;
+        return bulkCursor ? bulkCursor->globalCursorIndex() : -1;
+#else
+        return list ? list->cursorIndex() : -1;
+#endif
+    }
+
     std::string firstCandidate(const fcitx::ICUUID &uuid) {
         auto list = candidates(uuid);
         return list && list->size() > 0
@@ -226,21 +236,18 @@ private:
             return false;
         }
         const std::string first = firstPage->candidate(0).text().toString();
-        auto *firstBulkCursor = firstPage->toBulkCursor();
-        if (!require(firstBulkCursor != nullptr,
-                     "candidate list did not expose a bulk cursor")) {
+        const int firstCursor = selectedCandidateIndex(firstPage);
+        if (!require(firstCursor >= 0,
+                     "candidate list did not expose a selected cursor")) {
             return false;
         }
-        const int firstCursor = firstBulkCursor->globalCursorIndex();
         if (!require(send(uuid, fcitx::Key("Down")),
                      "Down was not handled") ||
-            !require(candidates(uuid)->toBulkCursor()->globalCursorIndex() !=
-                         firstCursor,
+            !require(selectedCandidateIndex(candidates(uuid)) != firstCursor,
                      "Down did not move the selected candidate") ||
             !require(send(uuid, fcitx::Key("Up")),
                      "Up was not handled") ||
-            !require(candidates(uuid)->toBulkCursor()->globalCursorIndex() ==
-                         firstCursor,
+            !require(selectedCandidateIndex(candidates(uuid)) == firstCursor,
                      "Up did not restore the selected candidate")) {
             return false;
         }
