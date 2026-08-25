@@ -1,5 +1,13 @@
 # 言泉输入法 Linux 版
 
+<p align="center">
+  <img src="cassotis_ime_yanquan.png" alt="Cassotis IME logo" width="280">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License: GPL-3.0"></a>
+</p>
+
 [English](README.md) | 简体中文
 
 言泉输入法 Linux 版是同时支持 IBus 与 Fcitx 5 的原生中文拼音输入法。
