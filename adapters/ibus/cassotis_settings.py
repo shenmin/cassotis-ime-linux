@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -91,6 +92,11 @@ PAGE_KEY_PREVIEWS = (
 COMPLETION_KEYS = ("Tab", "`")
 
 CONTROL_TIMEOUT_SECONDS = 35
+ENGINE_VERSION_TIMEOUT_SECONDS = 2
+PROJECT_URL = "https://www.yanquan.org/linux"
+ENGINE_VERSION_PATTERN = re.compile(
+    r"[0-9]+(?:\.[0-9]+){2}(?:[.-][0-9A-Za-z.-]+)?"
+)
 
 MODIFIER_CHOICES = (
     (0, "无"),
@@ -193,6 +199,37 @@ class ControlError(RuntimeError):
 def default_control_path():
     return os.path.join(os.path.dirname(os.path.realpath(__file__)),
                         "cassotis-control")
+
+
+def default_engine_path():
+    configured_path = os.environ.get("CASSOTIS_ENGINE_PATH")
+    if configured_path:
+        return configured_path
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                        "cassotis-engine")
+
+
+def read_engine_version(engine_path):
+    try:
+        result = subprocess.run(
+            [engine_path, "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=ENGINE_VERSION_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    version = result.stdout.strip()
+    if result.returncode != 0 or not ENGINE_VERSION_PATTERN.fullmatch(version):
+        return ""
+    return version
+
+
+def settings_subtitle(engine_path):
+    version = read_engine_version(engine_path)
+    version_text = f"v{version}" if version else "v?"
+    return f"Cassotis IME - 言泉输入法 ({version_text})"
 
 
 def run_control(control_path, arguments):
@@ -308,7 +345,7 @@ def merge_visible_state(current, changes):
 
 
 class SettingsWindow(Gtk.ApplicationWindow):
-    def __init__(self, application, control_path):
+    def __init__(self, application, control_path, engine_path):
         super().__init__(application=application)
         self.control_path = control_path
         self.current_dictionary_variant = 0
@@ -323,7 +360,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         header = Gtk.HeaderBar()
         header.set_show_close_button(True)
         header.set_title("设置")
-        header.set_subtitle("Cassotis IME · 言泉输入法")
+        header.set_subtitle(settings_subtitle(engine_path))
         self.set_titlebar(header)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -352,6 +389,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.defaults_button = Gtk.Button(label="恢复默认")
         self.defaults_button.connect("clicked", self._restore_defaults)
         footer.pack_start(self.defaults_button, False, False, 0)
+        website_link = Gtk.LinkButton.new_with_label(PROJECT_URL, PROJECT_URL)
+        footer.pack_start(website_link, False, False, 0)
         self.status = Gtk.Label(label="")
         self.status.set_xalign(0)
         footer.pack_start(self.status, True, True, 6)
@@ -748,7 +787,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self._run_operation(
             lambda: get_state(self.control_path),
             "正在读取当前设置…",
-            "已读取当前设置",
+            "",
             "读取失败",
         )
         return GLib.SOURCE_REMOVE
@@ -852,15 +891,16 @@ class SettingsWindow(Gtk.ApplicationWindow):
 
 
 class SettingsApplication(Gtk.Application):
-    def __init__(self, control_path):
+    def __init__(self, control_path, engine_path):
         super().__init__(application_id="org.cassotis.ime.Settings",
                          flags=Gio.ApplicationFlags.FLAGS_NONE)
         self.control_path = control_path
+        self.engine_path = engine_path
 
     def do_activate(self):
         window = self.props.active_window
         if window is None:
-            window = SettingsWindow(self, self.control_path)
+            window = SettingsWindow(self, self.control_path, self.engine_path)
         window.show_all()
         window.present()
 
@@ -868,10 +908,14 @@ class SettingsApplication(Gtk.Application):
 def main():
     parser = argparse.ArgumentParser(description="Cassotis IME settings")
     parser.add_argument("--control", default=default_control_path())
+    parser.add_argument("--engine", default=default_engine_path())
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--check-ui", action="store_true")
     options = parser.parse_args()
     if options.check_ui:
+        version = read_engine_version(options.engine)
+        if not version:
+            raise ControlError("无法从 cassotis-engine 读取版本号")
         state = dict(DEFAULT_STATE)
         state["future_setting"] = 37
         state["candidate_page_size"] = 5
@@ -890,13 +934,13 @@ def main():
         numpad_state["shortcut_settings_key"] = 0x6B
         numpad_state["shortcut_settings_modifiers"] = 7
         validate_state(numpad_state)
-        print("settings_ui=ok")
+        print(f"settings_ui=ok version={version}")
         return 0
     if options.check:
         get_state(options.control)
         print("settings_state=ok")
         return 0
-    application = SettingsApplication(options.control)
+    application = SettingsApplication(options.control, options.engine)
     return application.run(sys.argv[:1])
 
 
