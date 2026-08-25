@@ -4,6 +4,27 @@ set -u
 
 enable_ibus_source=0
 quiet=0
+command_timeout="${CASSOTIS_SESSION_COMMAND_TIMEOUT:-4}"
+user_timeout="${CASSOTIS_SESSION_USER_TIMEOUT:-10}"
+
+is_positive_duration() {
+    [[ "$1" =~ ^[0-9]+([.][0-9]+)?$ ]] &&
+        [[ "$1" != 0 && "$1" != 0.0 ]]
+}
+
+is_positive_duration "$command_timeout" || command_timeout=4
+is_positive_duration "$user_timeout" || user_timeout=10
+
+run_bounded() {
+    local duration="$1"
+
+    shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout --kill-after=1s "${duration}s" "$@"
+    else
+        "$@"
+    fi
+}
 
 usage() {
     cat <<'EOF'
@@ -66,7 +87,7 @@ refresh_all_users() {
         IFS=: read -r user _ _ _ _ home _ <<<"$entry"
         [[ -n "$user" && -d "$home" ]] || continue
 
-        if runuser -u "$user" -- env -i \
+        if run_bounded "$user_timeout" runuser -u "$user" -- env -i \
             HOME="$home" USER="$user" LOGNAME="$user" \
             PATH=/usr/local/bin:/usr/bin:/bin \
             XDG_RUNTIME_DIR="$runtime_dir" \
@@ -80,6 +101,7 @@ refresh_all_users() {
 }
 
 load_desktop_environment() {
+    local environment
     local name
     local value
 
@@ -95,7 +117,8 @@ load_desktop_environment() {
     [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] || return 1
 
     if command -v systemctl >/dev/null 2>&1 &&
-       systemctl --user show-environment >/dev/null 2>&1; then
+       environment="$(run_bounded "$command_timeout" \
+           systemctl --user show-environment 2>/dev/null)"; then
         while IFS='=' read -r name value; do
             case "$name" in
                 DISPLAY|WAYLAND_DISPLAY|XAUTHORITY|XDG_CACHE_HOME|\
@@ -105,7 +128,7 @@ load_desktop_environment() {
                     export "$name"
                     ;;
             esac
-        done < <(systemctl --user show-environment)
+        done <<<"$environment"
     fi
     return 0
 }
@@ -117,18 +140,24 @@ capture_gnome_sources() {
     mru_captured=0
     current_captured=0
     command -v gsettings >/dev/null 2>&1 || return 1
-    [[ "$(gsettings writable "$schema" sources 2>/dev/null || true)" == \
+    [[ "$(run_bounded "$command_timeout" gsettings writable \
+        "$schema" sources 2>/dev/null || true)" == \
        true ]] || return 1
-    sources_value="$(gsettings get "$schema" sources 2>/dev/null)" || return 1
+    sources_value="$(run_bounded "$command_timeout" gsettings get \
+        "$schema" sources 2>/dev/null)" || return 1
     sources_captured=1
-    if [[ "$(gsettings writable "$schema" mru-sources \
+    if [[ "$(run_bounded "$command_timeout" gsettings writable \
+                "$schema" mru-sources \
                 2>/dev/null || true)" == true ]] &&
-       mru_value="$(gsettings get "$schema" mru-sources 2>/dev/null)"; then
+       mru_value="$(run_bounded "$command_timeout" gsettings get \
+           "$schema" mru-sources 2>/dev/null)"; then
         mru_captured=1
     fi
-    if [[ "$(gsettings writable "$schema" current \
+    if [[ "$(run_bounded "$command_timeout" gsettings writable \
+                "$schema" current \
                 2>/dev/null || true)" == true ]] &&
-       current_value="$(gsettings get "$schema" current 2>/dev/null)"; then
+       current_value="$(run_bounded "$command_timeout" gsettings get \
+           "$schema" current 2>/dev/null)"; then
         current_captured=1
     fi
     return 0
@@ -138,12 +167,15 @@ restore_gnome_sources() {
     local schema='org.gnome.desktop.input-sources'
 
     [[ $sources_captured -eq 1 ]] || return 0
-    gsettings set "$schema" sources "$sources_value" || return 1
+    run_bounded "$command_timeout" gsettings set \
+        "$schema" sources "$sources_value" || return 1
     if [[ $mru_captured -eq 1 ]]; then
-        gsettings set "$schema" mru-sources "$mru_value" || return 1
+        run_bounded "$command_timeout" gsettings set \
+            "$schema" mru-sources "$mru_value" || return 1
     fi
     if [[ $current_captured -eq 1 ]]; then
-        gsettings set "$schema" current "$current_value" || return 1
+        run_bounded "$command_timeout" gsettings set \
+            "$schema" current "$current_value" || return 1
     fi
     sources_captured=0
 }
@@ -156,9 +188,11 @@ add_gnome_ibus_source() {
 
     [[ $enable_ibus_source -eq 1 ]] || return 0
     command -v gsettings >/dev/null 2>&1 || return 0
-    [[ "$(gsettings writable "$schema" sources 2>/dev/null || true)" == \
+    [[ "$(run_bounded "$command_timeout" gsettings writable \
+        "$schema" sources 2>/dev/null || true)" == \
        true ]] || return 0
-    sources="$(gsettings get "$schema" sources 2>/dev/null)" || return 1
+    sources="$(run_bounded "$command_timeout" gsettings get \
+        "$schema" sources 2>/dev/null)" || return 1
     if [[ "$sources" != *"$source"* ]]; then
         if [[ "$sources" == '@a(ss) []' || "$sources" == '[]' ]]; then
             sources="[$source]"
@@ -166,10 +200,12 @@ add_gnome_ibus_source() {
             sources="${sources%]}"
             sources="$sources, $source]"
         fi
-        gsettings set "$schema" sources "$sources" || return 1
+        run_bounded "$command_timeout" gsettings set \
+            "$schema" sources "$sources" || return 1
     fi
 
-    mru="$(gsettings get "$schema" mru-sources 2>/dev/null || true)"
+    mru="$(run_bounded "$command_timeout" gsettings get \
+        "$schema" mru-sources 2>/dev/null || true)"
     if [[ -n "$mru" && "$mru" != *"$source"* ]]; then
         if [[ "$mru" == '@a(ss) []' || "$mru" == '[]' ]]; then
             mru="[$source]"
@@ -177,12 +213,13 @@ add_gnome_ibus_source() {
             mru="${mru#\[}"
             mru="[$source, $mru"
         fi
-        gsettings set "$schema" mru-sources "$mru" || return 1
+        run_bounded "$command_timeout" gsettings set \
+            "$schema" mru-sources "$mru" || return 1
     fi
 }
 
 ibus_has_cassotis() {
-    ibus list-engine 2>/dev/null |
+    run_bounded "$command_timeout" ibus list-engine 2>/dev/null |
         grep -Eq '^[[:space:]]*cassotis[[:space:]]+-'
 }
 
@@ -192,16 +229,19 @@ refresh_ibus() {
 
     command -v ibus >/dev/null 2>&1 || return 0
     if command -v systemctl >/dev/null 2>&1 &&
-       systemctl --user is-active --quiet \
+       run_bounded "$command_timeout" systemctl --user is-active --quiet \
            org.freedesktop.IBus.session.GNOME.service; then
+        ibus_session_active=1
         capture_gnome_sources || true
-        if systemctl --user restart \
+        if run_bounded "$command_timeout" systemctl --user restart \
             org.freedesktop.IBus.session.GNOME.service; then
             restarted=1
         fi
-    elif ibus address >/dev/null 2>&1; then
+    elif run_bounded "$command_timeout" ibus address >/dev/null 2>&1; then
+        ibus_session_active=1
         capture_gnome_sources || true
-        if ibus restart >/dev/null 2>&1; then
+        if run_bounded "$command_timeout" \
+            ibus restart >/dev/null 2>&1; then
             restarted=1
         fi
     fi
@@ -223,22 +263,28 @@ refresh_fcitx() {
     local attempt
 
     command -v fcitx5-remote >/dev/null 2>&1 || return 0
-    fcitx5-remote --check >/dev/null 2>&1 || return 0
-    fcitx5-remote -e >/dev/null 2>&1 || return 1
+    run_bounded "$command_timeout" \
+        fcitx5-remote --check >/dev/null 2>&1 || return 0
+    run_bounded "$command_timeout" \
+        fcitx5-remote -e >/dev/null 2>&1 || return 1
     for ((attempt = 0; attempt < 50; attempt += 1)); do
-        fcitx5-remote --check >/dev/null 2>&1 || break
+        run_bounded "$command_timeout" \
+            fcitx5-remote --check >/dev/null 2>&1 || break
         sleep 0.1
     done
     if command -v systemctl >/dev/null 2>&1 &&
-       systemctl --user cat fcitx5.service >/dev/null 2>&1; then
-        systemctl --user restart fcitx5.service >/dev/null 2>&1 || return 1
+       run_bounded "$command_timeout" systemctl --user cat \
+           fcitx5.service >/dev/null 2>&1; then
+        run_bounded "$command_timeout" systemctl --user restart \
+            fcitx5.service >/dev/null 2>&1 || return 1
     elif command -v fcitx5 >/dev/null 2>&1; then
-        fcitx5 -d >/dev/null 2>&1 || return 1
+        run_bounded "$command_timeout" fcitx5 -d >/dev/null 2>&1 || return 1
     else
         return 1
     fi
     for ((attempt = 0; attempt < 50; attempt += 1)); do
-        if fcitx5-remote --check >/dev/null 2>&1; then
+        if run_bounded "$command_timeout" \
+            fcitx5-remote --check >/dev/null 2>&1; then
             log 'Fcitx 5 discovered the updated system components.'
             return 0
         fi
@@ -256,10 +302,13 @@ refresh_current_user() {
     sources_value=''
     mru_value=''
     current_value=''
+    ibus_session_active=0
     load_desktop_environment || return 0
     trap 'restore_gnome_sources >/dev/null 2>&1 || true' EXIT
     refresh_ibus || status=1
-    refresh_fcitx || status=1
+    if [[ $ibus_session_active -eq 0 ]]; then
+        refresh_fcitx || status=1
+    fi
     restore_gnome_sources >/dev/null 2>&1 || status=1
     trap - EXIT
     return "$status"

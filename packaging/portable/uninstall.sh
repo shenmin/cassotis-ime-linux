@@ -7,6 +7,13 @@ source_root="$bundle_dir/root"
 destdir="${DESTDIR:-/}"
 manifest="$source_root/usr/share/cassotis-ime/release-manifest.txt"
 
+run_bounded() {
+    local duration="$1"
+
+    shift
+    timeout --kill-after=1s "$duration" "$@"
+}
+
 [[ -r "$manifest" ]] || {
     printf 'Error: release manifest is missing: %s\n' "$manifest" >&2
     exit 1
@@ -38,9 +45,10 @@ done
 
 if [[ "$destdir" == / ]]; then
     command -v update-desktop-database >/dev/null 2>&1 &&
-        update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+        run_bounded 2s update-desktop-database \
+            /usr/share/applications >/dev/null 2>&1 || true
     command -v ibus >/dev/null 2>&1 &&
-        ibus write-cache --system >/dev/null 2>&1 || true
+        run_bounded 4s ibus write-cache --system >/dev/null 2>&1 || true
 fi
 
 printf 'Cassotis IME portable files were removed from %s.\n' "$destdir"
