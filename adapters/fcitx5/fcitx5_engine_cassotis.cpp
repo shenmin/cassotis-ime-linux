@@ -66,6 +66,19 @@ const fcitx::KeyList kSelectionKeys = {
     fcitx::Key(FcitxKey_9),
 };
 
+fcitx::Text candidateDisplayText(const char *text, const char *comment) {
+    std::string displayText = text ? text : "";
+#ifndef CASSOTIS_FCITX_HAS_CANDIDATE_COMMENT
+    if (comment && *comment) {
+        displayText += "  ";
+        displayText += comment;
+    }
+#else
+    (void)comment;
+#endif
+    return fcitx::Text(std::move(displayText));
+}
+
 bool statesEqual(const CassotisEngineState &left,
                  const CassotisEngineState &right) {
     return left.input_mode == right.input_mode &&
@@ -571,11 +584,13 @@ void CassotisFcitxState::selectCandidate(std::size_t globalIndex) {
 CassotisCandidateWord::CassotisCandidateWord(
     CassotisFcitxEngine *engine, std::size_t globalIndex, const char *text,
     const char *comment)
-    : fcitx::CandidateWord(fcitx::Text(text ? text : "")), engine_(engine),
+    : fcitx::CandidateWord(candidateDisplayText(text, comment)), engine_(engine),
       globalIndex_(globalIndex) {
+#ifdef CASSOTIS_FCITX_HAS_CANDIDATE_COMMENT
     if (comment && *comment) {
         setComment(fcitx::Text(comment));
     }
+#endif
 }
 
 void CassotisCandidateWord::select(
@@ -1053,4 +1068,8 @@ public:
 
 } // namespace
 
+#ifdef FCITX_ADDON_FACTORY_V2
 FCITX_ADDON_FACTORY_V2(cassotis, CassotisFcitxEngineFactory);
+#else
+FCITX_ADDON_FACTORY(CassotisFcitxEngineFactory);
+#endif

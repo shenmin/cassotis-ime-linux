@@ -133,6 +133,12 @@ cc -std=gnu11 -O2 -g -Wall -Wextra -Werror \
 cassotis_require_executable "$bin_dir/cassotis-control"
 
 printf '[build] libcassotis.so (Fcitx 5)\n'
+fcitx_candidate_comment_flags=()
+if pkg-config --atleast-version=5.1.9 Fcitx5Core; then
+    fcitx_candidate_comment_flags+=(
+        -DCASSOTIS_FCITX_HAS_CANDIDATE_COMMENT=1
+    )
+fi
 cc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fPIC \
     -I"$cassotis_root/adapters/ibus" \
     $(pkg-config --cflags glib-2.0) \
@@ -146,6 +152,7 @@ cc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fPIC \
 c++ -std=c++20 -O2 -g -Wall -Wextra -Werror -fPIC -shared \
     -I"$cassotis_root/adapters/common" \
     -I"$cassotis_root/adapters/ibus" \
+    "${fcitx_candidate_comment_flags[@]}" \
     $(pkg-config --cflags Fcitx5Core glib-2.0) \
     "$cassotis_root/adapters/fcitx5/fcitx5_engine_cassotis.cpp" \
     "$unit_dir/cassotis_protocol_fcitx5.o" \
