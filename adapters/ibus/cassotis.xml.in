@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component>
+  <name>org.freedesktop.IBus.Cassotis</name>
+  <description>Cassotis IME Linux IBus component</description>
+  <exec>@EXECUTABLE@ --ibus</exec>
+  <version>@VERSION@</version>
+  <author>Cassotis IME contributors</author>
+  <license>GPL-3.0-only</license>
+  <homepage>https://github.com/shenmin/cassotis-ime-linux</homepage>
+  <textdomain>ibus-cassotis</textdomain>
+  <engines>
+    <engine>
+      <name>cassotis</name>
+      <longname>Cassotis 言泉拼音输入法</longname>
+      <description>Cassotis Chinese input method</description>
+      <language>zh_CN</language>
+      <license>GPL-3.0-only</license>
+      <author>Cassotis IME contributors</author>
+      <icon>ibus-keyboard</icon>
+      <layout>us</layout>
+      <symbol>言</symbol>
+      <setup>@SETUP@</setup>
+    </engine>
+  </engines>
+</component>

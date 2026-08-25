@@ -1,0 +1,8 @@
+# Optional quality targets beyond the Windows v1.17.0 parity baseline.
+# These cases intentionally remain outside the required build/test gate until
+# the Windows engine itself adopts equivalent improvements.
+# query	expected_text	maximum_rank	category
+elm	饿了么	1	upstream-quality-target
+kaishichifan	开始吃饭	1	upstream-quality-target
+yanxikaishi	演习开始	1	upstream-quality-target
+woxiangchifanle	我想吃饭了	1	upstream-quality-target

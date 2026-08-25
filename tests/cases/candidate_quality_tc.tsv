@@ -1,0 +1,10 @@
+# query	expected_text	maximum_rank	category
+women	我們	1	traditional-exact
+shenme	什麼	1	traditional-exact
+zenme	怎麼	1	traditional-exact
+xianshi	顯示	1	traditional-exact
+shuru	輸入	1	traditional-exact
+shijie	世界	1	traditional-exact
+yonghu	用戶	1	traditional-exact
+shezhi	設置	1	traditional-exact
+xuexi	學習	1	traditional-exact

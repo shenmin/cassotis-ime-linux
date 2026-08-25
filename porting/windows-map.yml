@@ -1,0 +1,47 @@
+schema_version: 2
+windows_tag: v1.17.0
+windows_baseline: e9056cefb479c2df778664ec49e6da2056c59525
+lexicon_tag: v1.17.0
+lexicon_baseline: a9a29c4a5d4679a65b34e9556decc31925a0857a
+dictionary_schema: 22
+units:
+  - windows: src/common/nc_types.pas
+    linux: src/common/nc_types.pas
+    status: ported-platform-adaptation
+    notes: Domain types and production engine state are retained; platform key events are converted to framework-neutral values at the IPC boundary.
+  - windows: src/engine/nc_pinyin_parser.pas
+    linux: src/engine/nc_pinyin_parser.pas
+    status: ported-baseline
+    notes: Algorithm preserved; Delphi RTL names and dynamic-array types adapted for FPC 3.2.2.
+  - windows: src/engine/nc_shuangpin_decoder.pas
+    linux: src/engine/nc_shuangpin_decoder.pas
+    status: ported-baseline
+    notes: All six Windows schemes and their regression behavior are represented by FPCUnit tests.
+  - windows: src/engine/nc_fuzzy_pinyin.pas
+    linux: src/engine/nc_fuzzy_pinyin.pas
+    status: ported-baseline
+    notes: Expansion rules, costs, metadata, and deduplication are preserved.
+  - windows: src/common/nc_sqlite.pas
+    linux: src/dictionary/nc_sqlite.pas
+    status: ported-platform-adaptation
+    notes: WinAPI loading was replaced with FPC Dynlibs; the tested SQLite semantics are preserved.
+  - windows: src/engine/nc_dictionary_sqlite.pas
+    linux: src/engine/nc_dictionary_sqlite.pas
+    status: ported-production-provider
+    notes: The schema-22 release provider and all ranking, completion, context, popularity, corpus, and user-signal queries are retained; dynamic-library and filesystem calls use FPC compatibility units. The provider remains backward-compatible with schema 18 and later.
+  - windows: src/engine/nc_engine_intf.pas
+    linux: src/engine/nc_engine_intf.pas
+    status: ported-production-engine
+    notes: Candidate recall, short/long ranking, context, user learning, deletion, completion, all seven pinyin schemes, fuzzy recall, and input-state behavior follow the Windows v1.17.0 source; anonymous comparer calls use stable explicit FPC sorts, and the Linux service only supplies context and IPC lifecycle around TncEngine.
+  - windows: src/engine/nc_*_model.pas and src/engine/nc_short_context_expanded_evidence.pas
+    linux: src/engine/nc_*_model.pas and src/engine/nc_short_context_expanded_evidence.pas
+    status: ported-generated-models
+    notes: Forty generated model bodies plus expanded evidence were mechanically compared after normalizing compiler directives and unit names; constants, feature order, fixed scaling, and self-tests are unchanged.
+  - windows: src/tsf
+    linux: adapters/fcitx5 and adapters/ibus
+    status: redesigned-native-thin-adapters
+    notes: Native IBus C/GObject and Fcitx 5 C++ adapters share the versioned local IPC and contain no dictionary or ranking policy.
+  - windows: src/ui
+    linux: native framework UI and adapters/ibus/cassotis_settings.py
+    status: redesigned-native-ui
+    notes: Candidate/preedit placement is delegated to each framework with shared overflow geometry; completion is below candidates, and a GTK settings client controls engine-owned schema-4 state through IPC while preserving schema-1/2/3 compatibility.

@@ -1,0 +1,10 @@
+repository=https://github.com/shenmin/cassotis-ime
+tag=v1.17.0
+reviewed_through=e9056cefb479c2df778664ec49e6da2056c59525
+baseline_date=2026-08-22T14:30:21+08:00
+lexicon_repository=https://github.com/shenmin/cassotis-lexicon
+lexicon_tag=v1.17.0
+lexicon_reviewed_through=a9a29c4a5d4679a65b34e9556decc31925a0857a
+dictionary_schema=22
+dictionary_sha256=a07942f79fe607bdb7dad14e0b0e82b87fef47473380cf98eda415afc6a9c354
+dictionary_tc_sha256=3cb9de47d9ff3dbc9a517d53a64ac0a547ecd4c72b1767e26c13152a8963c17e
