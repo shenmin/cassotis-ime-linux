@@ -8,7 +8,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License: GPL-3.0"></a>
 </p>
 
-[English](README.md) | 简体中文
+[English](README.md) | 简体中文 | [Windows 版](https://github.com/shenmin/cassotis-ime)
 
 言泉输入法 Linux 版是同时支持 IBus 与 Fcitx 5 的原生中文拼音输入法。
 本项目源自
