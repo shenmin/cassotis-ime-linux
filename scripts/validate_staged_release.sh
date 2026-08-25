@@ -31,6 +31,7 @@ done
 
 cassotis_require_linux
 cassotis_require_command ldd
+cassotis_require_command python3
 cassotis_require_command realpath
 cassotis_require_command sha256sum
 [[ -n "$release_root" ]] || cassotis_die '--root is required'
@@ -43,6 +44,7 @@ data="$release_root/usr/share/cassotis-ime"
 engine="$libexec/cassotis-engine"
 control="$libexec/cassotis-control"
 settings="$libexec/cassotis-settings"
+session_refresh="$libexec/cassotis-refresh-sessions"
 ibus_adapter="$libexec/ibus-engine-cassotis"
 fcitx_addon="$(find "$release_root/usr" -type f \
     -path '*/fcitx5/libcassotis.so' -print -quit)"
@@ -50,6 +52,7 @@ required_files=(
     "$engine"
     "$control"
     "$settings"
+    "$session_refresh"
     "$ibus_adapter"
     "$libexec/cassotis-ibus-smoke"
     "$libexec/cassotis-fcitx5-smoke"
@@ -81,11 +84,57 @@ for path in "${required_files[@]}"; do
         cassotis_die "required release file is missing: $path"
 done
 
+ibus_component="$release_root/usr/share/ibus/component/cassotis.xml"
+installed_ibus_adapter="${ibus_adapter#"$release_root"}"
+installed_settings="${settings#"$release_root"}"
+python3 - "$ibus_component" "$installed_ibus_adapter" \
+    "$installed_settings" <<'PY'
+from pathlib import Path
+import sys
+import xml.etree.ElementTree as ET
+
+component_path = Path(sys.argv[1])
+expected_executable = sys.argv[2]
+expected_setup = sys.argv[3]
+component = ET.parse(component_path).getroot()
+engine = component.find("./engines/engine")
+if engine is None:
+    raise SystemExit("IBus component does not contain an engine")
+
+expected_values = {
+    "name": "cassotis",
+    "longname": "Cassotis 言泉拼音输入法",
+    "language": "zh_CN",
+    "setup": expected_setup,
+}
+for tag, expected in expected_values.items():
+    actual = engine.findtext(tag)
+    if actual != expected:
+        raise SystemExit(
+            f"unexpected IBus {tag}: expected {expected!r}, got {actual!r}"
+        )
+
+component_exec = component.findtext("exec")
+if component_exec != f"{expected_executable} --ibus":
+    raise SystemExit(
+        "unexpected IBus executable: "
+        f"expected {expected_executable!r} with --ibus, got {component_exec!r}"
+    )
+
+try:
+    rank = int(engine.findtext("rank", "0"))
+except ValueError as error:
+    raise SystemExit("IBus engine rank is not an integer") from error
+if rank <= 0:
+    raise SystemExit("IBus engine rank must be positive for desktop discovery")
+PY
+
 desktop_file="$release_root/usr/share/applications/org.cassotis.ime.Settings.desktop"
 if command -v desktop-file-validate >/dev/null 2>&1; then
     desktop-file-validate "$desktop_file"
 fi
-for path in "$engine" "$control" "$settings" "$ibus_adapter" \
+for path in "$engine" "$control" "$settings" "$session_refresh" \
+            "$ibus_adapter" \
             "$libexec/cassotis-ibus-smoke" \
             "$libexec/cassotis-fcitx5-smoke"; do
     cassotis_require_executable "$path"
@@ -123,6 +172,18 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$runtime_dir"
 chmod 0700 "$runtime_dir"
+
+if command -v ibus >/dev/null 2>&1; then
+    registry_cache="$temporary_dir/ibus-registry"
+    IBUS_COMPONENT_PATH="$(dirname "$ibus_component")" \
+        ibus write-cache --file "$registry_cache"
+    registry_output="$(ibus read-cache --file "$registry_cache")"
+    grep -q '<name>org.freedesktop.IBus.Cassotis</name>' \
+        <<<"$registry_output" ||
+        cassotis_die 'IBus registry did not discover the Cassotis component'
+    grep -q '<name>cassotis</name>' <<<"$registry_output" ||
+        cassotis_die 'IBus registry did not discover the Cassotis engine'
+fi
 
 "$engine" --self-test
 NO_AT_BRIDGE=1 "$settings" --check-ui

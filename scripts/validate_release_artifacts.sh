@@ -102,6 +102,14 @@ mapfile -t bundle_dirs < <(
 bundle_dir="${bundle_dirs[0]}"
 [[ -x "$bundle_dir/install.sh" && -x "$bundle_dir/uninstall.sh" ]] ||
     cassotis_die 'portable install or uninstall entry point is missing'
+grep -q 'cassotis-refresh-sessions' "$bundle_dir/install.sh" ||
+    cassotis_die 'portable installer does not refresh active user sessions'
+for portable_script in install.sh uninstall.sh; do
+    grep -Eq 'ibus write-cache --system([[:space:]]|$)' \
+        "$bundle_dir/$portable_script" ||
+        cassotis_die \
+            "Portable $portable_script does not refresh the system IBus registry"
+done
 [[ -r "$bundle_dir/root/usr/share/cassotis-ime/dict_tc.db" ]] ||
     cassotis_die 'portable release is missing the traditional dictionary'
 for document in README.md README.CN.md BUILD.md RELEASE.md COMPATIBILITY.md \
@@ -137,6 +145,14 @@ dpkg-deb --control "${deb_packages[0]}" "$deb_control"
     cassotis_die 'Debian post-remove script is missing or not executable'
 sh -n "$deb_control/postinst"
 sh -n "$deb_control/postrm"
+for maintainer_script in postinst postrm; do
+    grep -Eq 'ibus write-cache --system([[:space:]]|$)' \
+        "$deb_control/$maintainer_script" ||
+        cassotis_die \
+            "Debian $maintainer_script does not refresh the system IBus registry"
+done
+grep -q 'cassotis-refresh-sessions' "$deb_control/postinst" ||
+    cassotis_die 'Debian post-install script does not refresh user sessions'
 [[ -r "$deb_extract/usr/share/cassotis-ime/dict_tc.db" ]] ||
     cassotis_die 'Debian release is missing the traditional dictionary'
 

@@ -46,13 +46,14 @@ sha256sum --check SHA256SUMS
 sudo apt install ./cassotis-ime_0.1.0_amd64.deb
 ```
 
-注销并重新登录，然后在桌面的输入源设置中添加 **Cassotis 言泉拼音输入法**。
-IBus 与 Fcitx 5 可以同时安装，但当前桌面会话应只由其中一个框架管理。
+安装器会刷新当前活动的 IBus 和 Fcitx 5 桌面会话。在使用 IBus 的 GNOME
+桌面中，Cassotis 会直接加入输入源列表，无需重启系统或重新登录，也不会
+强制切换当前输入源。如果安装时没有活动的图形桌面会话，则会在下次登录时
+自动发现 Cassotis。
 
-使用 IBus 会话时，重新登录后从“设置 > 键盘 > 输入源”添加 Cassotis。使用
-Fcitx 5 会话时，应先把桌面输入法框架切换为 Fcitx 5，重新登录，再通过
-Fcitx 5 配置工具添加 Cassotis。不要让 IBus 与 Fcitx 5 在同一桌面会话中
-同时竞争输入法管理权。
+使用 Fcitx 5 会话时，应先把桌面输入法框架切换为 Fcitx 5，再通过 Fcitx 5
+配置工具添加 Cassotis。IBus 与 Fcitx 5 可以同时安装，但当前桌面会话应只
+由其中一个框架管理。
 
 便携包包含相同文件，也可用于系统安装或暂存安装：
 

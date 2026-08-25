@@ -44,6 +44,7 @@ cassotis_require_command python3
 python3 "$cassotis_root/tools/parity/validate_docs.py"
 python3 "$cassotis_root/scripts/fcitx5_profile.py" self-test
 bash "$cassotis_root/tests/scripts/test_gnome_input_sources.sh"
+bash "$cassotis_root/tests/scripts/test_session_refresh.sh"
 
 "$engine" --self-test
 

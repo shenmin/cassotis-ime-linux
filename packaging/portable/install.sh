@@ -25,8 +25,11 @@ cp -a "$source_root/." "$destdir/"
 if [[ "$destdir" == / ]]; then
     command -v update-desktop-database >/dev/null 2>&1 &&
         update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
-    command -v ibus >/dev/null 2>&1 && ibus write-cache >/dev/null 2>&1 || true
+    command -v ibus >/dev/null 2>&1 &&
+        ibus write-cache --system >/dev/null 2>&1 || true
+    "$destdir/usr/libexec/cassotis-ime/cassotis-refresh-sessions" \
+        --enable-ibus-source --quiet || true
 fi
 
 printf 'Cassotis IME was installed under %s.\n' "$destdir"
-printf 'Log out and back in, then enable Cassotis in IBus or Fcitx 5.\n'
+printf 'Active desktop input-method sessions were refreshed.\n'

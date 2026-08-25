@@ -160,6 +160,9 @@ install -d -m 0755 \
 install -m 0755 "$engine" "$(stage_path "$libexec_path/cassotis-engine")"
 install -m 0755 "$control" "$(stage_path "$libexec_path/cassotis-control")"
 install -m 0755 "$settings" "$(stage_path "$libexec_path/cassotis-settings")"
+install -m 0755 \
+    "$cassotis_root/packaging/session/cassotis-refresh-sessions" \
+    "$(stage_path "$libexec_path/cassotis-refresh-sessions")"
 install -m 0755 "$ibus_adapter" \
     "$(stage_path "$libexec_path/ibus-engine-cassotis")"
 install -m 0755 "$ibus_smoke" \
