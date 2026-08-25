@@ -53,15 +53,15 @@ sha256sum --check SHA256SUMS
 sudo apt install ./cassotis-ime_0.1.0_amd64.deb
 ```
 
-Log out and back in, then add **Cassotis 言泉拼音输入法** through the desktop
-input-source settings. IBus and Fcitx 5 may coexist, but only one framework
-should control the current desktop session.
+The installer refreshes active IBus and Fcitx 5 desktop sessions. On GNOME
+with IBus, Cassotis is added to the input-source list without requiring a
+reboot or new login; the current input source is not changed. If no graphical
+session is active during installation, Cassotis is discovered on the next
+login.
 
-For an IBus session, add Cassotis from **Settings > Keyboard > Input Sources**
-after logging back in. For an Fcitx 5 session, first select Fcitx 5 as the
-desktop input-method framework, log back in, and add Cassotis with the Fcitx 5
-configuration tool. Do not run IBus and Fcitx 5 as competing input-method
-daemons in the same session.
+For an Fcitx 5 session, select Fcitx 5 as the desktop input-method framework
+and add Cassotis with the Fcitx 5 configuration tool. IBus and Fcitx 5 may
+coexist, but only one framework should control the current desktop session.
 
 The portable archive contains the same payload and supports a staged or
 system install:

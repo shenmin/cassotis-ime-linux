@@ -39,7 +39,8 @@ done
 if [[ "$destdir" == / ]]; then
     command -v update-desktop-database >/dev/null 2>&1 &&
         update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
-    command -v ibus >/dev/null 2>&1 && ibus write-cache >/dev/null 2>&1 || true
+    command -v ibus >/dev/null 2>&1 &&
+        ibus write-cache --system >/dev/null 2>&1 || true
 fi
 
 printf 'Cassotis IME portable files were removed from %s.\n' "$destdir"

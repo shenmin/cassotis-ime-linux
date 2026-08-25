@@ -14,6 +14,7 @@
       <longname>Cassotis 言泉拼音输入法</longname>
       <description>Cassotis Chinese input method</description>
       <language>zh_CN</language>
+      <rank>80</rank>
       <license>GPL-3.0-only</license>
       <author>Cassotis IME contributors</author>
       <icon>ibus-keyboard</icon>

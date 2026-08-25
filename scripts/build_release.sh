@@ -176,7 +176,11 @@ if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
 fi
 if command -v ibus >/dev/null 2>&1; then
-    ibus write-cache >/dev/null 2>&1 || true
+    ibus write-cache --system >/dev/null 2>&1 || true
+fi
+if [ -x /usr/libexec/cassotis-ime/cassotis-refresh-sessions ]; then
+    /usr/libexec/cassotis-ime/cassotis-refresh-sessions \
+        --enable-ibus-source --quiet || true
 fi
 exit 0
 EOF
@@ -188,7 +192,7 @@ if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
 fi
 if command -v ibus >/dev/null 2>&1; then
-    ibus write-cache >/dev/null 2>&1 || true
+    ibus write-cache --system >/dev/null 2>&1 || true
 fi
 exit 0
 EOF

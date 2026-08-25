@@ -1,0 +1,272 @@
+#!/usr/bin/env bash
+
+set -u
+
+enable_ibus_source=0
+quiet=0
+
+usage() {
+    cat <<'EOF'
+Usage: cassotis-refresh-sessions [--enable-ibus-source] [--quiet]
+
+Refreshes active desktop input-method sessions after a system installation.
+When run as root, every logged-in desktop user is refreshed independently.
+EOF
+}
+
+log() {
+    [[ $quiet -eq 1 ]] || printf '%s\n' "$*"
+}
+
+warn() {
+    [[ $quiet -eq 1 ]] || printf 'Warning: %s\n' "$*" >&2
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --enable-ibus-source)
+            enable_ibus_source=1
+            ;;
+        --quiet)
+            quiet=1
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *)
+            usage >&2
+            printf 'Error: unknown option: %s\n' "$1" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+refresh_all_users() {
+    local entry
+    local home
+    local runtime_dir
+    local uid
+    local user
+    local -a options=()
+
+    command -v getent >/dev/null 2>&1 || return 0
+    command -v runuser >/dev/null 2>&1 || return 0
+    [[ $enable_ibus_source -eq 0 ]] || options+=(--enable-ibus-source)
+    [[ $quiet -eq 0 ]] || options+=(--quiet)
+
+    for runtime_dir in /run/user/[0-9]*; do
+        [[ -d "$runtime_dir" && -S "$runtime_dir/bus" ]] || continue
+        uid="${runtime_dir##*/}"
+        [[ "$uid" =~ ^[0-9]+$ ]] || continue
+        ((uid >= 1000 && uid != 65534)) || continue
+        entry="$(getent passwd "$uid" 2>/dev/null || true)"
+        [[ -n "$entry" ]] || continue
+        IFS=: read -r user _ _ _ _ home _ <<<"$entry"
+        [[ -n "$user" && -d "$home" ]] || continue
+
+        if runuser -u "$user" -- env -i \
+            HOME="$home" USER="$user" LOGNAME="$user" \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+            XDG_RUNTIME_DIR="$runtime_dir" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus" \
+            "$0" "${options[@]}"; then
+            log "Refreshed the input-method session for $user."
+        else
+            warn "could not refresh the input-method session for $user"
+        fi
+    done
+}
+
+load_desktop_environment() {
+    local name
+    local value
+
+    if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
+        XDG_RUNTIME_DIR="/run/user/$(id -u)"
+        export XDG_RUNTIME_DIR
+    fi
+    if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" &&
+          -S "$XDG_RUNTIME_DIR/bus" ]]; then
+        DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+        export DBUS_SESSION_BUS_ADDRESS
+    fi
+    [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] || return 1
+
+    if command -v systemctl >/dev/null 2>&1 &&
+       systemctl --user show-environment >/dev/null 2>&1; then
+        while IFS='=' read -r name value; do
+            case "$name" in
+                DISPLAY|WAYLAND_DISPLAY|XAUTHORITY|XDG_CACHE_HOME|\
+                XDG_CONFIG_HOME|XDG_CURRENT_DESKTOP|XDG_DATA_HOME|\
+                XDG_SESSION_TYPE)
+                    printf -v "$name" '%s' "$value"
+                    export "$name"
+                    ;;
+            esac
+        done < <(systemctl --user show-environment)
+    fi
+    return 0
+}
+
+capture_gnome_sources() {
+    local schema='org.gnome.desktop.input-sources'
+
+    sources_captured=0
+    mru_captured=0
+    current_captured=0
+    command -v gsettings >/dev/null 2>&1 || return 1
+    [[ "$(gsettings writable "$schema" sources 2>/dev/null || true)" == \
+       true ]] || return 1
+    sources_value="$(gsettings get "$schema" sources 2>/dev/null)" || return 1
+    sources_captured=1
+    if [[ "$(gsettings writable "$schema" mru-sources \
+                2>/dev/null || true)" == true ]] &&
+       mru_value="$(gsettings get "$schema" mru-sources 2>/dev/null)"; then
+        mru_captured=1
+    fi
+    if [[ "$(gsettings writable "$schema" current \
+                2>/dev/null || true)" == true ]] &&
+       current_value="$(gsettings get "$schema" current 2>/dev/null)"; then
+        current_captured=1
+    fi
+    return 0
+}
+
+restore_gnome_sources() {
+    local schema='org.gnome.desktop.input-sources'
+
+    [[ $sources_captured -eq 1 ]] || return 0
+    gsettings set "$schema" sources "$sources_value" || return 1
+    if [[ $mru_captured -eq 1 ]]; then
+        gsettings set "$schema" mru-sources "$mru_value" || return 1
+    fi
+    if [[ $current_captured -eq 1 ]]; then
+        gsettings set "$schema" current "$current_value" || return 1
+    fi
+    sources_captured=0
+}
+
+add_gnome_ibus_source() {
+    local schema='org.gnome.desktop.input-sources'
+    local source="('ibus', 'cassotis')"
+    local sources
+    local mru
+
+    [[ $enable_ibus_source -eq 1 ]] || return 0
+    command -v gsettings >/dev/null 2>&1 || return 0
+    [[ "$(gsettings writable "$schema" sources 2>/dev/null || true)" == \
+       true ]] || return 0
+    sources="$(gsettings get "$schema" sources 2>/dev/null)" || return 1
+    if [[ "$sources" != *"$source"* ]]; then
+        if [[ "$sources" == '@a(ss) []' || "$sources" == '[]' ]]; then
+            sources="[$source]"
+        else
+            sources="${sources%]}"
+            sources="$sources, $source]"
+        fi
+        gsettings set "$schema" sources "$sources" || return 1
+    fi
+
+    mru="$(gsettings get "$schema" mru-sources 2>/dev/null || true)"
+    if [[ -n "$mru" && "$mru" != *"$source"* ]]; then
+        if [[ "$mru" == '@a(ss) []' || "$mru" == '[]' ]]; then
+            mru="[$source]"
+        else
+            mru="${mru#\[}"
+            mru="[$source, $mru"
+        fi
+        gsettings set "$schema" mru-sources "$mru" || return 1
+    fi
+}
+
+ibus_has_cassotis() {
+    ibus list-engine 2>/dev/null |
+        grep -Eq '^[[:space:]]*cassotis[[:space:]]+-'
+}
+
+refresh_ibus() {
+    local attempt
+    local restarted=0
+
+    command -v ibus >/dev/null 2>&1 || return 0
+    if command -v systemctl >/dev/null 2>&1 &&
+       systemctl --user is-active --quiet \
+           org.freedesktop.IBus.session.GNOME.service; then
+        capture_gnome_sources || true
+        if systemctl --user restart \
+            org.freedesktop.IBus.session.GNOME.service; then
+            restarted=1
+        fi
+    elif ibus address >/dev/null 2>&1; then
+        capture_gnome_sources || true
+        if ibus restart >/dev/null 2>&1; then
+            restarted=1
+        fi
+    fi
+    [[ $restarted -eq 1 ]] || return 0
+
+    for ((attempt = 0; attempt < 50; attempt += 1)); do
+        if ibus_has_cassotis; then
+            restore_gnome_sources || return 1
+            add_gnome_ibus_source || return 1
+            log 'IBus discovered Cassotis without a desktop login restart.'
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
+refresh_fcitx() {
+    local attempt
+
+    command -v fcitx5-remote >/dev/null 2>&1 || return 0
+    fcitx5-remote --check >/dev/null 2>&1 || return 0
+    fcitx5-remote -e >/dev/null 2>&1 || return 1
+    for ((attempt = 0; attempt < 50; attempt += 1)); do
+        fcitx5-remote --check >/dev/null 2>&1 || break
+        sleep 0.1
+    done
+    if command -v systemctl >/dev/null 2>&1 &&
+       systemctl --user cat fcitx5.service >/dev/null 2>&1; then
+        systemctl --user restart fcitx5.service >/dev/null 2>&1 || return 1
+    elif command -v fcitx5 >/dev/null 2>&1; then
+        fcitx5 -d >/dev/null 2>&1 || return 1
+    else
+        return 1
+    fi
+    for ((attempt = 0; attempt < 50; attempt += 1)); do
+        if fcitx5-remote --check >/dev/null 2>&1; then
+            log 'Fcitx 5 discovered the updated system components.'
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
+refresh_current_user() {
+    local status=0
+
+    sources_captured=0
+    mru_captured=0
+    current_captured=0
+    sources_value=''
+    mru_value=''
+    current_value=''
+    load_desktop_environment || return 0
+    trap 'restore_gnome_sources >/dev/null 2>&1 || true' EXIT
+    refresh_ibus || status=1
+    refresh_fcitx || status=1
+    restore_gnome_sources >/dev/null 2>&1 || status=1
+    trap - EXIT
+    return "$status"
+}
+
+if [[ $EUID -eq 0 ]]; then
+    refresh_all_users
+else
+    refresh_current_user
+fi
