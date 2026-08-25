@@ -8,7 +8,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License: GPL-3.0"></a>
 </p>
 
-English | [简体中文](README.CN.md)
+English | [简体中文](README.CN.md) | [Windows version](https://github.com/shenmin/cassotis-ime)
 
 Cassotis IME for Linux is a native Chinese pinyin input method for both IBus
 and Fcitx 5. It is derived from
