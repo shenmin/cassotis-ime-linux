@@ -172,15 +172,32 @@ EOF
 cat > "$deb_root/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
 set -e
+run_bounded() {
+    duration="$1"
+    shift
+    timeout --kill-after=1s "$duration" "$@"
+}
+start_session_refresh() {
+    refresh="$1"
+    if command -v systemd-run >/dev/null 2>&1 &&
+       run_bounded 2s systemd-run --quiet --collect --no-block \
+           --unit="cassotis-ime-session-refresh-$$" \
+           --property=RuntimeMaxSec=15s \
+           "$refresh" --enable-ibus-source --quiet; then
+        return 0
+    fi
+    run_bounded 10s "$refresh" --enable-ibus-source --quiet || true
+}
 if command -v update-desktop-database >/dev/null 2>&1; then
-    update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+    run_bounded 2s update-desktop-database \
+        /usr/share/applications >/dev/null 2>&1 || true
 fi
 if command -v ibus >/dev/null 2>&1; then
-    ibus write-cache --system >/dev/null 2>&1 || true
+    run_bounded 4s ibus write-cache --system >/dev/null 2>&1 || true
 fi
 if [ -x /usr/libexec/cassotis-ime/cassotis-refresh-sessions ]; then
-    /usr/libexec/cassotis-ime/cassotis-refresh-sessions \
-        --enable-ibus-source --quiet || true
+    start_session_refresh \
+        /usr/libexec/cassotis-ime/cassotis-refresh-sessions
 fi
 exit 0
 EOF
@@ -188,11 +205,17 @@ chmod 0755 "$deb_root/DEBIAN/postinst"
 cat > "$deb_root/DEBIAN/postrm" <<'EOF'
 #!/bin/sh
 set -e
+run_bounded() {
+    duration="$1"
+    shift
+    timeout --kill-after=1s "$duration" "$@"
+}
 if command -v update-desktop-database >/dev/null 2>&1; then
-    update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+    run_bounded 2s update-desktop-database \
+        /usr/share/applications >/dev/null 2>&1 || true
 fi
 if command -v ibus >/dev/null 2>&1; then
-    ibus write-cache --system >/dev/null 2>&1 || true
+    run_bounded 4s ibus write-cache --system >/dev/null 2>&1 || true
 fi
 exit 0
 EOF

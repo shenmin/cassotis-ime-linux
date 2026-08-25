@@ -14,6 +14,9 @@ mkdir -p "$mock_bin" "$state"
 cat > "$mock_bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${MOCK_MODE:-ibus}" == blocked ]]; then
+    exec /usr/bin/sleep 30
+fi
 case "$*" in
     '--user show-environment')
         printf 'XDG_CURRENT_DESKTOP=GNOME\nXDG_SESSION_TYPE=wayland\n'
@@ -130,5 +133,13 @@ DBUS_SESSION_BUS_ADDRESS='unix:path=/tmp/mock-session' \
 
 [[ -f "$state/fcitx-restarted" ]]
 [[ ! -f "$state/fcitx-stopped" ]]
+
+MOCK_MODE=blocked \
+MOCK_STATE="$state" \
+CASSOTIS_SESSION_COMMAND_TIMEOUT=0.1 \
+PATH="$mock_bin:/usr/bin:/bin" \
+XDG_RUNTIME_DIR="$temporary_dir/runtime" \
+DBUS_SESSION_BUS_ADDRESS='unix:path=/tmp/mock-session' \
+    timeout 2s "$refresh" --quiet
 
 printf 'session_refresh=ok\n'
