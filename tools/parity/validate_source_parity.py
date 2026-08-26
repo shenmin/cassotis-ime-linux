@@ -15,6 +15,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 BASELINE_PATH = ROOT / "porting" / "windows-baseline.txt"
+SOURCE_MANIFEST_PATH = ROOT / "porting" / "source-parity-manifest.json"
 DIRECTIVE_RE = re.compile(r"^\{\$(?:codepage|mode|H\+).*$", re.IGNORECASE)
 
 
@@ -65,6 +66,69 @@ def sha256_file(path: Path) -> str:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def normalized_source_sha256(data: bytes) -> str:
+    text = data.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def git_file(repository: Path, revision: str, path: str) -> bytes:
+    return subprocess.check_output(
+        ["git", "-C", str(repository), "show", f"{revision}:{path}"]
+    )
+
+
+def validate_reviewed_sources(
+    windows_root: Path, windows_revision: str
+) -> tuple[list[dict[str, object]], list[str]]:
+    manifest = json.loads(SOURCE_MANIFEST_PATH.read_text(encoding="utf-8-sig"))
+    if manifest.get("format") != "cassotis-reviewed-source-parity-v1":
+        return [], ["unsupported reviewed source parity manifest"]
+
+    results: list[dict[str, object]] = []
+    failures: list[str] = []
+    entries = manifest.get("files")
+    if not isinstance(entries, list) or not entries:
+        return [], ["reviewed source parity manifest has no files"]
+    for entry in entries:
+        path = entry.get("path") if isinstance(entry, dict) else None
+        if not isinstance(path, str) or not path:
+            failures.append("reviewed source parity manifest has an invalid path")
+            continue
+        linux_path = ROOT / path
+        try:
+            windows_hash = normalized_source_sha256(
+                git_file(windows_root, windows_revision, path)
+            )
+        except (OSError, subprocess.CalledProcessError, UnicodeError):
+            failures.append(f"cannot read reviewed Windows source: {path}")
+            continue
+        try:
+            linux_hash = normalized_source_sha256(linux_path.read_bytes())
+        except (OSError, UnicodeError):
+            failures.append(f"cannot read reviewed Linux source: {path}")
+            continue
+        windows_expected = str(entry.get("windows_sha256", "")).lower()
+        linux_expected = str(entry.get("linux_sha256", "")).lower()
+        windows_ok = windows_hash == windows_expected
+        linux_ok = linux_hash == linux_expected
+        if not windows_ok:
+            failures.append(f"reviewed Windows source changed: {path}")
+        if not linux_ok:
+            failures.append(f"reviewed Linux source changed: {path}")
+        results.append(
+            {
+                "path": path,
+                "windows_sha256": windows_hash,
+                "windows_expected_sha256": windows_expected,
+                "windows_ok": windows_ok,
+                "linux_sha256": linux_hash,
+                "linux_expected_sha256": linux_expected,
+                "linux_ok": linux_ok,
+            }
+        )
+    return results, failures
 
 
 def validate_models(windows_root: Path) -> tuple[int, list[str]]:
@@ -150,6 +214,10 @@ def main() -> int:
 
     model_count, model_failures = validate_models(args.windows_root)
     failures.extend(model_failures)
+    reviewed_sources, reviewed_source_failures = validate_reviewed_sources(
+        args.windows_root, baseline["reviewed_through"]
+    )
+    failures.extend(reviewed_source_failures)
     expected_schema = int(baseline["dictionary_schema"])
     dictionary = validate_dictionary(
         args.dictionary, baseline["dictionary_sha256"], expected_schema
@@ -174,6 +242,7 @@ def main() -> int:
         "lexicon_worktree_clean": lexicon_clean,
         "generated_models": model_count,
         "expanded_evidence": True,
+        "reviewed_production_sources": reviewed_sources,
         "dictionary": dictionary,
         "dictionary_traditional": traditional_dictionary,
         "failures": failures,

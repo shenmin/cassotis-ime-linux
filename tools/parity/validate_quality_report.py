@@ -35,6 +35,106 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def failure_signature(
+    path: Path, expected_header: tuple[str, ...]
+) -> tuple[dict[str, object], list[str]]:
+    failures: list[str] = []
+    try:
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
+    except OSError as error:
+        return {}, [f"cannot read benchmark failure report {path}: {error}"]
+    if not lines:
+        return {}, [f"benchmark failure report is empty: {path}"]
+
+    header = tuple(lines[0].split("\t"))
+    if header != expected_header:
+        failures.append(
+            f"unexpected benchmark failure header in {path}: {header!r}"
+        )
+
+    stable_lines: list[str] = []
+    expected_columns = len(expected_header)
+    for line_number, line in enumerate(lines, start=1):
+        fields = line.split("\t")
+        if len(fields) != expected_columns:
+            failures.append(
+                f"invalid column count in {path} at line {line_number}"
+            )
+            continue
+        # Latency is host-dependent. Every other field identifies the exact
+        # case and ranking result and therefore forms a deterministic gate.
+        stable_lines.append("\t".join(fields[:-1]))
+    rendered = ("\n".join(stable_lines) + "\n").encode("utf-8")
+    return {
+        "path": str(path),
+        "rows": max(0, len(lines) - 1),
+        "sha256": hashlib.sha256(rendered).hexdigest(),
+    }, failures
+
+
+def validate_failure_signatures(
+    summary: Path, metrics: dict[str, str], baseline: dict[str, str]
+) -> tuple[dict[str, dict[str, object]], list[str]]:
+    signatures: dict[str, dict[str, object]] = {}
+    failures: list[str] = []
+    specifications = {
+        "long": (
+            summary.parent / "long-failures.tsv",
+            ("index", "expected", "pinyin", "rank", "top1", "latency_ms"),
+            ("long",),
+        ),
+        "short": (
+            summary.parent / "short-failures.tsv",
+            ("index", "mode", "expected", "pinyin", "rank", "top1", "latency_ms"),
+            ("short.off", "short.on"),
+        ),
+    }
+    for name, (path, header, tracks) in specifications.items():
+        expected_hash = baseline.get(f"signature.{name}.sha256")
+        expected_rows = baseline.get(f"signature.{name}.rows_exact")
+        if not expected_hash and expected_rows is None:
+            continue
+        signature, signature_failures = failure_signature(path, header)
+        failures.extend(signature_failures)
+        if not signature:
+            continue
+        signatures[name] = signature
+        if expected_hash and signature["sha256"].lower() != expected_hash.lower():
+            failures.append(
+                f"{name} failure signature {signature['sha256']} does not match "
+                f"frozen baseline {expected_hash}"
+            )
+        if expected_rows is not None:
+            try:
+                row_count = int(expected_rows)
+            except ValueError:
+                failures.append(
+                    f"signature.{name}.rows_exact is not an integer"
+                )
+            else:
+                if signature["rows"] != row_count:
+                    failures.append(
+                        f"{name} failure rows={signature['rows']} but expected "
+                        f"{row_count}"
+                    )
+
+        expected_from_metrics = 0
+        try:
+            for track in tracks:
+                expected_from_metrics += (
+                    int(metrics[f"{track}.total"]) - int(metrics[f"{track}.top1"])
+                )
+        except (KeyError, ValueError):
+            pass
+        else:
+            if signature["rows"] != expected_from_metrics:
+                failures.append(
+                    f"{name} failure rows={signature['rows']} but summary requires "
+                    f"{expected_from_metrics}"
+                )
+    return signatures, failures
+
+
 def validate_frozen_inputs(
     baseline: dict[str, str], dictionary: Path | None,
     long_cases: Path | None, short_cases: Path | None
@@ -111,7 +211,8 @@ def validate_baseline(
         return ["unsupported or missing quality baseline format"]
 
     for key, raw_value in baseline.items():
-        if key == "format" or key.startswith("metadata."):
+        if (key == "format" or key.startswith("metadata.") or
+                key.startswith("signature.")):
             continue
         metric_key = key
         comparison = "exact"
@@ -176,6 +277,7 @@ def main() -> int:
 
     baseline_metrics: dict[str, str] | None = None
     frozen_inputs: dict[str, dict[str, object]] = {}
+    result_signatures: dict[str, dict[str, object]] = {}
     if args.baseline:
         baseline_metrics = parse_metrics(args.baseline)
         failures.extend(validate_baseline(metrics, baseline_metrics))
@@ -183,6 +285,10 @@ def main() -> int:
             baseline_metrics, args.dictionary, args.long_cases, args.short_cases
         )
         failures.extend(input_failures)
+        result_signatures, signature_failures = validate_failure_signatures(
+            args.summary, metrics, baseline_metrics
+        )
+        failures.extend(signature_failures)
 
     result = {
         "format": "cassotis-quality-validation-v1",
@@ -192,6 +298,7 @@ def main() -> int:
         "baseline": str(args.baseline) if args.baseline else None,
         "baseline_metrics": baseline_metrics,
         "frozen_inputs": frozen_inputs,
+        "result_signatures": result_signatures,
         "failures": failures,
         "ok": not failures,
     }

@@ -1,0 +1,50 @@
+{
+  "format": "cassotis-reviewed-source-parity-v1",
+  "files": [
+    {
+      "path": "src/common/nc_config.pas",
+      "windows_sha256": "0953c41937be2af5d75bef60fb64b7bbb3c5952aebc2346984c72e8d90c94ef9",
+      "linux_sha256": "a1de33ac148b8690ff767f1b7c399a640d9f32d4d892234ca7a586d89d371523"
+    },
+    {
+      "path": "src/common/nc_shortcut.pas",
+      "windows_sha256": "891e477234093c80b5764421f964ba605171652d0e91cdd347f7d012253038e5",
+      "linux_sha256": "608433e5420545f6ababd2ae8701ddb2f915391d81ed5fabe85df67c48306cda"
+    },
+    {
+      "path": "src/common/nc_types.pas",
+      "windows_sha256": "96923368be6a2e58856055758176f0d4f68a7815bb0681ff255697db1f925de0",
+      "linux_sha256": "ef57b23055ef3c7349475d403c940bc92b3e2552fcd4b85ea1b53217fba962c5"
+    },
+    {
+      "path": "src/engine/nc_dictionary_intf.pas",
+      "windows_sha256": "33d9771bac057852762c0179ee44fc314bbc9e874354ef315d16cbed61176399",
+      "linux_sha256": "2fea744f408a0950233eaa4789e052190ba9218c8a4ffe019e7eaf867868cd6b"
+    },
+    {
+      "path": "src/engine/nc_dictionary_sqlite.pas",
+      "windows_sha256": "daf5bf074b99457379f348a2d832958f0f399f12210880622b69b8179dfc932c",
+      "linux_sha256": "1b8495d017c57ace89a0c4a8a36d9a2d7a45a94f83603426fa0a38f7969cd6e1"
+    },
+    {
+      "path": "src/engine/nc_engine_intf.pas",
+      "windows_sha256": "fa30804d1714e46271d6b87791a504bf5eaf4a15faf36769717ddf24983703eb",
+      "linux_sha256": "98cd299a15b0f639bf837da30157bf9f7d6e6a6b6794753dca85e06a199df31a"
+    },
+    {
+      "path": "src/engine/nc_fuzzy_pinyin.pas",
+      "windows_sha256": "7f8bd16fcd9a4b5ffa6ee7b76da5b67a7365af3c660a8b860f9539eaadd418fc",
+      "linux_sha256": "cb7739190c1f0a9b9406e5e1893b867f114c031508aaef51faa212728cec8dbc"
+    },
+    {
+      "path": "src/engine/nc_pinyin_parser.pas",
+      "windows_sha256": "d659ed86fc160057617266c3389f34b968a690bb4142bba5502b1437a2f6e1ed",
+      "linux_sha256": "665fb7001cc1c972b1d780d7d8db26971f6b04e1dcaa744f68125bdc230843ba"
+    },
+    {
+      "path": "src/engine/nc_shuangpin_decoder.pas",
+      "windows_sha256": "b5f749431d3f51f41bcbd3d8f769d0be3a95757840c04d19c9737ff10d39928b",
+      "linux_sha256": "98f8f4244431e1e0f68661e9950cf5ddd9320954c6439db687e45d75563fac04"
+    }
+  ]
+}

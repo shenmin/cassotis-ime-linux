@@ -60,7 +60,7 @@ var
     error_text: string;
 begin
     source.text := '你';
-    source.special_key := sk_numpad_decimal;
+    source.special_key := sk_f24;
     source.modifiers := [km_shift, km_control, km_num_lock];
     source.scan_code := $12345678;
     source.is_release := True;

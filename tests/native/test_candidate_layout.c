@@ -39,9 +39,17 @@ int main(void)
     initialize_result(&result, short_candidates, 9);
     failed |= expect(!cassotis_candidate_row_requires_vertical(&result),
                      "nine short candidates should remain horizontal");
+    failed |= expect(!cassotis_candidate_panel_requires_vertical(&result),
+                     "a short panel without completion should remain horizontal");
+    result.completion_text = (gchar *)"completion";
+    failed |= expect(cassotis_candidate_panel_requires_vertical(&result),
+                     "completion must force a vertical panel");
+    result.completion_text = NULL;
     initialize_result(&result, long_candidates, 9);
     failed |= expect(cassotis_candidate_row_requires_vertical(&result),
                      "the screenshot-sized row must become vertical");
+    failed |= expect(cassotis_candidate_panel_requires_vertical(&result),
+                     "a wide panel must remain vertical without completion");
     failed |= expect(cassotis_candidate_display_cells("abc") == 3,
                      "ASCII display width");
     failed |= expect(cassotis_candidate_display_cells(

@@ -10,12 +10,14 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <fcitx-utils/capabilityflags.h>
 #include <fcitx-utils/event.h>
 #include <fcitx-utils/key.h>
 #include <fcitx-utils/keysym.h>
 #include <fcitx-utils/log.h>
+#include <fcitx-config/configuration.h>
 #include <fcitx/action.h>
 #include <fcitx/addonfactory.h>
 #include <fcitx/addonmanager.h>
@@ -151,6 +153,19 @@ std::string defaultSettingsPath() {
     return "/usr/libexec/cassotis-ime/cassotis-settings";
 }
 
+class CassotisSettingsConfig final : public fcitx::Configuration {
+public:
+    explicit CassotisSettingsConfig(const std::string &settingsPath)
+        : settings(this, "Settings", "Open Cassotis IME settings",
+                   settingsPath) {}
+
+    const char *typeName() const override {
+        return "CassotisSettingsConfig";
+    }
+
+    fcitx::ExternalOption settings;
+};
+
 gint32 utf16Length(const char *start, const char *end) {
     gint32 length = 0;
     const char *cursor = start;
@@ -194,9 +209,10 @@ public:
     ~CassotisFcitxState() override;
 
     bool processKey(CassotisSpecialKey specialKey, guint32 modifiers,
-                    guint32 scanCode, bool isRepeat,
+                    guint32 scanCode, bool isRelease, bool isRepeat,
                     const std::string &text);
     void selectCandidate(std::size_t globalIndex);
+    void acceptCompletion();
     void activate();
     void deactivate();
     void reset();
@@ -242,6 +258,16 @@ private:
     std::size_t globalIndex_;
 };
 
+class CassotisCompletionWord final : public fcitx::CandidateWord {
+public:
+    CassotisCompletionWord(CassotisFcitxEngine *engine, const char *text);
+
+    void select(fcitx::InputContext *inputContext) const override;
+
+private:
+    CassotisFcitxEngine *engine_;
+};
+
 class CassotisFcitxEngine final : public fcitx::InputMethodEngineV2 {
 public:
     explicit CassotisFcitxEngine(fcitx::Instance *instance);
@@ -255,6 +281,9 @@ public:
                fcitx::InputContextEvent &event) override;
     void keyEvent(const fcitx::InputMethodEntry &entry,
                   fcitx::KeyEvent &keyEvent) override;
+    const fcitx::Configuration *getConfig() const override {
+        return &settingsConfig_;
+    }
 
     CassotisClient *client() { return clientOwner_.get(); }
     auto *factory() { return &factory_; }
@@ -280,6 +309,7 @@ private:
     std::string socketPath_;
     std::string enginePath_;
     std::string settingsPath_;
+    CassotisSettingsConfig settingsConfig_;
     // Declared before the property factory so it is destroyed after every
     // per-context state has released its engine context.
     CassotisClientOwner clientOwner_;
@@ -473,6 +503,8 @@ void CassotisFcitxState::reset() {
 void CassotisFcitxState::renderResult(CassotisEngineResult *result) {
     auto &panel = inputContext_->inputPanel();
     const auto pageSize = effectivePageSize(engine_->state_);
+    const bool hasCompletion =
+        result->completion_text && *result->completion_text;
     panel.reset();
 
     if (result->commit_text && *result->commit_text) {
@@ -488,16 +520,28 @@ void CassotisFcitxState::renderResult(CassotisEngineResult *result) {
             panel.setPreedit(preedit);
         }
     }
-    if (result->completion_text && *result->completion_text) {
-        panel.setAuxDown(
-            fcitx::Text(std::string("Tab  ⇥") + result->completion_text));
-    }
-    if (result->candidate_count > 0) {
+    if (result->candidate_count > 0 || hasCompletion) {
         auto candidates = std::make_unique<fcitx::CommonCandidateList>();
-        candidates->setPageSize(static_cast<int>(pageSize));
-        candidates->setSelectionKey(kSelectionKeys);
+        if (hasCompletion) {
+            std::vector<std::string> labels;
+            labels.reserve(result->candidate_count + 1U);
+            for (guint32 index = 0; index < result->candidate_count; ++index) {
+                labels.emplace_back(std::to_string(index + 1U));
+            }
+            labels.emplace_back(
+                engine_->state_.one_key_completion_key ==
+                        CASSOTIS_COMPLETION_BACKTICK
+                    ? "`"
+                    : "Tab");
+            candidates->setPageSize(
+                static_cast<int>(result->candidate_count + 1U));
+            candidates->setLabels(labels);
+        } else {
+            candidates->setPageSize(static_cast<int>(pageSize));
+            candidates->setSelectionKey(kSelectionKeys);
+        }
         candidates->setLayoutHint(
-            cassotis_candidate_row_requires_vertical(result)
+            cassotis_candidate_panel_requires_vertical(result)
                 ? fcitx::CandidateLayoutHint::Vertical
                 : fcitx::CandidateLayoutHint::Horizontal);
         for (guint32 index = 0; index < result->candidate_count; ++index) {
@@ -515,6 +559,12 @@ void CassotisFcitxState::renderResult(CassotisEngineResult *result) {
                 std::make_unique<CassotisCandidateWord>(
                     engine_, index, candidate.text, comment.c_str()));
         }
+        if (hasCompletion) {
+            candidates->insert(
+                static_cast<int>(result->candidate_count),
+                std::make_unique<CassotisCompletionWord>(
+                    engine_, result->completion_text));
+        }
         if (result->selected_index >= 0 &&
             static_cast<guint32>(result->selected_index) <
                 result->candidate_count) {
@@ -530,7 +580,8 @@ void CassotisFcitxState::renderResult(CassotisEngineResult *result) {
 
 bool CassotisFcitxState::processKey(CassotisSpecialKey specialKey,
                                    guint32 modifiers, guint32 scanCode,
-                                   bool isRepeat, const std::string &text) {
+                                   bool isRelease, bool isRepeat,
+                                   const std::string &text) {
     CassotisEngineResult result{};
     result.selected_index = -1;
     for (int attempt = 0; attempt < 2; ++attempt) {
@@ -542,7 +593,7 @@ bool CassotisFcitxState::processKey(CassotisSpecialKey specialKey,
         ++generationId_;
         if (!cassotis_client_process_key(
                 engine_->client(), contextId_, generationId_, specialKey,
-                modifiers, scanCode, false, isRepeat,
+                modifiers, scanCode, isRelease, isRepeat,
                 static_cast<guint64>(g_get_monotonic_time() / 1000),
                 text.c_str(), &result, &error)) {
             markContextLost();
@@ -577,8 +628,17 @@ void CassotisFcitxState::selectCandidate(std::size_t globalIndex) {
         return;
     }
     const char selection = static_cast<char>('1' + globalIndex);
-    processKey(CASSOTIS_KEY_NONE, 0, 0, false,
+    processKey(CASSOTIS_KEY_NONE, 0, 0, false, false,
                std::string(1, selection));
+}
+
+void CassotisFcitxState::acceptCompletion() {
+    if (engine_->state_.one_key_completion_key ==
+        CASSOTIS_COMPLETION_BACKTICK) {
+        processKey(CASSOTIS_KEY_NONE, 0, 0, false, false, "`");
+        return;
+    }
+    processKey(CASSOTIS_KEY_TAB, 0, 0, false, false, "");
 }
 
 CassotisCandidateWord::CassotisCandidateWord(
@@ -600,6 +660,19 @@ void CassotisCandidateWord::select(
     }
 }
 
+CassotisCompletionWord::CassotisCompletionWord(
+    CassotisFcitxEngine *engine, const char *text)
+    : fcitx::CandidateWord(
+          fcitx::Text(std::string("\xE2\x87\xA5") + (text ? text : ""))),
+      engine_(engine) {}
+
+void CassotisCompletionWord::select(
+    fcitx::InputContext *inputContext) const {
+    if (auto *state = inputContext->propertyFor(engine_->factory())) {
+        state->acceptCompletion();
+    }
+}
+
 CassotisFcitxEngine::CassotisFcitxEngine(fcitx::Instance *instance)
     : instance_(instance),
       socketPath_(environmentOrDefault("CASSOTIS_ENGINE_SOCKET",
@@ -608,6 +681,7 @@ CassotisFcitxEngine::CassotisFcitxEngine(fcitx::Instance *instance)
                                        defaultEnginePath())),
       settingsPath_(environmentOrDefault("CASSOTIS_SETTINGS_PATH",
                                          defaultSettingsPath())),
+      settingsConfig_(settingsPath_),
       factory_([this](fcitx::InputContext &inputContext) {
           return new CassotisFcitxState(this, &inputContext,
                                         allocateContextId());
@@ -638,6 +712,12 @@ bool CassotisFcitxEngine::isSensitive(
 
 CassotisSpecialKey CassotisFcitxEngine::translateSpecialKey(
     fcitx::KeySym keySym) {
+    const guint32 keyValue = static_cast<guint32>(keySym);
+    if (keyValue >= FcitxKey_F1 && keyValue <= FcitxKey_F24) {
+        return static_cast<CassotisSpecialKey>(
+            CASSOTIS_KEY_F1 + keyValue - FcitxKey_F1);
+    }
+
     switch (keySym) {
     case FcitxKey_BackSpace:
         return CASSOTIS_KEY_BACKSPACE;
@@ -689,6 +769,18 @@ CassotisSpecialKey CassotisFcitxEngine::translateSpecialKey(
         return CASSOTIS_KEY_NUMPAD_DECIMAL;
     case FcitxKey_KP_Divide:
         return CASSOTIS_KEY_NUMPAD_DIVIDE;
+    case FcitxKey_Shift_L:
+    case FcitxKey_Shift_R:
+        return CASSOTIS_KEY_SHIFT;
+    case FcitxKey_Control_L:
+    case FcitxKey_Control_R:
+        return CASSOTIS_KEY_CONTROL;
+    case FcitxKey_Alt_L:
+    case FcitxKey_Alt_R:
+        return CASSOTIS_KEY_ALT;
+    case FcitxKey_Super_L:
+    case FcitxKey_Super_R:
+        return CASSOTIS_KEY_SUPER;
     default:
         return CASSOTIS_KEY_NONE;
     }
@@ -755,9 +847,6 @@ void CassotisFcitxEngine::reset(const fcitx::InputMethodEntry &entry,
 void CassotisFcitxEngine::keyEvent(const fcitx::InputMethodEntry &entry,
                                   fcitx::KeyEvent &keyEvent) {
     (void)entry;
-    if (keyEvent.isRelease()) {
-        return;
-    }
     auto *inputContext = keyEvent.inputContext();
     auto *state = stateFor(inputContext);
     if (isSensitive(inputContext)) {
@@ -770,12 +859,35 @@ void CassotisFcitxEngine::keyEvent(const fcitx::InputMethodEntry &entry,
     guint32 modifiers = translateModifiers(originalKey.states());
     const bool isRepeat =
         originalKey.states().test(fcitx::KeyState::Repeat);
+    const bool isRelease = keyEvent.isRelease();
     bool handled = false;
     bool stateMayHaveChanged = false;
 
     if (normalizedKey.sym() == FcitxKey_Shift_L ||
         normalizedKey.sym() == FcitxKey_Shift_R) {
         modifiers |= CASSOTIS_MODIFIER_SHIFT;
+    } else if (normalizedKey.sym() == FcitxKey_Control_L ||
+               normalizedKey.sym() == FcitxKey_Control_R) {
+        modifiers |= CASSOTIS_MODIFIER_CONTROL;
+    } else if (normalizedKey.sym() == FcitxKey_Alt_L ||
+               normalizedKey.sym() == FcitxKey_Alt_R) {
+        modifiers |= CASSOTIS_MODIFIER_ALT;
+    } else if (normalizedKey.sym() == FcitxKey_Super_L ||
+               normalizedKey.sym() == FcitxKey_Super_R) {
+        modifiers |= CASSOTIS_MODIFIER_SUPER;
+    }
+    if (isRelease) {
+        if (normalizedKey.sym() != FcitxKey_Shift_L &&
+            normalizedKey.sym() != FcitxKey_Shift_R) {
+            return;
+        }
+        handled = state->processKey(CASSOTIS_KEY_SHIFT, modifiers,
+                                    keyEvent.rawKey().code(), true, false, "");
+        if (handled) {
+            refreshState(inputContext);
+            keyEvent.filterAndAccept();
+        }
+        return;
     }
     if (!stateValid_) {
         refreshState(inputContext);
@@ -791,16 +903,17 @@ void CassotisFcitxEngine::keyEvent(const fcitx::InputMethodEntry &entry,
 
     if (normalizedKey.sym() == FcitxKey_Shift_L ||
         normalizedKey.sym() == FcitxKey_Shift_R) {
-        handled = state->processKey(CASSOTIS_KEY_NONE, modifiers,
-                                    keyEvent.rawKey().code(), isRepeat, "");
+        handled = state->processKey(CASSOTIS_KEY_SHIFT, modifiers,
+                                    keyEvent.rawKey().code(), false, isRepeat,
+                                    "");
         stateMayHaveChanged = handled;
     } else {
         const CassotisSpecialKey specialKey =
             translateSpecialKey(normalizedKey.sym());
         if (specialKey != CASSOTIS_KEY_NONE) {
             handled = state->processKey(specialKey, modifiers,
-                                        keyEvent.rawKey().code(), isRepeat,
-                                        "");
+                                        keyEvent.rawKey().code(), false,
+                                        isRepeat, "");
             stateMayHaveChanged =
                 handled && specialKey == CASSOTIS_KEY_SPACE &&
                 (modifiers & (CASSOTIS_MODIFIER_SHIFT |
@@ -815,7 +928,7 @@ void CassotisFcitxEngine::keyEvent(const fcitx::InputMethodEntry &entry,
                 static_cast<unsigned char>(text[0]) <= 0x7eU) {
                 handled = state->processKey(CASSOTIS_KEY_NONE, modifiers,
                                             keyEvent.rawKey().code(),
-                                            isRepeat, text);
+                                            false, isRepeat, text);
                 stateMayHaveChanged =
                     handled && text == "." &&
                     (modifiers & (CASSOTIS_MODIFIER_SHIFT |

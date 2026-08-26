@@ -86,6 +86,7 @@ addon_binary="$cassotis_root/build/bin/libcassotis.so"
 smoke_binary="$cassotis_root/build/bin/cassotis-fcitx5-smoke"
 control_binary="$cassotis_root/build/bin/cassotis-control"
 settings_source="$cassotis_root/adapters/ibus/cassotis_settings.py"
+icon_source="$cassotis_root/cassotis_ime_yanquan_mark.png"
 release_version="$(tr -d '\r\n' < "$cassotis_root/VERSION")"
 profile_tool="$cassotis_root/scripts/fcitx5_profile.py"
 cassotis_require_executable "$engine_binary"
@@ -94,6 +95,8 @@ cassotis_require_executable "$smoke_binary"
 cassotis_require_executable "$control_binary"
 [[ -r "$settings_source" ]] ||
     cassotis_die "settings program is not readable: $settings_source"
+[[ -r "$icon_source" ]] ||
+    cassotis_die "application icon is not readable: $icon_source"
 [[ -r "$profile_tool" ]] ||
     cassotis_die "Fcitx profile helper is not readable: $profile_tool"
 
@@ -119,6 +122,9 @@ installed_settings="$libexec_dir/cassotis-settings"
 applications_dir="$data_home/applications"
 desktop_file="$applications_dir/ibus-setup-cassotis.desktop"
 legacy_desktop_file="$applications_dir/org.cassotis.ime.Settings.desktop"
+icon_theme_dir="$data_home/icons/hicolor"
+icon_dir="$icon_theme_dir/512x512/apps"
+installed_icon="$icon_dir/cassotis-ime.png"
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
 profile_file="$config_home/fcitx5/profile"
 runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${UID:-$(id -u)}}"
@@ -180,7 +186,9 @@ stage_addon="$staging_dir/libcassotis.so"
 stage_addon_metadata="$staging_dir/cassotis-addon.conf"
 stage_input_method="$staging_dir/cassotis-inputmethod.conf"
 stage_desktop="$staging_dir/ibus-setup-cassotis.desktop"
+stage_icon="$staging_dir/cassotis-ime.png"
 install -d -m 0700 "$stage_libexec" "$stage_data"
+install -m 0644 "$icon_source" "$stage_icon"
 install -m 0644 "$dictionary_path" "$stage_data/dict_sc.db"
 if [[ -n "$traditional_dictionary_path" ]]; then
     install -m 0644 "$traditional_dictionary_path" "$stage_data/dict_tc.db"
@@ -233,7 +241,7 @@ rm -f -- "$engine_socket"
 
 install -d -m 0700 "$data_dir" "$addon_dir" "$libexec_dir"
 install -d -m 0755 "$addon_metadata_dir" "$input_method_dir" \
-    "$applications_dir"
+    "$applications_dir" "$icon_dir"
 cassotis_atomic_install "$stage_data/dict_sc.db" \
     "$data_dir/dict_sc.db" 0644
 if [[ -n "$traditional_dictionary_path" ]]; then
@@ -253,6 +261,7 @@ cassotis_atomic_install "$stage_addon_metadata" "$addon_metadata" 0644
 cassotis_atomic_install "$stage_input_method" \
     "$input_method_metadata" 0644
 cassotis_atomic_install "$stage_desktop" "$desktop_file" 0644
+cassotis_atomic_install "$stage_icon" "$installed_icon" 0644
 rm -f -- "$legacy_desktop_file"
 
 "$cassotis_root/scripts/verify_fcitx5.sh" --installed \
@@ -264,6 +273,9 @@ if [[ $enable_profile -eq 1 ]]; then
 fi
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$applications_dir" >/dev/null 2>&1 || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -t "$icon_theme_dir" >/dev/null 2>&1 || true
 fi
 
 desktop_verification='not run; Fcitx was not active'

@@ -17,10 +17,14 @@ Linux v0.1.0 引擎依据以下版本完成审查和移植：
 - 繁体词库 schema 22，SHA-256：
   `3cb9de47d9ff3dbc9a517d53a64ac0a547ecd4c72b1767e26c13152a8963c17e`
 
-`tools/parity/validate_source_parity.py` 检查两个基准仓库的提交、全部
-40 个生成模型单元、扩展模型证据和冻结词库。随后通过实际 SQLite
-provider 运行小型回归集 `tests/cases/candidate_quality.tsv` 和
+`tools/parity/validate_source_parity.py` 检查两个基准仓库的提交，分别
+冻结并校验两端已经审阅的生产引擎、SQLite provider、拼音解析器、模糊音和
+双拼源码清单，同时校验全部 40 个生成模型单元、扩展模型证据和冻结词库。
+清单独立绑定 Delphi 与 FPC 的平台适配源码，并不伪称两端文件可以逐字相同。
+随后通过实际 SQLite provider 运行小型回归集 `tests/cases/candidate_quality.tsv` 和
 `tests/cases/candidate_quality_tc.tsv`，保护已确认的简体与繁体候选行为。
+完整质量门禁还会在仅排除依赖主机的耗时列后，对每一个非 Top1 样本计算签名。
+这样无需公开私有基准语料，也能冻结逐样本名次和首选结果。
 
 ## Linux 完整基准测试
 
@@ -78,9 +82,10 @@ Ubuntu 26.04 x86_64 发行主机使用经过审查的 schema 22 简体词库，�
 11,728 条标记为真实竞争候选的短词样例，在无上下文时取得
 8,737/10,528 的 Top1/Top2，在有上下文时取得 9,596/10,775。
 启用上下文后的短词质量计数与 Windows v1.17.0 参考结果完全一致。
-Windows 长句参考值为 Top1 10,595、Top2 12,023；Linux 发行门槛允许经过
-审查的少量编译器和运行时差异，但会拒绝更大的退化。延迟依赖测试主机，
-不能把 Windows 与 Linux 不同硬件上的数据直接解释成实现速度倍数。
+Windows 长句参考值为 Top1 10,595、Top2 12,023。Linux 基线保留这部分已经
+审查的少量编译器和运行时差异，但现在不再允许任何已记录质量计数继续退化。
+也不允许用不同的正确/错误样本替换来维持相同总数。延迟依赖测试主机，不能把
+Windows 与 Linux 不同硬件上的数据直接解释成实现速度倍数。
 
 单个基准进程的最大 RSS/内存高水位为 557,252 KiB，低于 768 MiB 的发行
 上限。同一次干净构建门禁还通过了全部 123 个 FPCUnit 测试、22/22 个

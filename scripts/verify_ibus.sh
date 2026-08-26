@@ -9,12 +9,14 @@ component_file="$data_home/ibus/component/cassotis.xml"
 smoke_binary="$HOME/.local/libexec/cassotis-ime/cassotis-ibus-smoke"
 settings_binary="$HOME/.local/libexec/cassotis-ime/cassotis-settings"
 desktop_file="$data_home/applications/ibus-setup-cassotis.desktop"
+icon_file="$data_home/icons/hicolor/512x512/apps/cassotis-ime.png"
 control_binary=''
 
 usage() {
     cat <<'EOF'
 Usage: scripts/verify_ibus.sh [--binary PATH] [--component PATH]
                               [--settings PATH] [--desktop PATH]
+                              [--icon PATH]
 
 Checks the installed static component and runs an isolated input context
 through the active desktop IBus daemon. The test does not commit into an
@@ -44,6 +46,11 @@ while [[ $# -gt 0 ]]; do
             desktop_file="$2"
             shift
             ;;
+        --icon)
+            [[ $# -ge 2 ]] || cassotis_die "--icon requires a path"
+            icon_file="$2"
+            shift
+            ;;
         --help|-h)
             usage
             exit 0
@@ -63,8 +70,12 @@ control_binary="$(dirname "$smoke_binary")/cassotis-control"
 cassotis_require_executable "$control_binary"
 [[ -r "$component_file" ]] ||
     cassotis_die "IBus component is not readable: $component_file"
+[[ -r "$icon_file" ]] ||
+    cassotis_die "Cassotis application icon is not readable: $icon_file"
 grep -q '<name>cassotis</name>' "$component_file" ||
     cassotis_die "IBus component does not declare the cassotis engine"
+grep -q '<icon>cassotis-ime</icon>' "$component_file" ||
+    cassotis_die "IBus component does not use the Cassotis application icon"
 grep -q "<setup>$settings_binary</setup>" "$component_file" ||
     cassotis_die "IBus component does not declare the installed settings entry"
 [[ "$(basename -- "$desktop_file")" == 'ibus-setup-cassotis.desktop' ]] ||
@@ -73,6 +84,8 @@ grep -q "<setup>$settings_binary</setup>" "$component_file" ||
     cassotis_die "IBus settings launcher is not readable: $desktop_file"
 grep -Fqx "Exec=$settings_binary" "$desktop_file" ||
     cassotis_die "IBus settings launcher does not execute the installed settings program"
+grep -Fqx 'Icon=cassotis-ime' "$desktop_file" ||
+    cassotis_die "IBus settings launcher does not use the Cassotis application icon"
 cassotis_prepare_ibus_environment ||
     cassotis_die "no active desktop IBus daemon was found"
 

@@ -210,6 +210,51 @@ static gboolean type_ascii(IBusInputContext *context, const gchar *input)
     return TRUE;
 }
 
+static gboolean tap_bare_shift(IBusInputContext *context)
+{
+    /* IBus may consume a modifier press itself; mode changes are observable
+       only after the matching release reaches the engine. */
+    (void)ibus_input_context_process_key_event(
+        context, IBUS_KEY_Shift_L, 0, IBUS_SHIFT_MASK);
+    wait_one_step();
+    if (!ibus_input_context_process_key_event(
+            context, IBUS_KEY_Shift_L, 0,
+            IBUS_SHIFT_MASK | IBUS_RELEASE_MASK)) {
+        g_printerr("Bare Shift release did not toggle input mode.\n");
+        return FALSE;
+    }
+    wait_one_step();
+    return TRUE;
+}
+
+static gboolean verify_shift_chord_does_not_toggle(
+    IBusInputContext *context, SmokeObservation *observation)
+{
+    (void)ibus_input_context_process_key_event(
+        context, IBUS_KEY_Shift_L, 0, IBUS_SHIFT_MASK);
+    wait_one_step();
+    (void)ibus_input_context_process_key_event(
+        context, IBUS_KEY_n, 0, IBUS_SHIFT_MASK);
+    wait_one_step();
+    if (ibus_input_context_process_key_event(
+            context, IBUS_KEY_Shift_L, 0,
+            IBUS_SHIFT_MASK | IBUS_RELEASE_MASK)) {
+        g_printerr("Shift chord release unexpectedly toggled input mode.\n");
+        return FALSE;
+    }
+    ibus_input_context_reset(context);
+    wait_one_step();
+    clear_observation(observation);
+    if (!type_ascii(context, "ni")) {
+        g_printerr("Shift chord cancellation did not preserve Chinese mode.\n");
+        return FALSE;
+    }
+    ibus_input_context_reset(context);
+    wait_one_step();
+    clear_observation(observation);
+    return TRUE;
+}
+
 static gboolean verify_debug_weight(IBusInputContext *context,
                                     SmokeObservation *observation)
 {
@@ -372,13 +417,15 @@ static gboolean verify_navigation_and_editing(IBusInputContext *context,
 }
 
 static gboolean verify_mode_shortcuts(IBusInputContext *context,
-                                      SmokeObservation *observation)
+                                       SmokeObservation *observation)
 {
     gboolean handled;
 
     ibus_input_context_reset(context);
     wait_one_step();
     clear_observation(observation);
+    if (!verify_shift_chord_does_not_toggle(context, observation))
+        return FALSE;
     handled = ibus_input_context_process_key_event(
         context, IBUS_KEY_space, 0, 0);
     wait_one_step();
@@ -441,12 +488,10 @@ static gboolean verify_mode_shortcuts(IBusInputContext *context,
         return FALSE;
     }
     wait_one_step();
-    if (!ibus_input_context_process_key_event(
-            context, IBUS_KEY_Shift_L, 0, IBUS_SHIFT_MASK)) {
+    if (!tap_bare_shift(context)) {
         g_printerr("Shift did not enter English mode for the width test.\n");
         return FALSE;
     }
-    wait_one_step();
     clear_observation(observation);
     handled = ibus_input_context_process_key_event(
         context, IBUS_KEY_space, 0, 0);
@@ -461,12 +506,10 @@ static gboolean verify_mode_shortcuts(IBusInputContext *context,
         g_printerr("Full-width mode did not commit an ideographic space.\n");
         return FALSE;
     }
-    if (!ibus_input_context_process_key_event(
-            context, IBUS_KEY_Shift_L, 0, IBUS_SHIFT_MASK)) {
+    if (!tap_bare_shift(context)) {
         g_printerr("Shift did not leave English mode after the width test.\n");
         return FALSE;
     }
-    wait_one_step();
     if (!ibus_input_context_process_key_event(
             context, IBUS_KEY_space, 0, IBUS_SHIFT_MASK)) {
         g_printerr("Shift+Space did not restore half-width mode.\n");
@@ -474,22 +517,23 @@ static gboolean verify_mode_shortcuts(IBusInputContext *context,
     }
     wait_one_step();
 
-    if (!ibus_input_context_process_key_event(
-            context, IBUS_KEY_Shift_L, 0, IBUS_SHIFT_MASK)) {
+    clear_observation(observation);
+    if (!type_ascii(context, "ni") || !tap_bare_shift(context)) {
         g_printerr("Shift did not enter English mode.\n");
         return FALSE;
     }
-    wait_one_step();
+    if (g_strcmp0(observation->commit, "ni") != 0) {
+        g_printerr("Shift did not commit pending pinyin before English mode.\n");
+        return FALSE;
+    }
     if (ibus_input_context_process_key_event(context, IBUS_KEY_n, 0, 0)) {
         g_printerr("English mode consumed a Latin letter.\n");
         return FALSE;
     }
-    if (!ibus_input_context_process_key_event(
-            context, IBUS_KEY_Shift_L, 0, IBUS_SHIFT_MASK)) {
+    if (!tap_bare_shift(context)) {
         g_printerr("Shift did not return to Chinese mode.\n");
         return FALSE;
     }
-    wait_one_step();
     return TRUE;
 }
 

@@ -41,7 +41,8 @@ type
         procedure SupportsAllShuangpinSchemes;
         procedure LearnsShuangpinSelectionWithCanonicalQuery;
         procedure TogglesInputModeAndConvertsPunctuation;
-        procedure IgnoresReleaseAndRepeatForModeShortcuts;
+        procedure DefersAndCancelsModifierOnlyShortcuts;
+        procedure SupportsFunctionKeyModeShortcuts;
         procedure SupportsDefaultModeShortcuts;
         procedure SupportsNumpadModeShortcuts;
         procedure SwitchesAndPersistsDictionaryVariant;
@@ -59,6 +60,7 @@ uses
     nc_sqlite,
     nc_dictionary_reader,
     nc_platform_compat,
+    nc_shortcut,
     nc_engine_service;
 
 procedure TncEngineServiceTests.SetUp;
@@ -1020,8 +1022,14 @@ begin
     try
         AssertTrue(service.CreateContext(11));
         generation := 0;
-        shift_event := LetterEvent('');
+        shift_event := SpecialEvent(sk_shift);
         shift_event.modifiers := [km_shift];
+        Inc(generation);
+        engine_result := service.ProcessKey(11, generation, shift_event);
+        AssertFalse(engine_result.handled);
+        AssertTrue(service.GetState(state));
+        AssertEquals(Ord(im_chinese), Ord(state.input_mode));
+        shift_event.is_release := True;
         Inc(generation);
         engine_result := service.ProcessKey(11, generation, shift_event);
         AssertTrue(engine_result.handled);
@@ -1031,6 +1039,11 @@ begin
         Inc(generation);
         engine_result := service.ProcessKey(11, generation, LetterEvent('n'));
         AssertFalse(engine_result.handled);
+        shift_event.is_release := False;
+        Inc(generation);
+        engine_result := service.ProcessKey(11, generation, shift_event);
+        AssertFalse(engine_result.handled);
+        shift_event.is_release := True;
         Inc(generation);
         engine_result := service.ProcessKey(11, generation, shift_event);
         AssertTrue(engine_result.handled);
@@ -1052,12 +1065,31 @@ begin
         engine_result := service.ProcessKey(11, generation, LetterEvent(','));
         AssertTrue(engine_result.handled);
         AssertEquals(UnicodeString(WideChar($FF0C)), engine_result.commit_text);
+
+        for input_index := 1 to Length(input_text) do
+        begin
+            Inc(generation);
+            engine_result := service.ProcessKey(11, generation,
+                LetterEvent(input_text[input_index]));
+        end;
+        shift_event.is_release := False;
+        Inc(generation);
+        engine_result := service.ProcessKey(11, generation, shift_event);
+        AssertFalse(engine_result.handled);
+        shift_event.is_release := True;
+        Inc(generation);
+        engine_result := service.ProcessKey(11, generation, shift_event);
+        AssertTrue(engine_result.handled);
+        AssertEquals('nihao', engine_result.commit_text);
+        AssertEquals('', engine_result.preedit_text);
+        AssertTrue(service.GetState(state));
+        AssertEquals(Ord(im_english), Ord(state.input_mode));
     finally
         service.Free;
     end;
 end;
 
-procedure TncEngineServiceTests.IgnoresReleaseAndRepeatForModeShortcuts;
+procedure TncEngineServiceTests.DefersAndCancelsModifierOnlyShortcuts;
 var
     service: TncEngineService;
     engine_result: TncEngineResult;
@@ -1065,16 +1097,13 @@ var
     shortcut_event: TncKeyEvent;
     generation: QWord;
 
-    procedure VerifyIgnored(const expected_mode: TncInputMode;
-        const expected_punctuation, expected_width: Boolean);
+    procedure VerifyIgnored(const expected_mode: TncInputMode);
     begin
         Inc(generation);
         engine_result := service.ProcessKey(18, generation, shortcut_event);
         AssertFalse(engine_result.handled);
         AssertTrue(service.GetState(state));
         AssertEquals(Ord(expected_mode), Ord(state.input_mode));
-        AssertEquals(expected_punctuation, state.punctuation_full_width);
-        AssertEquals(expected_width, state.full_width_mode);
     end;
 
 begin
@@ -1083,29 +1112,73 @@ begin
         AssertTrue(service.CreateContext(18));
         generation := 0;
 
-        shortcut_event := LetterEvent('');
+        shortcut_event := SpecialEvent(sk_shift);
         shortcut_event.modifiers := [km_shift];
         shortcut_event.is_repeat := True;
-        VerifyIgnored(im_chinese, True, False);
+        VerifyIgnored(im_chinese);
         shortcut_event.is_repeat := False;
         shortcut_event.is_release := True;
-        VerifyIgnored(im_chinese, True, False);
+        VerifyIgnored(im_chinese);
+
+        shortcut_event.is_release := False;
+        VerifyIgnored(im_chinese);
+        shortcut_event := SpecialEvent(sk_control);
+        shortcut_event.modifiers := [km_shift, km_control];
+        VerifyIgnored(im_chinese);
+        shortcut_event := SpecialEvent(sk_shift);
+        shortcut_event.modifiers := [km_shift];
+        shortcut_event.is_release := True;
+        VerifyIgnored(im_chinese);
 
         shortcut_event := LetterEvent('.');
         shortcut_event.modifiers := [km_control];
         shortcut_event.is_repeat := True;
-        VerifyIgnored(im_chinese, True, False);
+        VerifyIgnored(im_chinese);
         shortcut_event.is_repeat := False;
         shortcut_event.is_release := True;
-        VerifyIgnored(im_chinese, True, False);
+        VerifyIgnored(im_chinese);
 
         shortcut_event := SpecialEvent(sk_space);
         shortcut_event.modifiers := [km_shift];
         shortcut_event.is_repeat := True;
-        VerifyIgnored(im_chinese, True, False);
+        VerifyIgnored(im_chinese);
         shortcut_event.is_repeat := False;
         shortcut_event.is_release := True;
-        VerifyIgnored(im_chinese, True, False);
+        VerifyIgnored(im_chinese);
+    finally
+        service.Free;
+    end;
+end;
+
+procedure TncEngineServiceTests.SupportsFunctionKeyModeShortcuts;
+var
+    service: TncEngineService;
+    engine_result: TncEngineResult;
+    state: TncEngineState;
+    generation: QWord;
+begin
+    service := TncEngineService.Create(FDatabasePath, FUserDatabasePath);
+    try
+        AssertTrue(service.CreateContext(19));
+        AssertTrue(service.GetState(state));
+        state.shortcuts.punctuation_toggle := nc_make_shortcut(VK_F1);
+        state.shortcuts.full_width_toggle := nc_make_shortcut(VK_F24);
+        AssertTrue(service.SetState(state));
+        generation := 0;
+
+        Inc(generation);
+        engine_result := service.ProcessKey(19, generation,
+            SpecialEvent(sk_f1));
+        AssertTrue(engine_result.handled);
+        AssertTrue(service.GetState(state));
+        AssertFalse(state.punctuation_full_width);
+
+        Inc(generation);
+        engine_result := service.ProcessKey(19, generation,
+            SpecialEvent(sk_f24));
+        AssertTrue(engine_result.handled);
+        AssertTrue(service.GetState(state));
+        AssertTrue(state.full_width_mode);
     finally
         service.Free;
     end;

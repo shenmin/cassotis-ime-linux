@@ -12,6 +12,8 @@
 #include <fcitx-utils/capabilityflags.h>
 #include <fcitx-utils/eventdispatcher.h>
 #include <fcitx-utils/key.h>
+#include <fcitx-config/configuration.h>
+#include <fcitx-config/rawconfig.h>
 #include <fcitx/action.h>
 #include <fcitx/addonmanager.h>
 #include <fcitx/candidatelist.h>
@@ -36,6 +38,9 @@ public:
 
     bool run() {
         if (!prepareInputMethod()) {
+            return false;
+        }
+        if (!verifySettingsConfiguration()) {
             return false;
         }
         const auto standardFlags = fcitx::CapabilityFlags{
@@ -74,8 +79,8 @@ private:
                      "Fcitx testfrontend addon was not loaded")) {
             return false;
         }
-        if (!require(instance_.addonManager().addon("cassotis", true) !=
-                         nullptr,
+        cassotisAddon_ = instance_.addonManager().addon("cassotis", true);
+        if (!require(cassotisAddon_ != nullptr,
                      "Cassotis addon was not loaded")) {
             return false;
         }
@@ -87,6 +92,29 @@ private:
         instance_.inputMethodManager().setGroup(std::move(group));
         instance_.inputMethodManager().setCurrentGroup("CassotisSmoke");
         return true;
+    }
+
+    bool verifySettingsConfiguration() {
+        const char *expectedPath = g_getenv("CASSOTIS_SETTINGS_PATH");
+        const auto *config = cassotisAddon_->getConfig();
+        if (!require(expectedPath && *expectedPath,
+                     "settings path was not provided to the smoke test") ||
+            !require(config != nullptr,
+                     "Cassotis addon did not expose Fcitx configuration")) {
+            return false;
+        }
+
+        fcitx::RawConfig description;
+        config->dumpDescription(description);
+        const std::string root = config->typeName();
+        const auto *type =
+            description.valueByPath(root + "/Settings/Type");
+        const auto *external =
+            description.valueByPath(root + "/Settings/External");
+        return require(type && *type == "External",
+                       "settings configuration is not an External option") &&
+               require(external && *external == expectedPath,
+                       "settings configuration points to the wrong program");
     }
 
     fcitx::ICUUID createContext(const std::string &program,
@@ -116,6 +144,19 @@ private:
     bool send(const fcitx::ICUUID &uuid, const fcitx::Key &key) {
         return frontend_->call<fcitx::ITestFrontend::sendKeyEvent>(uuid, key,
                                                                    false);
+    }
+
+    bool sendRelease(const fcitx::ICUUID &uuid, const fcitx::Key &key) {
+        return frontend_->call<fcitx::ITestFrontend::sendKeyEvent>(uuid, key,
+                                                                   true);
+    }
+
+    bool tapBareShift(const fcitx::ICUUID &uuid) {
+        const fcitx::Key shift("Shift_L");
+        return require(!send(uuid, shift),
+                       "bare Shift toggled on key down") &&
+               require(sendRelease(uuid, shift),
+                       "bare Shift release did not toggle input mode");
     }
 
     bool type(const fcitx::ICUUID &uuid, const std::string &text) {
@@ -278,17 +319,40 @@ private:
             return false;
         }
         auto *inputContext = context(uuid);
-        const std::string auxiliary =
-            inputContext->inputPanel().auxDown().toString();
+        auto list = candidates(uuid);
         const std::string arrow = "⇥";
-        const auto position = auxiliary.find(arrow);
-        if (!require(position != std::string::npos &&
-                         position + arrow.size() < auxiliary.size(),
-                     "pianruo did not publish one-key completion")) {
+        if (!require(inputContext->inputPanel().auxDown().empty(),
+                     "completion was published above the candidate list") ||
+            !require(list && list->size() > 1,
+                     "pianruo did not publish one-key completion") ||
+            !require(list->layoutHint() ==
+                         fcitx::CandidateLayoutHint::Vertical,
+                     "completion did not force a vertical candidate list")) {
+            return false;
+        }
+        const int completionIndex = list->size() - 1;
+        const std::string completionRow =
+            list->candidate(completionIndex).text().toString();
+        const auto position = completionRow.find(arrow);
+        if (!require(position == 0 &&
+                         position + arrow.size() < completionRow.size(),
+                     "one-key completion is not the final candidate row") ||
+            !require(list->label(completionIndex).toString() == "Tab",
+                     "completion row does not expose the Tab label")) {
             return false;
         }
         const std::string completion =
-            auxiliary.substr(position + arrow.size());
+            completionRow.substr(position + arrow.size());
+        expectCommit(completion);
+        list->candidate(completionIndex).select(inputContext);
+        if (!require(preedit(uuid).empty(),
+                     "clicking one-key completion did not commit it")) {
+            return false;
+        }
+
+        if (!type(uuid, "pianruo")) {
+            return false;
+        }
         expectCommit(completion);
         return require(send(uuid, fcitx::Key("Tab")),
                        "Tab did not accept one-key completion");
@@ -354,6 +418,19 @@ private:
             return false;
         }
 
+        const fcitx::Key shift("Shift_L");
+        if (!require(!send(uuid, shift),
+                     "Shift chord was consumed on modifier key down")) {
+            return false;
+        }
+        (void)send(uuid, fcitx::Key(FcitxKey_n, fcitx::KeyState::Shift));
+        if (!require(!sendRelease(uuid, shift),
+                     "Shift chord release unexpectedly toggled input mode") ||
+            !expectActionText(uuid, "cassotis-input-mode", "中")) {
+            return false;
+        }
+        reset(uuid);
+
         expectCommit("。");
         if (!require(send(uuid, fcitx::Key(FcitxKey_period)),
                      "Chinese punctuation did not consume period") ||
@@ -376,8 +453,7 @@ private:
             !expectActionText(uuid, "cassotis-width", "全")) {
             return false;
         }
-        if (!require(send(uuid, fcitx::Key("Shift_L")),
-                     "Shift did not enter English mode for the width test") ||
+        if (!tapBareShift(uuid) ||
             !expectActionText(uuid, "cassotis-input-mode", "英")) {
             return false;
         }
@@ -386,8 +462,7 @@ private:
                      "full-width space was not handled")) {
             return false;
         }
-        if (!require(send(uuid, fcitx::Key("Shift_L")),
-                     "Shift did not leave English mode after the width test") ||
+        if (!tapBareShift(uuid) ||
             !expectActionText(uuid, "cassotis-input-mode", "中") ||
             !require(send(uuid, fcitx::Key(FcitxKey_space,
                                            fcitx::KeyState::Shift)),
@@ -396,8 +471,11 @@ private:
             return false;
         }
 
-        if (!require(send(uuid, fcitx::Key("Shift_L")),
-                     "Shift did not switch to English mode")) {
+        if (!type(uuid, "ni")) {
+            return false;
+        }
+        expectCommit("ni");
+        if (!tapBareShift(uuid)) {
             return false;
         }
         if (!expectActionText(uuid, "cassotis-input-mode", "英")) {
@@ -407,8 +485,7 @@ private:
                      "English mode consumed a Latin key")) {
             return false;
         }
-        if (!require(send(uuid, fcitx::Key("Shift_L")),
-                     "Shift did not switch back to Chinese mode") ||
+        if (!tapBareShift(uuid) ||
             !require(send(uuid, fcitx::Key("n")),
                      "Chinese mode did not resume key handling")) {
             return false;
@@ -565,6 +642,7 @@ private:
 
     fcitx::Instance &instance_;
     fcitx::AddonInstance *frontend_ = nullptr;
+    fcitx::AddonInstance *cassotisAddon_ = nullptr;
     std::vector<fcitx::ICUUID> contexts_;
 };
 

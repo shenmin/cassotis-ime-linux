@@ -39,6 +39,8 @@ libexec_dir="$HOME/.local/libexec/cassotis-ime"
 applications_dir="$data_home/applications"
 desktop_file="$applications_dir/ibus-setup-cassotis.desktop"
 legacy_desktop_file="$applications_dir/org.cassotis.ime.Settings.desktop"
+icon_theme_dir="$data_home/icons/hicolor"
+installed_icon="$icon_theme_dir/512x512/apps/cassotis-ime.png"
 adapter_path="$libexec_dir/ibus-engine-cassotis"
 installed_engine_path="$libexec_dir/cassotis-engine"
 installed_control_path="$libexec_dir/cassotis-control"
@@ -155,7 +157,8 @@ rm -f -- "$component_file" "$environment_file" "$ibus_dropin_file" \
 shared_runtime='retained for the installed Fcitx 5 addon'
 if [[ $fcitx_installed -eq 0 ]]; then
     rm -f -- "$desktop_file" "$legacy_desktop_file" "$installed_engine_path" \
-        "$installed_control_path" "$installed_settings_path"
+        "$installed_control_path" "$installed_settings_path" \
+        "$installed_icon"
     rmdir -- "$libexec_dir" 2>/dev/null || true
     shared_runtime='removed; no Fcitx 5 addon is installed'
 fi
@@ -171,6 +174,9 @@ if command -v ibus >/dev/null 2>&1; then
 fi
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$applications_dir" >/dev/null 2>&1 || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -t "$icon_theme_dir" >/dev/null 2>&1 || true
 fi
 if [[ $gnome_ibus_was_active -eq 1 ]]; then
     systemctl --user start org.freedesktop.IBus.session.GNOME.service

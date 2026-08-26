@@ -107,6 +107,7 @@ bin_dir="$cassotis_root/build/bin"
 engine="$bin_dir/cassotis-engine"
 control="$bin_dir/cassotis-control"
 settings="$cassotis_root/adapters/ibus/cassotis_settings.py"
+icon="$cassotis_root/cassotis_ime_yanquan_mark.png"
 ibus_adapter="$bin_dir/ibus-engine-cassotis"
 fcitx_addon="$bin_dir/libcassotis.so"
 ibus_smoke="$bin_dir/cassotis-ibus-smoke"
@@ -116,6 +117,7 @@ for binary in "$engine" "$control" "$ibus_adapter" "$ibus_smoke" \
     cassotis_require_executable "$binary"
 done
 [[ -r "$settings" ]] || cassotis_die "settings source not found: $settings"
+[[ -r "$icon" ]] || cassotis_die "application icon not found: $icon"
 [[ -r "$fcitx_addon" ]] || cassotis_die "Fcitx addon not found: $fcitx_addon"
 
 release_version="$(tr -d '\r\n' < "$cassotis_root/VERSION")"
@@ -141,6 +143,7 @@ libexec_path="$prefix/libexec/cassotis-ime"
 data_path="$prefix/share/cassotis-ime"
 doc_path="$prefix/share/doc/cassotis-ime"
 applications_path="$prefix/share/applications"
+icon_path="$prefix/share/icons/hicolor/512x512/apps"
 ibus_component_path="$prefix/share/ibus/component"
 fcitx_addon_path="$prefix/share/fcitx5/addon"
 fcitx_input_method_path="$prefix/share/fcitx5/inputmethod"
@@ -152,6 +155,7 @@ install -d -m 0755 \
     "$(stage_path "$doc_path")" \
     "$(stage_path "$doc_path/docs")" \
     "$(stage_path "$applications_path")" \
+    "$(stage_path "$icon_path")" \
     "$(stage_path "$ibus_component_path")" \
     "$(stage_path "$fcitx_addon_path")" \
     "$(stage_path "$fcitx_input_method_path")" \
@@ -171,6 +175,7 @@ install -m 0755 "$fcitx_smoke" \
     "$(stage_path "$libexec_path/cassotis-fcitx5-smoke")"
 install -m 0755 "$fcitx_addon" \
     "$(stage_path "$fcitx_library_path/libcassotis.so")"
+install -m 0644 "$icon" "$(stage_path "$icon_path/cassotis-ime.png")"
 install -m 0644 "$dictionary_path" "$(stage_path "$data_path/dict_sc.db")"
 if [[ -n "$traditional_dictionary_path" ]]; then
     install -m 0644 "$traditional_dictionary_path" \

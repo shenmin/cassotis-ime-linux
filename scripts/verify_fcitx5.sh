@@ -64,6 +64,8 @@ cassotis_require_command sqlite3
     cassotis_die "dictionary is not readable: $dictionary_path"
 pkg-config --exists Fcitx5Core ||
     cassotis_die "Fcitx 5 development package Fcitx5Core was not found"
+pkg-config --exists Fcitx5Config ||
+    cassotis_die "Fcitx 5 development package Fcitx5Config was not found"
 if [[ $verify_installed -eq 1 && -n "$staged_root" ]]; then
     cassotis_die "--installed and --root are mutually exclusive"
 fi
@@ -82,6 +84,8 @@ if [[ -n "$staged_root" ]]; then
         -path '*/fcitx5/libcassotis.so' -print -quit)"
     control="$staged_root/usr/libexec/cassotis-ime/cassotis-control"
     smoke="$staged_root/usr/libexec/cassotis-ime/cassotis-fcitx5-smoke"
+    settings="$staged_root/usr/libexec/cassotis-ime/cassotis-settings"
+    icon="$staged_root/usr/share/icons/hicolor/512x512/apps/cassotis-ime.png"
     addon_metadata_source="$staged_root/usr/share/fcitx5/addon/cassotis.conf"
     input_method_source="$staged_root/usr/share/fcitx5/inputmethod/cassotis.conf"
 elif [[ $verify_installed -eq 1 ]]; then
@@ -90,6 +94,8 @@ elif [[ $verify_installed -eq 1 ]]; then
     addon="$HOME/.local/lib/fcitx5/libcassotis.so"
     control="$HOME/.local/libexec/cassotis-ime/cassotis-control"
     smoke="$HOME/.local/libexec/cassotis-ime/cassotis-fcitx5-smoke"
+    settings="$HOME/.local/libexec/cassotis-ime/cassotis-settings"
+    icon="$data_home/icons/hicolor/512x512/apps/cassotis-ime.png"
     addon_metadata_source="$data_home/fcitx5/addon/cassotis.conf"
     input_method_source="$data_home/fcitx5/inputmethod/cassotis.conf"
 else
@@ -97,19 +103,40 @@ else
     addon="$cassotis_root/build/bin/libcassotis.so"
     control="$cassotis_root/build/bin/cassotis-control"
     smoke="$cassotis_root/build/bin/cassotis-fcitx5-smoke"
+    settings="$cassotis_root/adapters/ibus/cassotis_settings.py"
+    icon="$cassotis_root/cassotis_ime_yanquan_mark.png"
     addon_metadata_source=''
     input_method_source="$cassotis_root/adapters/fcitx5/cassotis.conf"
 fi
 cassotis_require_executable "$engine"
 cassotis_require_executable "$control"
 cassotis_require_executable "$smoke"
+if [[ $verify_installed -eq 1 || -n "$staged_root" ]]; then
+    cassotis_require_executable "$settings"
+else
+    [[ -r "$settings" ]] ||
+        cassotis_die "settings program is not readable: $settings"
+fi
 [[ -r "$addon" ]] || cassotis_die "Fcitx addon is not readable: $addon"
+[[ -r "$icon" ]] || cassotis_die "Cassotis application icon is not readable: $icon"
 if [[ $verify_installed -eq 1 || -n "$staged_root" ]]; then
     [[ -r "$addon_metadata_source" ]] ||
         cassotis_die "installed addon metadata is not readable"
     [[ -r "$input_method_source" ]] ||
         cassotis_die "installed input-method metadata is not readable"
 fi
+if [[ -n "$addon_metadata_source" ]]; then
+    grep -Fqx 'Configurable=True' "$addon_metadata_source" ||
+        cassotis_die "Cassotis addon does not expose Fcitx configuration"
+else
+    grep -Fqx 'Configurable=True' \
+        "$cassotis_root/adapters/fcitx5/cassotis-addon.conf.in" ||
+        cassotis_die "Cassotis addon does not expose Fcitx configuration"
+fi
+grep -Fqx 'Configurable=True' "$input_method_source" ||
+    cassotis_die "Cassotis input method does not expose Fcitx configuration"
+grep -Fqx 'Icon=cassotis-ime' "$input_method_source" ||
+    cassotis_die "Cassotis input method does not use its application icon"
 
 system_addon_dir="$(pkg-config --variable=libdir Fcitx5Core)/fcitx5"
 system_data_dir="$(pkg-config --variable=datadir Fcitx5Core)/fcitx5"
@@ -196,6 +223,7 @@ CASSOTIS_USER_DICTIONARY="$temporary_dir/user_dict.db" \
 CASSOTIS_ENGINE_SOCKET="$socket_path" \
 CASSOTIS_ENGINE_PATH="$engine" \
 CASSOTIS_CONTROL_PATH="$control" \
+CASSOTIS_SETTINGS_PATH="$settings" \
     "$smoke"
 
 printf 'fcitx5_addon=%s\n' "$addon"

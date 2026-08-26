@@ -331,8 +331,7 @@ static void render_result(CassotisIbusEngine *self,
         return;
     }
 
-    vertical = has_completion ||
-               cassotis_candidate_row_requires_vertical(result);
+    vertical = cassotis_candidate_panel_requires_vertical(result);
     page_size = effective_page_size(&self->state);
     table = ibus_lookup_table_new(
         has_completion ? page_size + 1U : page_size,
@@ -386,11 +385,13 @@ static void render_result(CassotisIbusEngine *self,
     ibus_engine_update_lookup_table(engine, table, TRUE);
 }
 
-static gboolean send_key(CassotisIbusEngine *self,
-                         CassotisSpecialKey special_key,
-                         guint32 modifiers,
-                         guint32 scan_code,
-                         const gchar *text_value)
+static gboolean send_key_event(CassotisIbusEngine *self,
+                               CassotisSpecialKey special_key,
+                               guint32 modifiers,
+                               guint32 scan_code,
+                               gboolean is_release,
+                               gboolean is_repeat,
+                               const gchar *text_value)
 {
     CassotisEngineResult result;
     GError *error = NULL;
@@ -405,7 +406,7 @@ static gboolean send_key(CassotisIbusEngine *self,
         ++self->generation_id;
         success = cassotis_client_process_key(
             &global_client, self->context_id, self->generation_id,
-            special_key, modifiers, scan_code, FALSE, FALSE,
+            special_key, modifiers, scan_code, is_release, is_repeat,
             (guint64)(g_get_monotonic_time() / 1000), text_value, &result,
             &error);
         if (!success) {
@@ -431,8 +432,21 @@ static gboolean send_key(CassotisIbusEngine *self,
     return success;
 }
 
+static gboolean send_key(CassotisIbusEngine *self,
+                         CassotisSpecialKey special_key,
+                         guint32 modifiers,
+                         guint32 scan_code,
+                         const gchar *text_value)
+{
+    return send_key_event(self, special_key, modifiers, scan_code, FALSE,
+                          FALSE, text_value);
+}
+
 static CassotisSpecialKey translate_special_key(guint keyval)
 {
+    if (keyval >= IBUS_KEY_F1 && keyval <= IBUS_KEY_F24)
+        return (CassotisSpecialKey)(CASSOTIS_KEY_F1 + keyval - IBUS_KEY_F1);
+
     switch (keyval) {
     case IBUS_KEY_BackSpace:
         return CASSOTIS_KEY_BACKSPACE;
@@ -484,6 +498,18 @@ static CassotisSpecialKey translate_special_key(guint keyval)
         return CASSOTIS_KEY_NUMPAD_DECIMAL;
     case IBUS_KEY_KP_Divide:
         return CASSOTIS_KEY_NUMPAD_DIVIDE;
+    case IBUS_KEY_Shift_L:
+    case IBUS_KEY_Shift_R:
+        return CASSOTIS_KEY_SHIFT;
+    case IBUS_KEY_Control_L:
+    case IBUS_KEY_Control_R:
+        return CASSOTIS_KEY_CONTROL;
+    case IBUS_KEY_Alt_L:
+    case IBUS_KEY_Alt_R:
+        return CASSOTIS_KEY_ALT;
+    case IBUS_KEY_Super_L:
+    case IBUS_KEY_Super_R:
+        return CASSOTIS_KEY_SUPER;
     default:
         return CASSOTIS_KEY_NONE;
     }
@@ -530,14 +556,31 @@ static gboolean cassotis_process_key_event(IBusEngine *engine,
     gunichar unicode_value;
     gchar text_value[8] = {0};
     guint32 modifiers;
+    gboolean is_release;
 
-    if ((state & IBUS_RELEASE_MASK) != 0)
-        return FALSE;
     if (is_sensitive_context(self))
         return FALSE;
+    is_release = (state & IBUS_RELEASE_MASK) != 0;
     modifiers = translate_modifiers(state);
     if (keyval == IBUS_KEY_Shift_L || keyval == IBUS_KEY_Shift_R)
         modifiers |= CASSOTIS_MODIFIER_SHIFT;
+    else if (keyval == IBUS_KEY_Control_L || keyval == IBUS_KEY_Control_R)
+        modifiers |= CASSOTIS_MODIFIER_CONTROL;
+    else if (keyval == IBUS_KEY_Alt_L || keyval == IBUS_KEY_Alt_R)
+        modifiers |= CASSOTIS_MODIFIER_ALT;
+    else if (keyval == IBUS_KEY_Super_L || keyval == IBUS_KEY_Super_R)
+        modifiers |= CASSOTIS_MODIFIER_SUPER;
+    special_key = translate_special_key(keyval);
+    if (is_release) {
+        gboolean handled;
+        if (special_key != CASSOTIS_KEY_SHIFT)
+            return FALSE;
+        handled = send_key_event(self, special_key, modifiers, keycode, TRUE,
+                                 FALSE, "");
+        if (handled)
+            refresh_engine_state(self);
+        return handled;
+    }
     if ((!self->state_valid && !refresh_engine_state(self)))
         return FALSE;
     if (cassotis_shortcut_matches_keysym(
@@ -545,13 +588,6 @@ static gboolean cassotis_process_key_event(IBusEngine *engine,
         launch_settings();
         return TRUE;
     }
-    if (keyval == IBUS_KEY_Shift_L || keyval == IBUS_KEY_Shift_R) {
-        gboolean handled;
-        handled = send_key(self, CASSOTIS_KEY_NONE, modifiers, keycode, "");
-        refresh_engine_state(self);
-        return handled;
-    }
-    special_key = translate_special_key(keyval);
     if (special_key != CASSOTIS_KEY_NONE)
         return send_key(self, special_key, modifiers, keycode, "");
 

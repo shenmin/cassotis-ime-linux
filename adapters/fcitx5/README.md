@@ -30,6 +30,11 @@ the selected dictionary. By default it adds Cassotis to the current Fcitx
 group. It does not change the desktop's selected input framework; after the
 desktop is configured for Fcitx 5, choose `Cassotis 言泉拼音输入法`.
 
+Cassotis exposes its existing GTK settings window through Fcitx's standard
+input-method and addon configuration entries. Their configure actions in
+`fcitx5-configtool` launch `cassotis-settings` directly;
+`Ctrl+Shift+F10` remains available as the default in-input shortcut.
+
 Run the build-tree or installed-addon verification independently:
 
 ```bash

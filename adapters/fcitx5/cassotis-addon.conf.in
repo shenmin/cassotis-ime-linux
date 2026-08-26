@@ -6,6 +6,7 @@ Version=@VERSION@
 Library=@LIBRARY@
 Type=SharedLibrary
 OnDemand=True
+Configurable=True
 
 [Addon/Dependencies]
 0=core:@FCITX_VERSION@

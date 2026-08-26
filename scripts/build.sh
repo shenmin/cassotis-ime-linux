@@ -107,6 +107,8 @@ pkg-config --exists ibus-1.0 ||
     cassotis_die "IBus development package ibus-1.0 was not found"
 pkg-config --exists Fcitx5Core ||
     cassotis_die "Fcitx 5 development package Fcitx5Core was not found"
+pkg-config --exists Fcitx5Config ||
+    cassotis_die "Fcitx 5 development package Fcitx5Config was not found"
 printf '[build] ibus-engine-cassotis\n'
 # Current IBus headers use GNU variadic macros, so use GNU C11 while keeping
 # warnings in Cassotis sources fatal.
@@ -154,22 +156,22 @@ c++ -std=c++20 -O2 -g -Wall -Wextra -Werror -fPIC -shared \
     -I"$cassotis_root/adapters/common" \
     -I"$cassotis_root/adapters/ibus" \
     "${fcitx_compat_flags[@]}" \
-    $(pkg-config --cflags Fcitx5Core glib-2.0) \
+    $(pkg-config --cflags Fcitx5Core Fcitx5Config glib-2.0) \
     "$cassotis_root/adapters/fcitx5/fcitx5_engine_cassotis.cpp" \
     "$unit_dir/cassotis_protocol_fcitx5.o" \
     "$unit_dir/cassotis_client_fcitx5.o" \
     -o "$bin_dir/libcassotis.so" \
-    $(pkg-config --libs Fcitx5Core glib-2.0)
+    $(pkg-config --libs Fcitx5Core Fcitx5Config glib-2.0)
 [[ -r "$bin_dir/libcassotis.so" ]] ||
     cassotis_die "Fcitx 5 addon was not produced"
 
 printf '[build] cassotis-fcitx5-smoke\n'
 c++ -std=c++20 -O2 -g -Wall -Wextra -Werror \
     "${fcitx_compat_flags[@]}" \
-    $(pkg-config --cflags Fcitx5Core glib-2.0) \
+    $(pkg-config --cflags Fcitx5Core Fcitx5Config glib-2.0) \
     "$cassotis_root/tools/integration/cassotis_fcitx5_smoke.cpp" \
     -o "$bin_dir/cassotis-fcitx5-smoke" \
-    $(pkg-config --libs Fcitx5Core glib-2.0)
+    $(pkg-config --libs Fcitx5Core Fcitx5Config glib-2.0)
 cassotis_require_executable "$bin_dir/cassotis-fcitx5-smoke"
 
 printf '[build] cassotis-ibus-smoke\n'

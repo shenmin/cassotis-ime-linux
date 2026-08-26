@@ -41,6 +41,7 @@ release_root="$(realpath -m -- "$release_root")"
 
 libexec="$release_root/usr/libexec/cassotis-ime"
 data="$release_root/usr/share/cassotis-ime"
+icon="$release_root/usr/share/icons/hicolor/512x512/apps/cassotis-ime.png"
 engine="$libexec/cassotis-engine"
 control="$libexec/cassotis-control"
 settings="$libexec/cassotis-settings"
@@ -57,6 +58,7 @@ required_files=(
     "$libexec/cassotis-ibus-smoke"
     "$libexec/cassotis-fcitx5-smoke"
     "$fcitx_addon"
+    "$icon"
     "$data/dict_sc.db"
     "$data/release-manifest.txt"
     "$data/release-sha256.txt"
@@ -105,6 +107,7 @@ expected_values = {
     "name": "cassotis",
     "longname": "Cassotis 言泉拼音输入法",
     "language": "zh_CN",
+    "icon": "cassotis-ime",
     "setup": expected_setup,
 }
 for tag, expected in expected_values.items():
@@ -136,8 +139,30 @@ if command -v desktop-file-validate >/dev/null 2>&1; then
 fi
 grep -Fqx "Exec=$installed_settings" "$desktop_file" ||
     cassotis_die 'GNOME IBus settings launcher has an invalid Exec entry'
+grep -Fqx 'Icon=cassotis-ime' "$desktop_file" ||
+    cassotis_die 'GNOME IBus settings launcher has an invalid Icon entry'
 [[ ! -e "$legacy_desktop_file" ]] ||
     cassotis_die 'legacy settings launcher name must not be shipped'
+fcitx_input_method="$release_root/usr/share/fcitx5/inputmethod/cassotis.conf"
+grep -Fqx 'Icon=cassotis-ime' "$fcitx_input_method" ||
+    cassotis_die 'Fcitx input-method metadata has an invalid Icon entry'
+python3 - "$icon" <<'PY'
+from pathlib import Path
+import struct
+import sys
+
+icon_path = Path(sys.argv[1])
+data = icon_path.read_bytes()
+if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
+    raise SystemExit(f"application icon is not a PNG: {icon_path}")
+if data[12:16] != b"IHDR":
+    raise SystemExit(f"application icon has no PNG IHDR: {icon_path}")
+width, height = struct.unpack(">II", data[16:24])
+if (width, height) != (512, 512):
+    raise SystemExit(
+        f"unexpected application icon size: expected 512x512, got {width}x{height}"
+    )
+PY
 for path in "$engine" "$control" "$settings" "$session_refresh" \
             "$ibus_adapter" \
             "$libexec/cassotis-ibus-smoke" \

@@ -81,6 +81,7 @@ adapter_binary="$cassotis_root/build/bin/ibus-engine-cassotis"
 smoke_binary="$cassotis_root/build/bin/cassotis-ibus-smoke"
 control_binary="$cassotis_root/build/bin/cassotis-control"
 settings_source="$cassotis_root/adapters/ibus/cassotis_settings.py"
+icon_source="$cassotis_root/cassotis_ime_yanquan_mark.png"
 release_version="$(tr -d '\r\n' < "$cassotis_root/VERSION")"
 cassotis_require_executable "$engine_binary"
 cassotis_require_executable "$adapter_binary"
@@ -88,6 +89,8 @@ cassotis_require_executable "$smoke_binary"
 cassotis_require_executable "$control_binary"
 [[ -r "$settings_source" ]] ||
     cassotis_die "settings program is not readable: $settings_source"
+[[ -r "$icon_source" ]] ||
+    cassotis_die "application icon is not readable: $icon_source"
 
 data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
 data_dir="$data_home/cassotis-ime"
@@ -97,6 +100,9 @@ libexec_dir="$HOME/.local/libexec/cassotis-ime"
 applications_dir="$data_home/applications"
 desktop_file="$applications_dir/ibus-setup-cassotis.desktop"
 legacy_desktop_file="$applications_dir/org.cassotis.ime.Settings.desktop"
+icon_theme_dir="$data_home/icons/hicolor"
+icon_dir="$icon_theme_dir/512x512/apps"
+installed_icon="$icon_dir/cassotis-ime.png"
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}"
 environment_dir="$config_dir/environment.d"
 environment_file="$environment_dir/80-cassotis-ibus.conf"
@@ -106,7 +112,7 @@ ibus_dropin_file="$ibus_dropin_dir/80-cassotis-component-path.conf"
 legacy_service_file="$systemd_dir/cassotis-ibus.service"
 legacy_autostart_file="$config_dir/autostart/cassotis-ibus.desktop"
 system_component_dir="$(cassotis_ibus_system_component_dir)"
-component_path="$system_component_dir:$component_dir"
+component_path="$component_dir:$system_component_dir"
 adapter_path="$libexec_dir/ibus-engine-cassotis"
 installed_engine_path="$libexec_dir/cassotis-engine"
 installed_smoke_path="$libexec_dir/cassotis-ibus-smoke"
@@ -188,7 +194,9 @@ stage_component="$staging_dir/cassotis.xml"
 stage_desktop="$staging_dir/ibus-setup-cassotis.desktop"
 stage_environment="$staging_dir/80-cassotis-ibus.conf"
 stage_dropin="$staging_dir/80-cassotis-component-path.conf"
+stage_icon="$staging_dir/cassotis-ime.png"
 install -d -m 0700 "$stage_libexec" "$stage_data"
+install -m 0644 "$icon_source" "$stage_icon"
 install -m 0644 "$dictionary_path" "$stage_data/dict_sc.db"
 if [[ -n "$traditional_dictionary_path" ]]; then
     install -m 0644 "$traditional_dictionary_path" "$stage_data/dict_tc.db"
@@ -260,7 +268,7 @@ rm -f -- "$engine_socket"
 
 install -d -m 0700 "$data_dir" "$component_dir" "$libexec_dir" \
     "$environment_dir" "$ibus_dropin_dir"
-install -d -m 0755 "$applications_dir"
+install -d -m 0755 "$applications_dir" "$icon_dir"
 cassotis_atomic_install "$stage_data/dict_sc.db" "$data_dir/dict_sc.db" 0644
 if [[ -n "$traditional_dictionary_path" ]]; then
     cassotis_atomic_install "$stage_data/dict_tc.db" "$data_dir/dict_tc.db" 0644
@@ -277,6 +285,7 @@ cassotis_atomic_install "$stage_libexec/cassotis-settings" \
     "$installed_settings_path" 0755
 cassotis_atomic_install "$stage_component" "$component_file" 0644
 cassotis_atomic_install "$stage_desktop" "$desktop_file" 0644
+cassotis_atomic_install "$stage_icon" "$installed_icon" 0644
 rm -f -- "$legacy_desktop_file"
 cassotis_atomic_install "$stage_environment" "$environment_file" 0600
 cassotis_atomic_install "$stage_dropin" "$ibus_dropin_file" 0600
@@ -293,6 +302,9 @@ if command -v ibus >/dev/null 2>&1; then
 fi
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$applications_dir" >/dev/null 2>&1 || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -t "$icon_theme_dir" >/dev/null 2>&1 || true
 fi
 
 refresh_mode='next desktop login'
