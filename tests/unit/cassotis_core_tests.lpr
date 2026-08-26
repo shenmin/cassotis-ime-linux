@@ -16,6 +16,7 @@ uses
     test_nc_ipc_dispatcher,
     test_nc_engine_context,
     test_nc_engine_service,
+    test_nc_engine_pagination,
     test_nc_pinyin_parser,
     test_nc_shuangpin_decoder,
     test_nc_fuzzy_pinyin,
