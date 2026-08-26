@@ -9,6 +9,10 @@
   <a href="https://github.com/shenmin/cassotis-ime-linux/actions/workflows/ci.yml"><img src="https://github.com/shenmin/cassotis-ime-linux/actions/workflows/ci.yml/badge.svg" alt="Linux CI"></a>
 </p>
 
+<p align="center">
+  <img src="snapshot.jpg" alt="Cassotis IME for Linux snapshot" width="600" height="282">
+</p>
+
 English | [简体中文](README.CN.md) | [Windows version](https://github.com/shenmin/cassotis-ime)
 
 Cassotis IME for Linux is a native Chinese pinyin input method for both IBus

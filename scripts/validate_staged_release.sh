@@ -68,6 +68,7 @@ required_files=(
     "$release_root/usr/share/applications/ibus-setup-cassotis.desktop"
     "$release_root/usr/share/doc/cassotis-ime/README.md"
     "$release_root/usr/share/doc/cassotis-ime/README.CN.md"
+    "$release_root/usr/share/doc/cassotis-ime/snapshot.jpg"
     "$release_root/usr/share/doc/cassotis-ime/BUILD.md"
     "$release_root/usr/share/doc/cassotis-ime/RELEASE.md"
     "$release_root/usr/share/doc/cassotis-ime/COMPATIBILITY.md"

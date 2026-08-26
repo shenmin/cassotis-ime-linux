@@ -120,7 +120,7 @@ done
 for document in README.md README.CN.md BUILD.md RELEASE.md COMPATIBILITY.md \
                 BENCHMARK.md CONFIGURATION.md CONFIGURATION.CN.md \
                 CHANGELOG.md LICENSE NOTICE.md docs/DICTIONARY.md docs/IPC.md \
-                docs/LEXICON_ATTRIBUTION.md; do
+                docs/LEXICON_ATTRIBUTION.md snapshot.jpg; do
     [[ -r "$bundle_dir/$document" ]] ||
         cassotis_die "portable documentation is missing: $document"
 done

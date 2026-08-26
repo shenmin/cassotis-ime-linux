@@ -208,6 +208,8 @@ for document in README.md README.CN.md BUILD.md RELEASE.md COMPATIBILITY.md \
             "$(stage_path "$doc_path/$document")"
     fi
 done
+install -m 0644 "$cassotis_root/snapshot.jpg" \
+    "$(stage_path "$doc_path/snapshot.jpg")"
 for document in DICTIONARY.md IPC.md LEXICON_ATTRIBUTION.md; do
     install -m 0644 "$cassotis_root/docs/$document" \
         "$(stage_path "$doc_path/docs/$document")"

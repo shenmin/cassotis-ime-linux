@@ -9,6 +9,10 @@
   <a href="https://github.com/shenmin/cassotis-ime-linux/actions/workflows/ci.yml"><img src="https://github.com/shenmin/cassotis-ime-linux/actions/workflows/ci.yml/badge.svg" alt="Linux CI"></a>
 </p>
 
+<p align="center">
+  <img src="snapshot.jpg" alt="言泉输入法 Linux 版截图" width="600" height="282">
+</p>
+
 [English](README.md) | 简体中文 | [Windows 版](https://github.com/shenmin/cassotis-ime)
 
 言泉输入法 Linux 版是同时支持 IBus 与 Fcitx 5 的原生中文拼音输入法。

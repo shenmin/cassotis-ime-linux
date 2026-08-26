@@ -138,6 +138,7 @@ for document in README.md README.CN.md BUILD.md RELEASE.md COMPATIBILITY.md \
     [[ ! -r "$cassotis_root/$document" ]] ||
         install -m 0644 "$cassotis_root/$document" "$bundle_dir/$document"
 done
+install -m 0644 "$cassotis_root/snapshot.jpg" "$bundle_dir/snapshot.jpg"
 install -d -m 0755 "$bundle_dir/docs"
 install -m 0644 "$cassotis_root/docs/DICTIONARY.md" \
     "$bundle_dir/docs/DICTIONARY.md"
