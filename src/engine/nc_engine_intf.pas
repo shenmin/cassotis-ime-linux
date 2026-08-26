@@ -162580,7 +162580,8 @@ var
             end;
         end;
     begin
-        if (normalized_pinyin = '') or (not is_full_pinyin_key(normalized_pinyin)) then
+        if (m_page_index <> 0) or (normalized_pinyin = '') or
+            (not is_full_pinyin_key(normalized_pinyin)) then
         begin
             Exit;
         end;
@@ -180147,7 +180148,8 @@ var
         moved_path_local: string;
         move_idx_local: Integer;
     begin
-        if (m_dictionary = nil) or (expected_units < 2) or
+        if (m_page_index <> 0) or (m_dictionary = nil) or
+            (expected_units < 2) or
             (expected_units > 3) or
             (Length(syllables) <> expected_units) or
             (Length(m_candidates) <= 1) then
@@ -183159,12 +183161,12 @@ var
                 insert_idx: Integer;
                 move_idx: Integer;
             begin
-                if page_size <= 0 then
+                if visible_page_size <= 0 then
                 begin
                     Exit;
                 end;
                 old_len := Length(Result);
-                if old_len < page_size then
+                if old_len < visible_page_size then
                 begin
                     new_len := old_len + 1;
                 end
@@ -183336,10 +183338,10 @@ var
                 begin
                     Inc(direct_insert_pos_local);
                 end;
-                if direct_insert_pos_local >= page_size then
+                if direct_insert_pos_local >= visible_page_size then
                 begin
                     direct_insert_pos_local := Max(1,
-                        page_size - c_max_direct_added);
+                        visible_page_size - c_max_direct_added);
                 end;
 
                 if expected_units - 1 < direct_min_prefix_units_local then
@@ -186835,9 +186837,119 @@ var
                         False, False);
                 end;
             end;
+
+            procedure build_short_visible_candidate_pool_local;
+            var
+                candidate_idx_local: Integer;
+                source_idx_local: Integer;
+                candidate_local: TncCandidate;
+                keep_full_exact_local: Boolean;
+                keep_apostrophe_partial_local: Boolean;
+            begin
+                if (m_page_index <> 0) or (expected_units < 2) or
+                    (expected_units >= c_long_sentence_full_path_min_syllables) or
+                    (normalized_pinyin = '') then
+                begin
+                    Exit;
+                end;
+
+                SetLength(pool_candidates_local, 0);
+                SetLength(pool_source_indices_local, 0);
+                seen_candidates_local := TDictionary<string, Boolean>.Create;
+                try
+                    { Freeze the fully processed first page, then append every
+                      remaining visible source candidate once. Later pages are
+                      slices of this pool and therefore cannot rerun first-page
+                      promotion rules or lose the item displaced by a prefix. }
+                    for candidate_idx_local := 0 to High(Result) do
+                    begin
+                        if candidate_idx_local < Length(visible_source_indices) then
+                        begin
+                            source_idx_local :=
+                                visible_source_indices[candidate_idx_local];
+                        end
+                        else
+                        begin
+                            source_idx_local := -1;
+                        end;
+                        append_pool_candidate_local(Result[candidate_idx_local],
+                            source_idx_local, False,
+                            Result[candidate_idx_local].display_kind =
+                            cdk_lm_compound);
+                    end;
+
+                    for candidate_idx_local := 0 to High(m_candidates) do
+                    begin
+                        candidate_local := m_candidates[candidate_idx_local];
+                        normalize_display_candidate(candidate_local);
+                        keep_full_exact_local :=
+                            is_protected_full_query_exact_local(candidate_local);
+                        keep_apostrophe_partial_local :=
+                            display_candidate_is_explicit_apostrophe_prefix_partial(
+                            candidate_local);
+
+                        if (not keep_full_exact_local) and
+                            candidate_is_visible_repeated_initial_reduplicated_local(
+                            candidate_local) then
+                        begin
+                            Continue;
+                        end;
+                        if (not keep_full_exact_local) and
+                            (not keep_apostrophe_partial_local) and
+                            display_candidate_should_drop_short_invalid_partial(
+                            candidate_local) then
+                        begin
+                            Continue;
+                        end;
+                        if (not keep_full_exact_local) and
+                            (not keep_apostrophe_partial_local) and
+                            display_candidate_should_drop_short_nonlexicon_complete(
+                            candidate_local, candidate_idx_local) then
+                        begin
+                            Continue;
+                        end;
+                        if (not keep_full_exact_local) and
+                            (not keep_apostrophe_partial_local) and
+                            candidate_is_repeated_particle_tail_complete_local(
+                            candidate_local) then
+                        begin
+                            Continue;
+                        end;
+                        if (not keep_full_exact_local) and
+                            (not keep_apostrophe_partial_local) and
+                            candidate_is_non_strict_one_plus_two_complete(
+                            candidate_local, candidate_idx_local) then
+                        begin
+                            Continue;
+                        end;
+
+                        append_pool_candidate_local(candidate_local,
+                            candidate_idx_local, False,
+                            candidate_local.display_kind = cdk_lm_compound);
+                    end;
+
+                    m_long_visible_candidate_pool_cache := Copy(
+                        pool_candidates_local, 0, Length(pool_candidates_local));
+                    m_long_visible_candidate_pool_source_indices_cache := Copy(
+                        pool_source_indices_local, 0,
+                        Length(pool_source_indices_local));
+                    m_long_visible_candidate_pool_cache_key :=
+                        get_long_visible_candidate_pool_cache_key(
+                        visible_page_size);
+                    m_long_visible_candidate_pool_source_signature :=
+                        get_candidate_state_signature;
+                    m_long_visible_candidate_pool_cache_valid := True;
+                finally
+                    seen_candidates_local.Free;
+                end;
+            end;
         begin
+            if expected_units < c_long_sentence_full_path_min_syllables then
+            begin
+                build_short_visible_candidate_pool_local;
+                Exit;
+            end;
             if short_exact_query_mode or
-                (expected_units < c_long_sentence_full_path_min_syllables) or
                 (normalized_pinyin = '') or
                 ((expected_units <= 6) and
                 (Length(protected_full_query_exacts) > 0)) then
@@ -187108,9 +187220,16 @@ var
             note_display_phase('longpool');
             promote_strong_short_four_two_exact_path_visible_local(Result,
                 visible_source_indices);
-            build_visible_long_sentence_candidate_pool_local;
+            if expected_units >= c_long_sentence_full_path_min_syllables then
+            begin
+                build_visible_long_sentence_candidate_pool_local;
+            end;
             promote_visible_longest_exact_prefix_partial_local;
             restore_visible_supported_transition_top_local;
+            if expected_units < c_long_sentence_full_path_min_syllables then
+            begin
+                build_visible_long_sentence_candidate_pool_local;
+            end;
             if (Length(Result) > 0) and
                 (Trim(Result[0].comment) = '') and
                 (get_candidate_text_unit_count(Trim(Result[0].text)) =
