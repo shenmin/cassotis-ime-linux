@@ -7,5 +7,6 @@ Comment[zh_CN]=配置言泉输入法
 Exec=@SETUP@
 Icon=input-keyboard
 Terminal=false
+NoDisplay=true
 Categories=Settings;
 StartupNotify=true

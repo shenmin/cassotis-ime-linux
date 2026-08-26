@@ -117,7 +117,8 @@ installed_control="$libexec_dir/cassotis-control"
 installed_smoke="$libexec_dir/cassotis-fcitx5-smoke"
 installed_settings="$libexec_dir/cassotis-settings"
 applications_dir="$data_home/applications"
-desktop_file="$applications_dir/org.cassotis.ime.Settings.desktop"
+desktop_file="$applications_dir/ibus-setup-cassotis.desktop"
+legacy_desktop_file="$applications_dir/org.cassotis.ime.Settings.desktop"
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
 profile_file="$config_home/fcitx5/profile"
 runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${UID:-$(id -u)}}"
@@ -178,7 +179,7 @@ stage_data="$staging_dir/data"
 stage_addon="$staging_dir/libcassotis.so"
 stage_addon_metadata="$staging_dir/cassotis-addon.conf"
 stage_input_method="$staging_dir/cassotis-inputmethod.conf"
-stage_desktop="$staging_dir/org.cassotis.ime.Settings.desktop"
+stage_desktop="$staging_dir/ibus-setup-cassotis.desktop"
 install -d -m 0700 "$stage_libexec" "$stage_data"
 install -m 0644 "$dictionary_path" "$stage_data/dict_sc.db"
 if [[ -n "$traditional_dictionary_path" ]]; then
@@ -201,7 +202,7 @@ sed -e "s|@FCITX_VERSION@|$fcitx_version|g" \
 install -m 0644 "$cassotis_root/adapters/fcitx5/cassotis.conf" \
     "$stage_input_method"
 sed "s|@SETUP@|$installed_settings|g" \
-    "$cassotis_root/adapters/ibus/org.cassotis.ime.Settings.desktop.in" \
+    "$cassotis_root/adapters/ibus/ibus-setup-cassotis.desktop.in" \
     > "$stage_desktop"
 
 NO_AT_BRIDGE=1 "$stage_libexec/cassotis-settings" --check-ui
@@ -252,6 +253,7 @@ cassotis_atomic_install "$stage_addon_metadata" "$addon_metadata" 0644
 cassotis_atomic_install "$stage_input_method" \
     "$input_method_metadata" 0644
 cassotis_atomic_install "$stage_desktop" "$desktop_file" 0644
+rm -f -- "$legacy_desktop_file"
 
 "$cassotis_root/scripts/verify_fcitx5.sh" --installed \
     --dictionary "$data_dir/dict_sc.db"

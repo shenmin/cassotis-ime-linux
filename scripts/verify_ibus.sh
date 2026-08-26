@@ -8,12 +8,13 @@ data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
 component_file="$data_home/ibus/component/cassotis.xml"
 smoke_binary="$HOME/.local/libexec/cassotis-ime/cassotis-ibus-smoke"
 settings_binary="$HOME/.local/libexec/cassotis-ime/cassotis-settings"
+desktop_file="$data_home/applications/ibus-setup-cassotis.desktop"
 control_binary=''
 
 usage() {
     cat <<'EOF'
 Usage: scripts/verify_ibus.sh [--binary PATH] [--component PATH]
-                              [--settings PATH]
+                              [--settings PATH] [--desktop PATH]
 
 Checks the installed static component and runs an isolated input context
 through the active desktop IBus daemon. The test does not commit into an
@@ -36,6 +37,11 @@ while [[ $# -gt 0 ]]; do
         --settings)
             [[ $# -ge 2 ]] || cassotis_die "--settings requires a path"
             settings_binary="$2"
+            shift
+            ;;
+        --desktop)
+            [[ $# -ge 2 ]] || cassotis_die "--desktop requires a path"
+            desktop_file="$2"
             shift
             ;;
         --help|-h)
@@ -61,6 +67,12 @@ grep -q '<name>cassotis</name>' "$component_file" ||
     cassotis_die "IBus component does not declare the cassotis engine"
 grep -q "<setup>$settings_binary</setup>" "$component_file" ||
     cassotis_die "IBus component does not declare the installed settings entry"
+[[ "$(basename -- "$desktop_file")" == 'ibus-setup-cassotis.desktop' ]] ||
+    cassotis_die "GNOME requires the settings launcher name ibus-setup-cassotis.desktop"
+[[ -r "$desktop_file" ]] ||
+    cassotis_die "IBus settings launcher is not readable: $desktop_file"
+grep -Fqx "Exec=$settings_binary" "$desktop_file" ||
+    cassotis_die "IBus settings launcher does not execute the installed settings program"
 cassotis_prepare_ibus_environment ||
     cassotis_die "no active desktop IBus daemon was found"
 

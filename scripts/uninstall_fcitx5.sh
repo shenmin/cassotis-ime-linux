@@ -51,7 +51,8 @@ installed_control="$libexec_dir/cassotis-control"
 installed_smoke="$libexec_dir/cassotis-fcitx5-smoke"
 installed_settings="$libexec_dir/cassotis-settings"
 applications_dir="$data_home/applications"
-desktop_file="$applications_dir/org.cassotis.ime.Settings.desktop"
+desktop_file="$applications_dir/ibus-setup-cassotis.desktop"
+legacy_desktop_file="$applications_dir/org.cassotis.ime.Settings.desktop"
 ibus_component="$data_home/ibus/component/cassotis.xml"
 ibus_adapter="$libexec_dir/ibus-engine-cassotis"
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
@@ -128,7 +129,7 @@ if [[ ! -f "$ibus_component" && ! -f "$ibus_adapter" ]]; then
     fi
     stop_installed_engine_by_path
     rm -f -- "$engine_socket" "$installed_engine" "$installed_control" \
-        "$installed_settings" "$desktop_file"
+        "$installed_settings" "$desktop_file" "$legacy_desktop_file"
     rmdir -- "$libexec_dir" 2>/dev/null || true
     shared_runtime='removed; no IBus adapter is installed'
 fi

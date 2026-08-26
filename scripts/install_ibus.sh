@@ -95,7 +95,8 @@ component_dir="$data_home/ibus/component"
 component_file="$component_dir/cassotis.xml"
 libexec_dir="$HOME/.local/libexec/cassotis-ime"
 applications_dir="$data_home/applications"
-desktop_file="$applications_dir/org.cassotis.ime.Settings.desktop"
+desktop_file="$applications_dir/ibus-setup-cassotis.desktop"
+legacy_desktop_file="$applications_dir/org.cassotis.ime.Settings.desktop"
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}"
 environment_dir="$config_dir/environment.d"
 environment_file="$environment_dir/80-cassotis-ibus.conf"
@@ -112,7 +113,7 @@ installed_smoke_path="$libexec_dir/cassotis-ibus-smoke"
 installed_control_path="$libexec_dir/cassotis-control"
 installed_settings_path="$libexec_dir/cassotis-settings"
 component_template="$cassotis_root/adapters/ibus/cassotis.xml.in"
-desktop_template="$cassotis_root/adapters/ibus/org.cassotis.ime.Settings.desktop.in"
+desktop_template="$cassotis_root/adapters/ibus/ibus-setup-cassotis.desktop.in"
 runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${UID:-$(id -u)}}"
 engine_socket="$runtime_dir/cassotis-ime/engine.sock"
 staging_dir="$(mktemp -d)"
@@ -184,7 +185,7 @@ stop_installed_engine_by_path() {
 stage_libexec="$staging_dir/libexec"
 stage_data="$staging_dir/data"
 stage_component="$staging_dir/cassotis.xml"
-stage_desktop="$staging_dir/org.cassotis.ime.Settings.desktop"
+stage_desktop="$staging_dir/ibus-setup-cassotis.desktop"
 stage_environment="$staging_dir/80-cassotis-ibus.conf"
 stage_dropin="$staging_dir/80-cassotis-component-path.conf"
 install -d -m 0700 "$stage_libexec" "$stage_data"
@@ -276,6 +277,7 @@ cassotis_atomic_install "$stage_libexec/cassotis-settings" \
     "$installed_settings_path" 0755
 cassotis_atomic_install "$stage_component" "$component_file" 0644
 cassotis_atomic_install "$stage_desktop" "$desktop_file" 0644
+rm -f -- "$legacy_desktop_file"
 cassotis_atomic_install "$stage_environment" "$environment_file" 0600
 cassotis_atomic_install "$stage_dropin" "$ibus_dropin_file" 0600
 

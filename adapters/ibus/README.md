@@ -28,12 +28,13 @@ the engine and persisted rather than being implemented as adapter-side
 candidate logic.
 
 The installed component exposes `cassotis-settings` through IBus's standard
-setup entry and a desktop application launcher. The GTK 3 window invokes the
-small `cassotis-control` protocol client, so settings, diagnostics, IBus, and
-the native Fcitx 5 adapter all observe the same engine-owned state. While a
-Cassotis context is focused, the adapter polls that shared state every 500 ms
-and updates properties only when a value changes; polling stops on focus-out
-or disable and does not rebuild candidates on unchanged ticks.
+setup entry and the `ibus-setup-cassotis.desktop` launcher required by GNOME's
+input-source preferences action. The GTK 3 window invokes the small
+`cassotis-control` protocol client, so settings, diagnostics, IBus, and the
+native Fcitx 5 adapter all observe the same engine-owned state. While a Cassotis
+context is focused, the adapter polls that shared state every 500 ms and updates
+properties only when a value changes; polling stops on focus-out or disable and
+does not rebuild candidates on unchanged ticks.
 
 Password, PIN, and hidden-text content types are treated as sensitive. The
 adapter deactivates their engine context, clears any visible composition, and

@@ -192,8 +192,8 @@ sed -e "s|@FCITX_VERSION@|$fcitx_version|g" \
 install -m 0644 "$cassotis_root/adapters/fcitx5/cassotis.conf" \
     "$(stage_path "$fcitx_input_method_path/cassotis.conf")"
 sed "s|@SETUP@|$libexec_path/cassotis-settings|g" \
-    "$cassotis_root/adapters/ibus/org.cassotis.ime.Settings.desktop.in" \
-    > "$(stage_path "$applications_path/org.cassotis.ime.Settings.desktop")"
+    "$cassotis_root/adapters/ibus/ibus-setup-cassotis.desktop.in" \
+    > "$(stage_path "$applications_path/ibus-setup-cassotis.desktop")"
 
 for document in README.md README.CN.md BUILD.md RELEASE.md COMPATIBILITY.md \
                 BENCHMARK.md CONFIGURATION.md CONFIGURATION.CN.md \

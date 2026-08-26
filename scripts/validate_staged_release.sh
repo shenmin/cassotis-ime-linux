@@ -63,7 +63,7 @@ required_files=(
     "$release_root/usr/share/ibus/component/cassotis.xml"
     "$release_root/usr/share/fcitx5/addon/cassotis.conf"
     "$release_root/usr/share/fcitx5/inputmethod/cassotis.conf"
-    "$release_root/usr/share/applications/org.cassotis.ime.Settings.desktop"
+    "$release_root/usr/share/applications/ibus-setup-cassotis.desktop"
     "$release_root/usr/share/doc/cassotis-ime/README.md"
     "$release_root/usr/share/doc/cassotis-ime/README.CN.md"
     "$release_root/usr/share/doc/cassotis-ime/BUILD.md"
@@ -129,10 +129,15 @@ if rank <= 0:
     raise SystemExit("IBus engine rank must be positive for desktop discovery")
 PY
 
-desktop_file="$release_root/usr/share/applications/org.cassotis.ime.Settings.desktop"
+desktop_file="$release_root/usr/share/applications/ibus-setup-cassotis.desktop"
+legacy_desktop_file="$release_root/usr/share/applications/org.cassotis.ime.Settings.desktop"
 if command -v desktop-file-validate >/dev/null 2>&1; then
     desktop-file-validate "$desktop_file"
 fi
+grep -Fqx "Exec=$installed_settings" "$desktop_file" ||
+    cassotis_die 'GNOME IBus settings launcher has an invalid Exec entry'
+[[ ! -e "$legacy_desktop_file" ]] ||
+    cassotis_die 'legacy settings launcher name must not be shipped'
 for path in "$engine" "$control" "$settings" "$session_refresh" \
             "$ibus_adapter" \
             "$libexec/cassotis-ibus-smoke" \
