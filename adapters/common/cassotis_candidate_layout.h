@@ -54,4 +54,14 @@ static inline gboolean cassotis_candidate_row_requires_vertical(
     return FALSE;
 }
 
+static inline gboolean cassotis_candidate_panel_requires_vertical(
+    const CassotisEngineResult *result)
+{
+    if (result == NULL)
+        return FALSE;
+    if (result->completion_text != NULL && result->completion_text[0] != '\0')
+        return TRUE;
+    return cassotis_candidate_row_requires_vertical(result);
+}
+
 #endif

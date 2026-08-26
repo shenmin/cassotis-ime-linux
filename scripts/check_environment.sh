@@ -52,11 +52,15 @@ pkg-config --exists ibus-1.0 ||
     cassotis_die "IBus development package ibus-1.0 was not found"
 pkg-config --exists Fcitx5Core ||
     cassotis_die "Fcitx 5 development package Fcitx5Core was not found"
+pkg-config --exists Fcitx5Config ||
+    cassotis_die "Fcitx 5 development package Fcitx5Config was not found"
 printf 'pkg-config=%s\n' "$(command -v pkg-config)"
 printf 'cc=%s\n' "$(command -v cc)"
 printf 'c++=%s\n' "$(command -v c++)"
 printf 'ibus_development=%s\n' "$(pkg-config --modversion ibus-1.0)"
 printf 'fcitx5_development=%s\n' "$(pkg-config --modversion Fcitx5Core)"
+printf 'fcitx5_config_development=%s\n' \
+    "$(pkg-config --modversion Fcitx5Config)"
 python3 -c 'import gi; gi.require_version("Gtk", "3.0"); from gi.repository import Gtk' \
     >/dev/null 2>&1 ||
     cassotis_die "Python GI with GTK 3 introspection data was not found"

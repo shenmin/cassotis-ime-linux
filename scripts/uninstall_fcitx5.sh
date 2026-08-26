@@ -53,6 +53,8 @@ installed_settings="$libexec_dir/cassotis-settings"
 applications_dir="$data_home/applications"
 desktop_file="$applications_dir/ibus-setup-cassotis.desktop"
 legacy_desktop_file="$applications_dir/org.cassotis.ime.Settings.desktop"
+icon_theme_dir="$data_home/icons/hicolor"
+installed_icon="$icon_theme_dir/512x512/apps/cassotis-ime.png"
 ibus_component="$data_home/ibus/component/cassotis.xml"
 ibus_adapter="$libexec_dir/ibus-engine-cassotis"
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
@@ -129,13 +131,17 @@ if [[ ! -f "$ibus_component" && ! -f "$ibus_adapter" ]]; then
     fi
     stop_installed_engine_by_path
     rm -f -- "$engine_socket" "$installed_engine" "$installed_control" \
-        "$installed_settings" "$desktop_file" "$legacy_desktop_file"
+        "$installed_settings" "$desktop_file" "$legacy_desktop_file" \
+        "$installed_icon"
     rmdir -- "$libexec_dir" 2>/dev/null || true
     shared_runtime='removed; no IBus adapter is installed'
 fi
 
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$applications_dir" >/dev/null 2>&1 || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -t "$icon_theme_dir" >/dev/null 2>&1 || true
 fi
 if [[ $fcitx_was_active -eq 1 ]]; then
     fcitx5 -d >/dev/null 2>&1

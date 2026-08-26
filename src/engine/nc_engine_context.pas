@@ -23,6 +23,10 @@ type
         FSelectedIndex: Integer;
         FCompletionText: string;
         FCompletionPinyin: string;
+        FModifierShortcutPending: Boolean;
+        FModifierShortcutCanceled: Boolean;
+        FModifierShortcutAction: TncShortcutAction;
+        FModifierShortcutKeyCode: Word;
     public
         constructor Create(const context_id: QWord);
         function AdvanceGeneration(const generation_id: QWord): Boolean;
@@ -34,6 +38,12 @@ type
         procedure SetCandidates(const value: TncCandidateList);
         procedure SetCompletion(const full_pinyin: string;
             const text: string);
+        procedure BeginModifierShortcut(const action: TncShortcutAction;
+            const key_code: Word);
+        procedure CancelModifierShortcut;
+        procedure ClearModifierShortcut;
+        function FinishModifierShortcut(const key_code: Word;
+            out action: TncShortcutAction; out should_execute: Boolean): Boolean;
         procedure MoveSelection(const delta: Integer);
         procedure SelectCandidate(const candidate_index: Integer);
         procedure SetSurrounding(const text: string; const cursor_offset: Integer);
@@ -47,6 +57,10 @@ type
         property SelectedIndex: Integer read FSelectedIndex;
         property CompletionText: string read FCompletionText;
         property CompletionPinyin: string read FCompletionPinyin;
+        property ModifierShortcutPending: Boolean
+            read FModifierShortcutPending;
+        property ModifierShortcutKeyCode: Word
+            read FModifierShortcutKeyCode;
     end;
 
     TncEngineContextRegistry = class
@@ -86,6 +100,7 @@ begin
     FActive := False;
     FSurroundingText := '';
     FCursorOffset := 0;
+    ClearModifierShortcut;
     ClearComposition;
 end;
 
@@ -129,6 +144,40 @@ procedure TncEngineContext.SetCompletion(const full_pinyin: string;
 begin
     FCompletionPinyin := full_pinyin;
     FCompletionText := text;
+end;
+
+procedure TncEngineContext.BeginModifierShortcut(
+    const action: TncShortcutAction; const key_code: Word);
+begin
+    FModifierShortcutPending := True;
+    FModifierShortcutCanceled := False;
+    FModifierShortcutAction := action;
+    FModifierShortcutKeyCode := key_code;
+end;
+
+procedure TncEngineContext.CancelModifierShortcut;
+begin
+    if FModifierShortcutPending then
+        FModifierShortcutCanceled := True;
+end;
+
+procedure TncEngineContext.ClearModifierShortcut;
+begin
+    FModifierShortcutPending := False;
+    FModifierShortcutCanceled := False;
+    FModifierShortcutAction := Low(TncShortcutAction);
+    FModifierShortcutKeyCode := 0;
+end;
+
+function TncEngineContext.FinishModifierShortcut(const key_code: Word;
+    out action: TncShortcutAction; out should_execute: Boolean): Boolean;
+begin
+    Result := FModifierShortcutPending and
+        (FModifierShortcutKeyCode = key_code);
+    action := FModifierShortcutAction;
+    should_execute := Result and (not FModifierShortcutCanceled);
+    if Result then
+        ClearModifierShortcut;
 end;
 
 procedure TncEngineContext.MoveSelection(const delta: Integer);

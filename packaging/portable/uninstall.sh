@@ -47,6 +47,9 @@ if [[ "$destdir" == / ]]; then
     command -v update-desktop-database >/dev/null 2>&1 &&
         run_bounded 2s update-desktop-database \
             /usr/share/applications >/dev/null 2>&1 || true
+    command -v gtk-update-icon-cache >/dev/null 2>&1 &&
+        run_bounded 2s gtk-update-icon-cache -q -t \
+            /usr/share/icons/hicolor >/dev/null 2>&1 || true
     command -v ibus >/dev/null 2>&1 &&
         run_bounded 4s ibus write-cache --system >/dev/null 2>&1 || true
 fi

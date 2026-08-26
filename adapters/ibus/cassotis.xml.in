@@ -17,7 +17,7 @@
       <rank>80</rank>
       <license>GPL-3.0-only</license>
       <author>Cassotis IME contributors</author>
-      <icon>ibus-keyboard</icon>
+      <icon>cassotis-ime</icon>
       <layout>us</layout>
       <symbol>言</symbol>
       <setup>@SETUP@</setup>

@@ -33,6 +33,7 @@ const
     VK_F1 = $70;
     VK_F10 = $79;
     VK_F24 = $87;
+    VK_LWIN = $5B;
     VK_LSHIFT = $A0;
     VK_RSHIFT = $A1;
     VK_LCONTROL = $A2;

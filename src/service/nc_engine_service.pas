@@ -321,6 +321,13 @@ begin
     key_state.alt_down := km_alt in key_event.modifiers;
     key_state.caps_lock := km_caps_lock in key_event.modifiers;
 
+    if (key_event.special_key >= sk_f1) and
+        (key_event.special_key <= sk_f24) then
+    begin
+        key_code := VK_F1 + Ord(key_event.special_key) - Ord(sk_f1);
+        Exit(True);
+    end;
+
     case key_event.special_key of
         sk_backspace: key_code := VK_BACK;
         sk_delete: key_code := VK_DELETE;
@@ -341,6 +348,10 @@ begin
         sk_numpad_subtract: key_code := VK_SUBTRACT;
         sk_numpad_decimal: key_code := VK_DECIMAL;
         sk_numpad_divide: key_code := VK_DIVIDE;
+        sk_shift: key_code := VK_SHIFT;
+        sk_control: key_code := VK_CONTROL;
+        sk_alt: key_code := VK_MENU;
+        sk_super: key_code := VK_LWIN;
     end;
     if key_code <> 0 then
         Exit(True);
@@ -552,6 +563,7 @@ begin
         Result := ActivateContext(context)
     else
     begin
+        context.ClearModifierShortcut;
         context.ClearComposition;
         if FLoadedContextId = context_id then
         begin
@@ -665,7 +677,15 @@ var
     key_code: Word;
     key_state: TncKeyState;
     shortcut_action: TncShortcutAction;
+    shortcut_value: TncShortcut;
+    shortcut_matched: Boolean;
+    normalized_key_code: Word;
+    execute_modifier_shortcut: Boolean;
+    modifier_release: Boolean;
     next_state: TncEngineState;
+    raw_key_state: TncKeyState;
+    raw_commit_text: string;
+    engine_commit_text: string;
 begin
     nc_initialize_engine_result(Result);
     Result.error_code := PrepareContext(context_id, generation_id, context);
@@ -677,13 +697,52 @@ begin
     end;
     if Result.error_code <> 0 then
         Exit;
-    if key_event.is_release or (km_super in key_event.modifiers) then
-        Exit;
     if not KeyEventToVirtualKey(key_event, key_code, key_state) then
+    begin
+        if not key_event.is_release then
+            context.CancelModifierShortcut;
         Exit;
+    end;
 
-    if nc_find_shortcut_action(FEngine.Config.shortcuts, key_code,
-        key_state, shortcut_action) then
+    normalized_key_code := nc_normalize_shortcut_key_code(key_code);
+    modifier_release := False;
+    shortcut_matched := False;
+    if key_event.is_release then
+    begin
+        if not context.FinishModifierShortcut(normalized_key_code,
+            shortcut_action, execute_modifier_shortcut) then
+            Exit;
+        if not execute_modifier_shortcut then
+            Exit;
+        modifier_release := True;
+        shortcut_matched := True;
+    end
+    else
+    begin
+        if context.ModifierShortcutPending and
+            (normalized_key_code <> context.ModifierShortcutKeyCode) then
+            context.CancelModifierShortcut;
+        if km_super in key_event.modifiers then
+            Exit;
+        shortcut_matched := nc_find_shortcut_action(FEngine.Config.shortcuts,
+            key_code, key_state, shortcut_action);
+        if shortcut_matched then
+        begin
+            shortcut_value := nc_shortcut_for_action(FEngine.Config.shortcuts,
+                shortcut_action);
+            if nc_shortcut_is_modifier_only(shortcut_value) then
+            begin
+                if key_event.is_repeat then
+                    Exit;
+                if not context.ModifierShortcutPending then
+                    context.BeginModifierShortcut(shortcut_action,
+                        normalized_key_code);
+                Exit;
+            end;
+        end;
+    end;
+
+    if shortcut_matched then
     begin
         if key_event.is_repeat then
             Exit;
@@ -730,13 +789,40 @@ begin
         Exit;
     end;
 
-    if not FEngine.should_handle_key(key_code, key_state) then
-        Exit;
-
     try
+        raw_commit_text := '';
+        if modifier_release and (shortcut_action = sa_input_mode_toggle) and
+            (FState.input_mode = im_chinese) and
+            (context.Composition <> '') then
+        begin
+            raw_key_state := Default(TncKeyState);
+            if FEngine.should_handle_key(VK_RETURN, raw_key_state) and
+                FEngine.process_key(VK_RETURN, raw_key_state) then
+                FEngine.commit_text(raw_commit_text);
+        end;
+
+        if not FEngine.should_handle_key(key_code, key_state) then
+        begin
+            if raw_commit_text <> '' then
+            begin
+                Result.handled := True;
+                Result.commit_text := raw_commit_text;
+                SyncStateFromEngine;
+                PopulateResult(context, Result);
+            end;
+            Exit;
+        end;
+
         Result.handled := FEngine.process_key(key_code, key_state);
         if Result.handled then
-            FEngine.commit_text(Result.commit_text);
+        begin
+            engine_commit_text := '';
+            FEngine.commit_text(engine_commit_text);
+            if raw_commit_text <> '' then
+                Result.commit_text := raw_commit_text
+            else
+                Result.commit_text := engine_commit_text;
+        end;
         SyncStateFromEngine;
         PopulateResult(context, Result);
     except

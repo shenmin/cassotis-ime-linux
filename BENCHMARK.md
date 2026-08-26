@@ -60,10 +60,11 @@ The 11,728 short-word rows marked as genuine competing-candidate cases score
 8,737/10,528 Top1/Top2 without context and 9,596/10,775 with context. The
 context-enabled short-word quality counts are identical to the Windows
 v1.17.0 reference. The Windows long-sentence reference is 10,595 Top1 and
-12,023 Top2; the Linux release floor permits the small reviewed compiler/runtime
-difference but rejects a larger regression. Latency is host-specific and must
-not be compared across Windows and Linux hardware as an implementation-speed
-ratio.
+12,023 Top2. The Linux baseline retains the small reviewed compiler/runtime
+difference but now permits no further regression in any recorded quality
+count or substitution of different passing/failing cases. Latency is
+host-specific and must not be compared across Windows and Linux hardware as an
+implementation-speed ratio.
 
 The single benchmark process reached 557,252 KiB maximum RSS/high-water mark,
 below the 768 MiB release ceiling. The same clean-build gate also passed all
