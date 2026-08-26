@@ -37,7 +37,8 @@ component_dir="$data_home/ibus/component"
 component_file="$component_dir/cassotis.xml"
 libexec_dir="$HOME/.local/libexec/cassotis-ime"
 applications_dir="$data_home/applications"
-desktop_file="$applications_dir/org.cassotis.ime.Settings.desktop"
+desktop_file="$applications_dir/ibus-setup-cassotis.desktop"
+legacy_desktop_file="$applications_dir/org.cassotis.ime.Settings.desktop"
 adapter_path="$libexec_dir/ibus-engine-cassotis"
 installed_engine_path="$libexec_dir/cassotis-engine"
 installed_control_path="$libexec_dir/cassotis-control"
@@ -153,7 +154,7 @@ rm -f -- "$component_file" "$environment_file" "$ibus_dropin_file" \
     "$installed_smoke_path"
 shared_runtime='retained for the installed Fcitx 5 addon'
 if [[ $fcitx_installed -eq 0 ]]; then
-    rm -f -- "$desktop_file" "$installed_engine_path" \
+    rm -f -- "$desktop_file" "$legacy_desktop_file" "$installed_engine_path" \
         "$installed_control_path" "$installed_settings_path"
     rmdir -- "$libexec_dir" 2>/dev/null || true
     shared_runtime='removed; no Fcitx 5 addon is installed'
