@@ -44,29 +44,38 @@ connection.
 
 ## Supported Release
 
-The v0.1.0 binary release is verified on Ubuntu 26.04 LTS, GNOME, Wayland,
-x86_64. It contains both framework adapters; enable either IBus or Fcitx 5
-after installation. The published `.deb` may work on compatible Debian-family
-amd64 systems, but Ubuntu 26.04 is the only release-gated binary target.
+The v0.1.0 release provides `.deb` packages and portable binary archives for
+both amd64 and arm64. The full release gate has been completed on Ubuntu 26.04
+LTS, GNOME, Wayland, and x86_64. The ARM64 artifacts were built natively on
+Ubuntu 26.04.1 and passed the core test suite, simplified/traditional
+dictionary regressions, artifact parity and integrity checks, package
+installation, and the installed-engine self-test. The full IBus/Fcitx desktop
+matrix and manual GUI validation on ARM64 remain pending.
 
-The x86_64 portable archive contains the same dynamically linked binaries and
-requires compatible runtime libraries; it is not a distribution-independent
-package. The build scripts recognize Linux aarch64, but aarch64 release
-artifacts are not published until native hardware completes the same matrix.
-Other distributions should build natively from source.
+Both architecture packages include the IBus and Fcitx 5 adapters; enable
+either framework after installation.
+
+Each portable archive contains the same dynamically linked binaries as its
+matching `.deb` and requires compatible runtime libraries; it is not a
+distribution-independent package. Compatible Debian-family systems can use
+the package matching their architecture. Other distributions should build
+natively from source.
 
 See [COMPATIBILITY.md](COMPATIBILITY.md) for the exact test scope and platform
 status.
 
 ## Install
 
-For the verified Ubuntu installation path, download the `.deb` and
-`SHA256SUMS` from [GitHub Releases](https://github.com/shenmin/cassotis-ime-linux/releases),
-verify the package, and install it with APT:
+Download the `.deb` matching the system architecture from
+[GitHub Releases](https://github.com/shenmin/cassotis-ime-linux/releases),
+compare its local SHA-256 value with the digest shown in the release asset
+metadata, and install it with APT:
 
 ```bash
-grep ' cassotis-ime_0.1.0_amd64.deb$' SHA256SUMS | sha256sum --check -
-sudo apt install ./cassotis-ime_0.1.0_amd64.deb
+arch="$(dpkg --print-architecture)"  # amd64 or arm64
+package="cassotis-ime_0.1.0_${arch}.deb"
+sha256sum "${package}"
+sudo apt install "./${package}"
 ```
 
 The installer refreshes active IBus and Fcitx 5 desktop sessions. On GNOME
@@ -85,12 +94,15 @@ settings or from the Cassotis configuration action in `fcitx5-configtool`.
 The installed fallback command is
 `/usr/libexec/cassotis-ime/cassotis-settings`.
 
-For a compatible x86_64 host, verify and install the portable archive with:
+Alternatively, verify and install the portable binary archive matching the
+system architecture:
 
 ```bash
-grep ' cassotis-ime-linux-0.1.0-x86_64.tar.gz$' SHA256SUMS | sha256sum --check -
-tar -xzf cassotis-ime-linux-0.1.0-x86_64.tar.gz
-cd cassotis-ime-linux-0.1.0-x86_64
+arch="$(uname -m)"  # x86_64 or aarch64
+archive="cassotis-ime-linux-0.1.0-${arch}.tar.gz"
+sha256sum "${archive}"
+tar -xzf "${archive}"
+cd "cassotis-ime-linux-0.1.0-${arch}"
 sudo ./install.sh
 ```
 

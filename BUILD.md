@@ -109,10 +109,21 @@ ignored by Git.
 
 ## Release Artifacts
 
-Build the supported Debian and portable dual-framework artifacts from final
-dictionary databases:
+Build the supported Debian package and portable dual-framework binary archive
+from final dictionary databases:
 
 
+
+Artifact names follow each packaging ecosystem's architecture convention:
+
+| Native host | Debian package | Portable binary archive |
+| --- | --- | --- |
+| x86_64 | `cassotis-ime_<version>_amd64.deb` | `cassotis-ime-linux-<version>-x86_64.tar.gz` |
+| aarch64 | `cassotis-ime_<version>_arm64.deb` | `cassotis-ime-linux-<version>-aarch64.tar.gz` |
+
+The `.tar.gz` files contain prebuilt, dynamically linked binaries for the
+named architecture. They are not source archives or distribution-independent
+packages.
 
 End-user settings and persistent data behavior are documented in
 [CONFIGURATION.md](CONFIGURATION.md).

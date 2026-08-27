@@ -6,13 +6,21 @@
 | --- | --- | --- | --- |
 | Ubuntu 26.04 x86_64, GNOME, Wayland | Native adapter, real daemon input-context smoke | Native addon, official testfrontend plus desktop discovery/reload | Release gate |
 | Ubuntu 26.04 x86_64, GNOME, X11 | Expected from the same framework APIs | Expected from the same framework APIs | Not yet release-gated |
-| Linux aarch64 | Source target available | Source target available | Build target; binary release pending hardware validation |
+| Ubuntu 26.04.1 aarch64 | Native adapter built and packaged | Native addon built and packaged | Native build, core/regression tests, artifact validation, package installation, and installed-engine self-test passed; desktop matrix pending |
 | Other distributions | Source build | Source build | Community-tested; no repackaged Debian binaries |
 
-The release-gated host uses Linux 7.0.0, Free Pascal 3.2.2, IBus
-1.5.34-rc2, and Fcitx 5.1.19. The automated matrix was last completed on
-2026-08-25. Package/portable validation uses the same native binaries and
+The x86_64 release-gated host uses Linux 7.0.0, Free Pascal 3.2.2, IBus
+1.5.34-rc2, and Fcitx 5.1.19. Its automated desktop matrix was last completed
+on 2026-08-25. Native ARM64 package validation was completed on 2026-08-27
+using Ubuntu 26.04.1, Linux 7.0.0-30, Free Pascal 3.2.2, IBus 1.5.34-rc2, and
+Fcitx 5.1.19. Package/portable validation uses the same native binaries and
 schema-22 simplified/traditional dictionaries.
+
+The ARM64 run covered the core test suite, simplified/traditional dictionary
+regressions, portable/Debian payload parity and integrity, actual package
+installation, and installed-engine self-test. It did not run the complete
+desktop framework matrix or the manual GUI checklist, so ARM64 is not yet a
+full release-gated desktop target.
 
 Both framework adapters are deliberately thin. Parsing, dictionaries,
 ranking, completion, settings state, and user learning live in the same local
