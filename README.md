@@ -44,7 +44,7 @@ connection.
 
 ## Supported Release
 
-The v0.1.0 release provides `.deb` packages and portable binary archives for
+The v0.1.1 release provides `.deb` packages and portable binary archives for
 both amd64 and arm64. The full release gate has been completed on Ubuntu 26.04
 LTS, GNOME, Wayland, and x86_64. The ARM64 artifacts were built natively on
 Ubuntu 26.04.1 and passed the core test suite, simplified/traditional
@@ -73,7 +73,7 @@ metadata, and install it with APT:
 
 ```bash
 arch="$(dpkg --print-architecture)"  # amd64 or arm64
-package="cassotis-ime_0.1.0_${arch}.deb"
+package="cassotis-ime_0.1.1_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -99,10 +99,10 @@ system architecture:
 
 ```bash
 arch="$(uname -m)"  # x86_64 or aarch64
-archive="cassotis-ime-linux-0.1.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-0.1.1-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-0.1.0-${arch}"
+cd "cassotis-ime-linux-0.1.1-${arch}"
 sudo ./install.sh
 ```
 

@@ -885,8 +885,9 @@ void CassotisFcitxEngine::keyEvent(const fcitx::InputMethodEntry &entry,
                                     keyEvent.rawKey().code(), true, false, "");
         if (handled) {
             refreshState(inputContext);
-            keyEvent.filterAndAccept();
         }
+        // Shift key-down is passed through, so its release must also reach the
+        // application even when Cassotis handles the mode toggle internally.
         return;
     }
     if (!stateValid_) {
