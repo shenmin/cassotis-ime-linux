@@ -37,27 +37,32 @@
 
 ## 已验证发行环境
 
-v0.1.0 二进制版本已在 Ubuntu 26.04 LTS、GNOME、Wayland、x86_64 环境
-完成验收。安装包同时包含 IBus 与 Fcitx 5 适配层，安装后选择其中一个框架
-启用即可。发布的 `.deb` 可能也能用于依赖兼容的 Debian 系 amd64 系统，
-但目前只有 Ubuntu 26.04 是经过完整发行验收的二进制目标。
+v0.1.0 同时提供 amd64 与 arm64 的 `.deb` 安装包和便携二进制包。完整发行
+验收目前在 Ubuntu 26.04 LTS、GNOME、Wayland、x86_64 环境完成。ARM64
+产物已在 Ubuntu 26.04.1 ARM64 主机上原生构建，并通过核心测试、简繁词库
+回归、产物一致性与完整性校验、软件包实际安装及已安装引擎自检；ARM64 上的
+完整 IBus/Fcitx 桌面矩阵和人工 GUI 验收仍待完成。
 
-x86_64 便携包包含相同的动态链接二进制文件，仍然要求系统提供兼容的运行库，
-并不是与发行版无关的通用安装包。构建脚本已识别 Linux aarch64 目标，但在
-原生硬件完成同等验收前不发布 aarch64 二进制包。其他发行版应在本机从源码
-构建。
+两种架构的安装包均包含 IBus 与 Fcitx 5 适配层，安装后选择其中一个框架
+启用即可。
+
+两种架构的便携包均包含与对应 `.deb` 相同的动态链接二进制文件，仍然要求
+系统提供兼容的运行库，并不是与发行版无关的通用安装包。依赖兼容的 Debian
+系系统可安装与自身架构相符的软件包；其他发行版建议在本机从源码构建。
 
 具体测试范围和平台状态见 [COMPATIBILITY.md](COMPATIBILITY.md)。
 
 ## 安装
 
-在已验证的 Ubuntu 环境中，从
-[GitHub Releases](https://github.com/shenmin/cassotis-ime-linux/releases)
-下载 `.deb` 与 `SHA256SUMS`，校验后用 APT 安装：
+从 [GitHub Releases](https://github.com/shenmin/cassotis-ime-linux/releases)
+下载与系统架构相符的 `.deb`，将本地计算的 SHA-256 与 Release 资产信息中
+显示的摘要核对一致后，再用 APT 安装：
 
 ```bash
-grep ' cassotis-ime_0.1.0_amd64.deb$' SHA256SUMS | sha256sum --check -
-sudo apt install ./cassotis-ime_0.1.0_amd64.deb
+arch="$(dpkg --print-architecture)"  # 输出 amd64 或 arm64
+package="cassotis-ime_0.1.0_${arch}.deb"
+sha256sum "${package}"
+sudo apt install "./${package}"
 ```
 
 安装器会刷新当前活动的 IBus 和 Fcitx 5 桌面会话。在使用 IBus 的 GNOME
@@ -74,12 +79,14 @@ sudo apt install ./cassotis-ime_0.1.0_amd64.deb
 `fcitx5-configtool` 中 Cassotis 的配置操作打开。安装后的备用命令是
 `/usr/libexec/cassotis-ime/cassotis-settings`。
 
-在兼容的 x86_64 系统中，可以校验并安装便携包：
+也可以校验并安装与系统架构相符的便携二进制包：
 
 ```bash
-grep ' cassotis-ime-linux-0.1.0-x86_64.tar.gz$' SHA256SUMS | sha256sum --check -
-tar -xzf cassotis-ime-linux-0.1.0-x86_64.tar.gz
-cd cassotis-ime-linux-0.1.0-x86_64
+arch="$(uname -m)"  # 输出 x86_64 或 aarch64
+archive="cassotis-ime-linux-0.1.0-${arch}.tar.gz"
+sha256sum "${archive}"
+tar -xzf "${archive}"
+cd "cassotis-ime-linux-0.1.0-${arch}"
 sudo ./install.sh
 ```
 

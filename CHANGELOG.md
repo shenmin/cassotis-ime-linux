@@ -11,7 +11,8 @@ behavior/data baseline.
 - Added native IBus and Fcitx 5 adapters backed by the same engine, settings,
   dictionaries, and learned data.
 - Added a GTK 3 settings application for supported cross-platform options.
-- Added deterministic Debian and portable dual-framework release artifacts.
+- Added deterministic amd64 and arm64 Debian packages and portable binary
+  archives, each containing both framework adapters.
 - Made package installation/removal refresh desktop component caches while
   retaining user data and recommending IBus or Fcitx 5 as alternatives.
 - Added source/data parity checks, frozen simplified/traditional candidate
@@ -22,6 +23,8 @@ behavior/data baseline.
 - Hardened the shared adapter transport budget so valid bounded long-sentence
   queries are not mistaken for an unresponsive engine under load.
 
-The supported binary target is Ubuntu 26.04 x86_64 on GNOME Wayland. Other
-Linux environments may build from source; their status is tracked in
-[COMPATIBILITY.md](COMPATIBILITY.md).
+The full release-gated desktop target is Ubuntu 26.04 x86_64 on GNOME Wayland.
+ARM64 has passed native build, core/regression, artifact, package-installation,
+and installed-engine validation; its complete desktop matrix and manual GUI
+checks remain pending. Other Linux environments may build from source; their
+status is tracked in [COMPATIBILITY.md](COMPATIBILITY.md).
