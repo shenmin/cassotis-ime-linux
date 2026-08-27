@@ -37,7 +37,7 @@
 
 ## 已验证发行环境
 
-v0.1.0 同时提供 amd64 与 arm64 的 `.deb` 安装包和便携二进制包。完整发行
+v0.1.1 同时提供 amd64 与 arm64 的 `.deb` 安装包和便携二进制包。完整发行
 验收目前在 Ubuntu 26.04 LTS、GNOME、Wayland、x86_64 环境完成。ARM64
 产物已在 Ubuntu 26.04.1 ARM64 主机上原生构建，并通过核心测试、简繁词库
 回归、产物一致性与完整性校验、软件包实际安装及已安装引擎自检；ARM64 上的
@@ -60,7 +60,7 @@ v0.1.0 同时提供 amd64 与 arm64 的 `.deb` 安装包和便携二进制包。
 
 ```bash
 arch="$(dpkg --print-architecture)"  # 输出 amd64 或 arm64
-package="cassotis-ime_0.1.0_${arch}.deb"
+package="cassotis-ime_0.1.1_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -83,10 +83,10 @@ sudo apt install "./${package}"
 
 ```bash
 arch="$(uname -m)"  # 输出 x86_64 或 aarch64
-archive="cassotis-ime-linux-0.1.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-0.1.1-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-0.1.0-${arch}"
+cd "cassotis-ime-linux-0.1.1-${arch}"
 sudo ./install.sh
 ```
 

@@ -155,8 +155,9 @@ private:
         const fcitx::Key shift("Shift_L");
         return require(!send(uuid, shift),
                        "bare Shift toggled on key down") &&
-               require(sendRelease(uuid, shift),
-                       "bare Shift release did not toggle input mode");
+               require(!sendRelease(uuid, shift),
+                       "bare Shift release was consumed and would leave the "
+                       "client modifier state latched");
     }
 
     bool type(const fcitx::ICUUID &uuid, const std::string &text) {

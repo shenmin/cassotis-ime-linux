@@ -217,10 +217,12 @@ static gboolean tap_bare_shift(IBusInputContext *context)
     (void)ibus_input_context_process_key_event(
         context, IBUS_KEY_Shift_L, 0, IBUS_SHIFT_MASK);
     wait_one_step();
-    if (!ibus_input_context_process_key_event(
+    if (ibus_input_context_process_key_event(
             context, IBUS_KEY_Shift_L, 0,
             IBUS_SHIFT_MASK | IBUS_RELEASE_MASK)) {
-        g_printerr("Bare Shift release did not toggle input mode.\n");
+        g_printerr(
+            "Bare Shift release was consumed and would leave the client "
+            "modifier state latched.\n");
         return FALSE;
     }
     wait_one_step();

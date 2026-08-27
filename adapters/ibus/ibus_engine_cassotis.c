@@ -579,7 +579,10 @@ static gboolean cassotis_process_key_event(IBusEngine *engine,
                                  FALSE, "");
         if (handled)
             refresh_engine_state(self);
-        return handled;
+        /* The matching Shift press is passed through to the application.
+           Passing the release through as well prevents a latched Shift state
+           after Cassotis handles the bare-Shift mode toggle internally. */
+        return FALSE;
     }
     if ((!self->state_valid && !refresh_engine_state(self)))
         return FALSE;

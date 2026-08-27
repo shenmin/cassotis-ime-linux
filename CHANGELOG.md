@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1 - 2026-08-27
+
+- Fixed bare Shift mode switching in both IBus and Fcitx 5 so applications
+  receive a balanced key press/release pair. This prevents the next character
+  from being interpreted as Shift-modified, such as `.` becoming `>` after
+  switching to English input mode.
+- Added adapter-level regression coverage for the modifier-release contract on
+  both supported input-method frameworks.
+
 ## 0.1.0 - 2026-08-25
 
 First Linux release based on the Cassotis IME and Cassotis Lexicon v1.17.0
