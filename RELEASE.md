@@ -82,9 +82,9 @@ desktop, session type, architecture, and result in the release notes.
 ## 5. Publish
 
 Before tagging, confirm the worktree contains the intended executable bits for
-all `.sh` entry points, the version is `0.1.0` in both `VERSION` and
-`src/common/nc_version.pas`, and the committed tree is the tree that produced
-the validation record.
+all `.sh` entry points, the values in `VERSION` and
+`src/common/nc_version.pas` match, and the committed tree is the tree that
+produced the validation record.
 
 Upload only these files from `release-validation/artifacts/`:
 

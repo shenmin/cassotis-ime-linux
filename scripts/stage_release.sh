@@ -123,6 +123,9 @@ done
 release_version="$(tr -d '\r\n' < "$cassotis_root/VERSION")"
 [[ "$release_version" =~ ^[0-9]+([.][0-9]+){2}([.-][0-9A-Za-z.-]+)?$ ]] ||
     cassotis_die "invalid VERSION: $release_version"
+engine_version="$("$engine" --version)"
+[[ "$engine_version" == "$release_version" ]] ||
+    cassotis_die "engine version $engine_version does not match VERSION $release_version"
 fcitx_version="$(pkg-config --modversion Fcitx5Core)"
 
 if [[ -e "$resolved_destdir" ]]; then
