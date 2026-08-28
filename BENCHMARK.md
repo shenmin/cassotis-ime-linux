@@ -7,6 +7,16 @@ integration tests, bounded transport/memory stress tests, frozen candidate
 parity, and corpus-scale quality and latency benchmarks. No single metric is
 presented as proof of equivalence.
 
+## Shared Corpus Source
+
+The corpus-scale Linux quality gate uses the same fixed long-sentence and
+short-word benchmark cases documented by
+[Cassotis IME for Windows](https://github.com/shenmin/cassotis-ime/blob/master/BENCHMARK.md).
+Both benchmarks are derived from the developer's own novel,
+[**Elegance in Timelessness**](https://www.qidian.com/book/1037259117/)
+(Chinese title: **永恒的舞动**). Benchmark cases are kept separate from the
+corresponding model-training data.
+
 ## Baseline
 
 The current Linux engine is reviewed against:
@@ -32,7 +42,7 @@ The small `tests/cases/candidate_quality.tsv` and
 traditional candidate behavior through the actual SQLite provider.
 The full quality gate also hashes every non-Top1 case after excluding only the
 host-dependent latency column. This freezes the exact per-case ranks and Top1
-results without publishing the private benchmark corpus.
+results for comparison across releases and architectures.
 
 ## Full Linux Benchmark
 
@@ -71,17 +81,16 @@ result while retaining realistic production latency behavior.
 
 The runner reports Top1/Top2/Top5/Top9 counts, mean/P50/P95/maximum query
 latency, and Linux process RSS/high-water marks. Memory events contain only
-the track and case identifier, never the private query text. It writes every
-non-Top1 result to `long-failures.tsv` or `short-failures.tsv`; those files are
-diagnostics, not ignored failures and are not public release artifacts.
+the track and case identifier. It writes every non-Top1 result to
+`long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
+not ignored failures, and are not included in binary release assets.
 
 ## Frozen v1.18.0 Port Results
 
-The complete release run uses externally supplied frozen case files. They are
-not redistributed by this repository because the source sentences are not
-part of the public program distribution. The release record binds the inputs
-by size and SHA-256, so a result cannot silently be reused with another case
-set:
+The complete release run uses separately supplied frozen corpus files. The
+source novel text is not part of the software distribution, so these files are
+not redistributed by this repository. The release record binds the inputs by
+size and SHA-256, so a result cannot silently be reused with another case set:
 
 | Input | Cases | Bytes | SHA-256 |
 | --- | ---: | ---: | --- |
