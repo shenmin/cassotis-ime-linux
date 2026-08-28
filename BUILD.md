@@ -1,8 +1,7 @@
 # Native Linux Build
 
 The supported build entry points in this document run inside a native Linux
-environment. The PowerShell scripts are temporary Windows-hosted FPC checks and
-are not substitutes for Linux release builds.
+environment.
 
 ## Core Requirements
 
