@@ -157,7 +157,8 @@ type
         okcs_user_exact,
         okcs_base_exact,
         okcs_transition,
-        okcs_long_transition
+        okcs_long_transition,
+        okcs_long_neural
     );
 
     TncOneKeyCompletion = record
@@ -184,6 +185,7 @@ type
     TncOneKeyCompletionList = array of TncOneKeyCompletion;
 
     TncLongOneKeyCompletion = record
+        anchor_text: string;
         anchor_path: string;
         suffix_pinyin: string;
         suffix_text: string;
@@ -302,6 +304,7 @@ type
 
     TncEngineResult = record
         handled: Boolean;
+        async_pending: Boolean;
         commit_text: string;
         preedit_text: string;
         query_text: string;
@@ -402,6 +405,7 @@ end;
 procedure nc_initialize_engine_result(out value: TncEngineResult);
 begin
     value.handled := False;
+    value.async_pending := False;
     value.commit_text := '';
     value.preedit_text := '';
     value.query_text := '';

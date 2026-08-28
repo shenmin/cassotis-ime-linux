@@ -6,6 +6,7 @@ program cassotis_engine;
 
 uses
 {$IFDEF UNIX}
+    cthreads,
     cwstring,
 {$ENDIF}
     SysUtils,

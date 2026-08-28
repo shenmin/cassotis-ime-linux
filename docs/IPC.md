@@ -62,9 +62,12 @@ Message ordinals are wire ABI and must not be reordered.
 | 13 | `set_state` | Request/empty response |
 | 14 | `shutdown` | Request/acknowledgement |
 | 15 | `error` | Structured response |
+| 16 | `clear_user_dictionary` | Request/empty response |
+| 17 | `poll_result` | Request; asynchronous `engine_result` response |
 
-`create_context`, `destroy_context`, and `reset_context` have empty payloads.
-Structured payloads start with `u16 schema_version` and `u16 reserved`.
+`create_context`, `destroy_context`, `reset_context`,
+`clear_user_dictionary`, and `poll_result` have empty payloads. Structured
+payloads start with `u16 schema_version` and `u16 reserved`.
 
 ## Payload Primitives
 
@@ -98,14 +101,25 @@ cursor convention at this boundary.
 
 ## Engine Result
 
-The schema-v1 result contains handled/selection/page/error fields followed by
-commit text, preedit text, normalized query, one-key completion, error text,
-and at most 256 candidates. Each candidate contains source, display kind,
-dictionary-weight/deletable flags, final score, dictionary weight, fuzzy cost
-and rule mask, text, and annotation.
+The schema-v1 result contains handled/selection/page/error fields and a result
+flags byte followed by commit text, preedit text, normalized query, one-key
+completion, error text, and at most 256 candidates. Result flag bit 0 is
+`async_pending`: the ordinary key result is complete and immediately
+renderable, while a bounded background completion request may still produce a
+new completion row. All other result flag bits are reserved and rejected.
+Each candidate contains source, display kind, dictionary-weight/deletable
+flags, final score, dictionary weight, fuzzy cost and rule mask, text, and
+annotation.
 
 Adapters render only this result. A candidate is shown as deletable only when
 the engine marks a persistent user candidate deletable.
+
+When `async_pending` is set, an adapter polls with the same context and current
+generation id. A `poll_result` response with `handled = false` means no result
+is ready yet. A response with `handled = true` replaces the rendered state and
+ends polling, whether the model accepted a completion or abstained. Adapters
+use a bounded polling interval and discard the request after focus loss,
+context reset, generation change, timeout, or transport failure.
 
 ## Engine State Schema 4
 

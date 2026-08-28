@@ -68,6 +68,8 @@ const
     c_state_known_flags = c_state_flag_full_width or
         c_state_flag_punctuation_full_width or
         c_state_flag_fuzzy_pinyin_enabled or c_state_flag_debug_mode;
+    c_engine_result_flag_async_pending = $01;
+    c_engine_result_known_flags = c_engine_result_flag_async_pending;
     c_shortcut_flag_shift = $01;
     c_shortcut_flag_control = $02;
     c_shortcut_flag_alt = $04;
@@ -664,6 +666,7 @@ function nc_encode_engine_result_payload(const engine_result: TncEngineResult):
 var
     writer: TncIpcPayloadWriter;
     candidate: TncCandidate;
+    result_flags: Byte;
 begin
     if Length(engine_result.candidates) > c_ipc_payload_max_candidates then
         raise EncIpcPayloadError.Create('Engine result has too many candidates');
@@ -672,7 +675,10 @@ begin
         WritePayloadHeader(writer);
         writer.WriteBoolean(engine_result.handled);
         writer.WriteUInt16(0);
-        writer.WriteByte(0);
+        result_flags := 0;
+        if engine_result.async_pending then
+            result_flags := result_flags or c_engine_result_flag_async_pending;
+        writer.WriteByte(result_flags);
         writer.WriteInt32(engine_result.selected_index);
         writer.WriteInt32(engine_result.page_index);
         writer.WriteInt32(engine_result.page_count);
@@ -708,7 +714,7 @@ function nc_try_decode_engine_result_payload(const payload: TBytes;
 var
     reader: TncIpcPayloadReader;
     reserved16: Word;
-    reserved8: Byte;
+    result_flags: Byte;
     candidate_count: Cardinal;
     candidate_index: Integer;
     source: Byte;
@@ -722,7 +728,7 @@ begin
     try
         Result := ReadPayloadHeader(reader) and
             reader.ReadBoolean(engine_result.handled) and
-            reader.ReadUInt16(reserved16) and reader.ReadByte(reserved8) and
+            reader.ReadUInt16(reserved16) and reader.ReadByte(result_flags) and
             reader.ReadInt32(engine_result.selected_index) and
             reader.ReadInt32(engine_result.page_index) and
             reader.ReadInt32(engine_result.page_count) and
@@ -733,11 +739,15 @@ begin
             reader.ReadString(engine_result.completion_text) and
             reader.ReadString(engine_result.error_text) and
             reader.ReadUInt32(candidate_count);
-        if Result and ((reserved16 <> 0) or (reserved8 <> 0)) then
+        if Result and ((reserved16 <> 0) or
+            ((result_flags and not c_engine_result_known_flags) <> 0)) then
         begin
-            reader.SetError('Engine result reserved fields must be zero');
+            reader.SetError('Engine result contains invalid flags');
             Result := False;
         end;
+        if Result then
+            engine_result.async_pending :=
+                (result_flags and c_engine_result_flag_async_pending) <> 0;
         if Result and (candidate_count > c_ipc_payload_max_candidates) then
         begin
             reader.SetError('Engine result has too many candidates');

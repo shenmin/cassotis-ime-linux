@@ -37,8 +37,12 @@ rm -f -- \
 
 for directory in \
     "$destdir/usr/share/cassotis-ime" \
+    "$destdir/usr/share/doc/cassotis-ime/third-party/onnxruntime" \
+    "$destdir/usr/share/doc/cassotis-ime/third-party" \
     "$destdir/usr/share/doc/cassotis-ime/docs" \
     "$destdir/usr/share/doc/cassotis-ime" \
+    "$destdir/usr/libexec/cassotis-ime/local_completion" \
+    "$destdir/usr/libexec/cassotis-ime/pinyin_transformer" \
     "$destdir/usr/libexec/cassotis-ime"; do
     rmdir --ignore-fail-on-non-empty "$directory" 2>/dev/null || true
 done

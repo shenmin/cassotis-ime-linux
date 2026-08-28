@@ -35,7 +35,8 @@ type
         imt_set_state,
         imt_shutdown,
         imt_error,
-        imt_clear_user_dictionary
+        imt_clear_user_dictionary,
+        imt_poll_result
     );
 
     TncIpcEnvelope = record

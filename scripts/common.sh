@@ -65,6 +65,67 @@ cassotis_require_executable() {
     [[ -x "$path" ]] || cassotis_die "executable not found: $path"
 }
 
+cassotis_process_uses_executable() {
+    local process_id="$1"
+    local target_path="$2"
+    local executable_path
+
+    executable_path="$(readlink "/proc/$process_id/exe" 2>/dev/null || true)"
+    [[ "$executable_path" == "$target_path" ||
+       "$executable_path" == "$target_path (deleted)" ]]
+}
+
+cassotis_stop_executable_by_path() {
+    local target_path="$1"
+    local executable_link
+    local process_id
+    local attempt
+    local any_running
+    local -a process_ids=()
+
+    [[ "$target_path" == /* ]] ||
+        cassotis_die "executable stop path must be absolute: $target_path"
+    for executable_link in /proc/[0-9]*/exe; do
+        process_id="${executable_link#/proc/}"
+        process_id="${process_id%/exe}"
+        if cassotis_process_uses_executable "$process_id" "$target_path"; then
+            process_ids+=("$process_id")
+        fi
+    done
+    [[ ${#process_ids[@]} -gt 0 ]] || return 0
+
+    kill -TERM "${process_ids[@]}" 2>/dev/null || true
+    for ((attempt = 0; attempt < 40; attempt += 1)); do
+        any_running=0
+        for process_id in "${process_ids[@]}"; do
+            if cassotis_process_uses_executable "$process_id" "$target_path"; then
+                any_running=1
+                break
+            fi
+        done
+        [[ $any_running -eq 0 ]] && return 0
+        sleep 0.05
+    done
+
+    for process_id in "${process_ids[@]}"; do
+        if cassotis_process_uses_executable "$process_id" "$target_path"; then
+            kill -KILL "$process_id" 2>/dev/null || true
+        fi
+    done
+    for ((attempt = 0; attempt < 20; attempt += 1)); do
+        any_running=0
+        for process_id in "${process_ids[@]}"; do
+            if cassotis_process_uses_executable "$process_id" "$target_path"; then
+                any_running=1
+                break
+            fi
+        done
+        [[ $any_running -eq 0 ]] && return 0
+        sleep 0.05
+    done
+    return 1
+}
+
 cassotis_ibus_system_component_dir() {
     if command -v pkg-config >/dev/null 2>&1 &&
        pkg-config --exists ibus-1.0 2>/dev/null; then
@@ -354,4 +415,81 @@ cassotis_atomic_install() {
         rm -f -- "$temporary_path"
         return 1
     fi
+}
+
+cassotis_stage_neural_runtime() {
+    local source_dir="$1"
+    local destination_dir="$2"
+    local file_name
+
+    install -d -m 0755 "$destination_dir/pinyin_transformer" \
+        "$destination_dir/local_completion"
+    for file_name in libcassotis_pinyin_transformer_ort.so \
+                     libonnxruntime.so.1.20.1 \
+                     libonnxruntime_providers_shared.so; do
+        [[ -r "$source_dir/$file_name" ]] ||
+            cassotis_die "neural runtime artifact not found: $source_dir/$file_name"
+        install -m 0755 "$source_dir/$file_name" \
+            "$destination_dir/$file_name"
+    done
+    ln -sfn libonnxruntime.so.1.20.1 \
+        "$destination_dir/libonnxruntime.so.1"
+    ln -sfn libonnxruntime.so.1 "$destination_dir/libonnxruntime.so"
+    for file_name in pinyin_difference_reranker_int8.onnx vocab.json; do
+        install -m 0644 "$source_dir/pinyin_transformer/$file_name" \
+            "$destination_dir/pinyin_transformer/$file_name"
+    done
+    for file_name in local_completion_path_ranker_int8.onnx \
+                     local_completion_index.bin model_manifest.json; do
+        install -m 0644 "$source_dir/local_completion/$file_name" \
+            "$destination_dir/local_completion/$file_name"
+    done
+}
+
+cassotis_atomic_install_neural_runtime() {
+    local source_dir="$1"
+    local destination_dir="$2"
+    local file_name
+
+    install -d -m 0700 "$destination_dir" \
+        "$destination_dir/pinyin_transformer" \
+        "$destination_dir/local_completion"
+    for file_name in libcassotis_pinyin_transformer_ort.so \
+                     libonnxruntime.so.1.20.1 \
+                     libonnxruntime_providers_shared.so; do
+        cassotis_atomic_install "$source_dir/$file_name" \
+            "$destination_dir/$file_name" 0755
+    done
+    ln -sfn libonnxruntime.so.1.20.1 \
+        "$destination_dir/libonnxruntime.so.1"
+    ln -sfn libonnxruntime.so.1 "$destination_dir/libonnxruntime.so"
+    for file_name in pinyin_difference_reranker_int8.onnx vocab.json; do
+        cassotis_atomic_install \
+            "$source_dir/pinyin_transformer/$file_name" \
+            "$destination_dir/pinyin_transformer/$file_name" 0644
+    done
+    for file_name in local_completion_path_ranker_int8.onnx \
+                     local_completion_index.bin model_manifest.json; do
+        cassotis_atomic_install "$source_dir/local_completion/$file_name" \
+            "$destination_dir/local_completion/$file_name" 0644
+    done
+}
+
+cassotis_remove_neural_runtime() {
+    local destination_dir="$1"
+
+    rm -f -- \
+        "$destination_dir/cassotis-neural-runtime-smoke" \
+        "$destination_dir/libcassotis_pinyin_transformer_ort.so" \
+        "$destination_dir/libonnxruntime.so" \
+        "$destination_dir/libonnxruntime.so.1" \
+        "$destination_dir/libonnxruntime.so.1.20.1" \
+        "$destination_dir/libonnxruntime_providers_shared.so" \
+        "$destination_dir/pinyin_transformer/pinyin_difference_reranker_int8.onnx" \
+        "$destination_dir/pinyin_transformer/vocab.json" \
+        "$destination_dir/local_completion/local_completion_path_ranker_int8.onnx" \
+        "$destination_dir/local_completion/local_completion_index.bin" \
+        "$destination_dir/local_completion/model_manifest.json"
+    rmdir -- "$destination_dir/pinyin_transformer" \
+        "$destination_dir/local_completion" 2>/dev/null || true
 }

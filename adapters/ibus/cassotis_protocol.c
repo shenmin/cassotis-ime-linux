@@ -22,6 +22,9 @@
      CASSOTIS_STATE_FLAG_PUNCTUATION_FULL_WIDTH |                      \
      CASSOTIS_STATE_FLAG_FUZZY_PINYIN_ENABLED |                        \
      CASSOTIS_STATE_FLAG_DEBUG_MODE)
+#define CASSOTIS_ENGINE_RESULT_FLAG_ASYNC_PENDING 0x01U
+#define CASSOTIS_ENGINE_RESULT_KNOWN_FLAGS \
+    CASSOTIS_ENGINE_RESULT_FLAG_ASYNC_PENDING
 #define CASSOTIS_SHORTCUT_KNOWN_MODIFIERS                               \
     (CASSOTIS_MODIFIER_SHIFT | CASSOTIS_MODIFIER_CONTROL |             \
      CASSOTIS_MODIFIER_ALT)
@@ -458,7 +461,7 @@ gboolean cassotis_protocol_parse_header(const guint8 *data,
     header->generation_id = read_u64_at(data, 32);
     header->payload_length = read_u32_at(data, 40);
     if (header->message_type == CASSOTIS_MESSAGE_INVALID ||
-        header->message_type > CASSOTIS_MESSAGE_CLEAR_USER_DICTIONARY ||
+        header->message_type > CASSOTIS_MESSAGE_POLL_RESULT ||
         (header->flags & ~(CASSOTIS_IPC_FLAG_RESPONSE |
                            CASSOTIS_IPC_FLAG_ERROR)) != 0 ||
         header->payload_length > CASSOTIS_IPC_MAX_PAYLOAD) {
@@ -496,7 +499,7 @@ gboolean cassotis_protocol_decode_engine_result(
 {
     PayloadReader reader = {payload, payload_length, 0, error};
     guint8 handled;
-    guint8 reserved8;
+    guint8 result_flags;
     guint16 reserved16;
     guint32 candidate_count;
     guint32 index;
@@ -511,7 +514,7 @@ gboolean cassotis_protocol_decode_engine_result(
     result->selected_index = -1;
     if (!reader_header(&reader) || !reader_u8(&reader, &handled) ||
         !reader_u16(&reader, &reserved16) ||
-        !reader_u8(&reader, &reserved8) ||
+        !reader_u8(&reader, &result_flags) ||
         !reader_i32(&reader, &result->selected_index) ||
         !reader_i32(&reader, &result->page_index) ||
         !reader_i32(&reader, &result->page_count) ||
@@ -523,12 +526,15 @@ gboolean cassotis_protocol_decode_engine_result(
         !reader_string(&reader, &result->error_text) ||
         !reader_u32(&reader, &candidate_count))
         goto fail;
-    if (handled > 1 || reserved16 != 0 || reserved8 != 0 ||
+    if (handled > 1 || reserved16 != 0 ||
+        (result_flags & ~CASSOTIS_ENGINE_RESULT_KNOWN_FLAGS) != 0 ||
         candidate_count > CASSOTIS_MAX_CANDIDATES) {
         set_reader_error(&reader, "invalid engine result fields");
         goto fail;
     }
     result->handled = handled != 0;
+    result->async_pending =
+        (result_flags & CASSOTIS_ENGINE_RESULT_FLAG_ASYNC_PENDING) != 0;
     result->candidate_count = candidate_count;
     result->candidates = g_new0(CassotisCandidate, candidate_count);
     for (index = 0; index < candidate_count; ++index) {

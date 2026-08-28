@@ -28,8 +28,16 @@ type
         function ClearUserDictionary: Boolean; virtual; abstract;
         function ProcessKey(const context_id: QWord; const generation_id: QWord;
             const key_event: TncKeyEvent): TncEngineResult; virtual; abstract;
+        function PollResult(const context_id: QWord;
+            const generation_id: QWord): TncEngineResult; virtual;
     end;
 
 implementation
+
+function TncEngineCore.PollResult(const context_id: QWord;
+    const generation_id: QWord): TncEngineResult;
+begin
+    nc_initialize_engine_result(Result);
+end;
 
 end.

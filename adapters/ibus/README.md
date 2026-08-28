@@ -6,7 +6,7 @@ Pascal engine, and renders preedit and lookup-table results through native IBus
 APIs. It does not contain dictionary, pinyin, learning, or ranking logic.
 
 The adapter uses the shared production candidate pipeline, including the full
-v1.17.0 exact, alias, prefix, jianpin, segmented-path, short-word, long-sentence,
+v1.18.0 exact, alias, prefix, jianpin, segmented-path, short-word, long-sentence,
 context-ranking, completion, and user-signal stages. It supports selection by
 space, number, mouse, and cursor movement; paging,
 backspace, Escape, and raw-pinyin commit with Enter; persistent cross-context
@@ -19,6 +19,13 @@ least two complete syllables and is accepted with its configured `Tab` or
 backtick key; an unmatched completion key remains an application key. This
 mapping keeps completion below ordinary candidates because GNOME Shell fixes
 IBus auxiliary text above the lookup table.
+
+Long-prefix static misses may enqueue the v1.18 constrained local-completion
+worker. The adapter polls the versioned engine result without blocking key
+delivery, applies only the matching context generation, and stops polling on
+focus loss, reset, disable, replacement by a newer request, or a bounded
+timeout. Neural inference and all acceptance rules remain in the shared engine
+process rather than the adapter.
 
 IBus properties expose input mode, punctuation, character width, a pinyin
 scheme submenu, and a controlled fuzzy-pinyin submenu. The fuzzy menu keeps a
@@ -55,10 +62,16 @@ Build on Linux with `./build_all.sh`, then install for the current user with:
 ```
 
 The rootless installer explicitly adds its private component directory to the
-IBus daemon's static search path, while retaining the system component path, so
-GNOME can enumerate Cassotis in its input-source switcher. IBus starts the
-adapter on demand; the adapter then starts the Pascal engine through the
-versioned socket boundary. Use `Super+Space` to select
+IBus daemon's static search path, while retaining the system component path,
+and starts the GNOME user service with `--cache=refresh`. This is required
+because IBus `cache=auto` can retain a registry that omits a newly installed
+per-user component. GNOME can therefore enumerate Cassotis in its input-source
+switcher immediately and after later daemon restarts. Do not layer the
+rootless installation over a system-wide Cassotis Debian package: IBus gives
+the system component with the same engine identifier precedence, so the
+installer rejects that configuration instead of silently launching stale
+binaries. IBus starts the adapter on demand; the adapter then starts the Pascal
+engine through the versioned socket boundary. Use `Super+Space` to select
 `Cassotis 言泉拼音输入法` after
 installation.
 

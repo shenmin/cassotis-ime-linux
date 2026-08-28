@@ -8,7 +8,7 @@ interface
 
 const
     c_product_name = 'Cassotis IME Linux';
-    c_engine_version = '0.1.1';
+    c_engine_version = '0.2.0';
     c_ipc_protocol_major = 1;
     c_ipc_protocol_minor = 0;
     c_windows_baseline_commit =

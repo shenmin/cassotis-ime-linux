@@ -192,6 +192,16 @@ begin
                 response.message_type := imt_engine_result;
                 response.payload := nc_encode_engine_result_payload(engine_result);
             end;
+        imt_poll_result:
+            begin
+                if not RequireEmptyPayload(request, response) then
+                    Exit;
+                engine_result := FEngine.PollResult(request.context_id,
+                    request.generation_id);
+                response.message_type := imt_engine_result;
+                response.payload := nc_encode_engine_result_payload(
+                    engine_result);
+            end;
         imt_get_state:
             begin
                 if not RequireEmptyPayload(request, response) then

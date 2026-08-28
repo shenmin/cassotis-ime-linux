@@ -133,6 +133,7 @@ if [[ ! -f "$ibus_component" && ! -f "$ibus_adapter" ]]; then
     rm -f -- "$engine_socket" "$installed_engine" "$installed_control" \
         "$installed_settings" "$desktop_file" "$legacy_desktop_file" \
         "$installed_icon"
+    cassotis_remove_neural_runtime "$libexec_dir"
     rmdir -- "$libexec_dir" 2>/dev/null || true
     shared_runtime='removed; no IBus adapter is installed'
 fi

@@ -40,6 +40,8 @@ constexpr glong kSurroundingRadius = 2048;
 constexpr std::size_t kSchemeCount = 7;
 constexpr std::size_t kFuzzyRuleCount = CASSOTIS_FUZZY_RULE_COUNT;
 constexpr std::uint64_t kStatePollIntervalUsec = 500000;
+constexpr std::uint64_t kResultPollIntervalUsec = 25000;
+constexpr unsigned int kResultPollMaxAttempts = 120;
 constexpr guint32 kDefaultFuzzyRules =
     CASSOTIS_FUZZY_Z_ZH | CASSOTIS_FUZZY_C_CH |
     CASSOTIS_FUZZY_S_SH | CASSOTIS_FUZZY_L_N |
@@ -219,6 +221,7 @@ public:
     void refreshSurrounding();
     void clearUI();
     void handleSensitiveContext();
+    void pollAsyncResult();
     int pageIndex() const { return pageIndex_; }
 
 private:
@@ -243,6 +246,8 @@ private:
     std::string surroundingText_;
     gint32 surroundingCursor_ = 0;
     int pageIndex_ = 0;
+    bool resultPollPending_ = false;
+    unsigned int resultPollAttempts_ = 0;
 };
 
 class CassotisCandidateWord final : public fcitx::CandidateWord {
@@ -303,6 +308,7 @@ private:
     CassotisFcitxState *stateFor(fcitx::InputContext *inputContext);
     void initializeActions();
     void initializeStatePolling();
+    void initializeResultPolling();
     void launchSettings();
 
     fcitx::Instance *instance_;
@@ -330,6 +336,7 @@ private:
     std::array<fcitx::SimpleAction, kSchemeCount> schemeActions_;
     std::array<fcitx::SimpleAction, kFuzzyRuleCount> fuzzyRuleActions_;
     std::unique_ptr<fcitx::EventSourceTime> statePollEvent_;
+    std::unique_ptr<fcitx::EventSourceTime> resultPollEvent_;
 };
 
 CassotisFcitxState::CassotisFcitxState(
@@ -355,6 +362,8 @@ void CassotisFcitxState::markContextLost() {
     contextCreated_ = false;
     contextActive_ = false;
     surroundingDirty_ = hasSurrounding_;
+    resultPollPending_ = false;
+    resultPollAttempts_ = 0;
 }
 
 bool CassotisFcitxState::ensureContext() {
@@ -460,6 +469,8 @@ void CassotisFcitxState::clearUI() {
     inputContext_->updateUserInterface(
         fcitx::UserInterfaceComponent::InputPanel, true);
     pageIndex_ = 0;
+    resultPollPending_ = false;
+    resultPollAttempts_ = 0;
 }
 
 void CassotisFcitxState::activate() {
@@ -619,8 +630,45 @@ bool CassotisFcitxState::processKey(CassotisSpecialKey specialKey,
     if (handled) {
         renderResult(&result);
     }
+    resultPollPending_ = result.async_pending;
+    resultPollAttempts_ = 0;
     cassotis_engine_result_clear(&result);
     return handled;
+}
+
+void CassotisFcitxState::pollAsyncResult() {
+    if (!resultPollPending_) {
+        return;
+    }
+    if (!desiredActive_ || !contextCreated_ ||
+        resultPollAttempts_ >= kResultPollMaxAttempts) {
+        resultPollPending_ = false;
+        resultPollAttempts_ = 0;
+        return;
+    }
+    ++resultPollAttempts_;
+    CassotisEngineResult result{};
+    result.selected_index = -1;
+    GError *error = nullptr;
+    if (!cassotis_client_poll_result(engine_->client(), contextId_,
+                                     generationId_, &result, &error)) {
+        resultPollPending_ = false;
+        markContextLost();
+        clearUI();
+        logClientError("poll result failed", error);
+        return;
+    }
+    if (result.error_code != 0) {
+        FCITX_WARN() << "Cassotis async result error " << result.error_code
+                     << ": "
+                     << (result.error_text ? result.error_text : "");
+    }
+    if (result.handled) {
+        renderResult(&result);
+        resultPollPending_ = false;
+        resultPollAttempts_ = 0;
+    }
+    cassotis_engine_result_clear(&result);
 }
 
 void CassotisFcitxState::selectCandidate(std::size_t globalIndex) {
@@ -694,6 +742,7 @@ CassotisFcitxEngine::CassotisFcitxEngine(fcitx::Instance *instance)
                                                       &factory_);
     initializeActions();
     initializeStatePolling();
+    initializeResultPolling();
 }
 
 CassotisFcitxEngine::~CassotisFcitxEngine() = default;
@@ -1169,6 +1218,21 @@ void CassotisFcitxEngine::initializeStatePolling() {
                 refreshState(inputContext);
             }
             event->setNextInterval(kStatePollIntervalUsec);
+            return true;
+        });
+}
+
+void CassotisFcitxEngine::initializeResultPolling() {
+    resultPollEvent_ = instance_->eventLoop().addTimeEvent(
+        CLOCK_MONOTONIC,
+        fcitx::now(CLOCK_MONOTONIC) + kResultPollIntervalUsec, 0,
+        [this](fcitx::EventSourceTime *event, std::uint64_t) {
+            auto *inputContext = instance_->mostRecentInputContext();
+            if (inputContext && inputContext->hasFocus() &&
+                instance_->inputMethod(inputContext) == "cassotis") {
+                stateFor(inputContext)->pollAsyncResult();
+            }
+            event->setNextInterval(kResultPollIntervalUsec);
             return true;
         });
 }
