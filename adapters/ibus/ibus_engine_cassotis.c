@@ -15,6 +15,8 @@
 #define CASSOTIS_DEFAULT_PAGE_SIZE 9U
 #define CASSOTIS_SURROUNDING_RADIUS 2048U
 #define CASSOTIS_STATE_POLL_INTERVAL_MS 500U
+#define CASSOTIS_RESULT_POLL_INTERVAL_MS 25U
+#define CASSOTIS_RESULT_POLL_MAX_ATTEMPTS 120U
 #define CASSOTIS_PROP_INPUT_MODE "InputMode"
 #define CASSOTIS_PROP_PUNCTUATION "Punctuation"
 #define CASSOTIS_PROP_WIDTH "CharacterWidth"
@@ -53,6 +55,8 @@ typedef struct {
     guint input_purpose;
     guint input_hints;
     guint state_poll_id;
+    guint result_poll_id;
+    guint result_poll_attempts;
     guint32 rendered_page_candidate_count;
     gboolean rendered_completion_row;
     CassotisEngineState state;
@@ -66,6 +70,8 @@ typedef struct {
 static CassotisClient global_client;
 static gchar *global_settings_path;
 static guint64 next_context_id = 1;
+
+static void stop_result_polling(CassotisIbusEngine *self);
 
 G_DEFINE_TYPE(CassotisIbusEngine, cassotis_ibus_engine, IBUS_TYPE_ENGINE)
 
@@ -211,6 +217,7 @@ static gboolean update_engine_state(CassotisIbusEngine *self,
 
 static void mark_context_lost(CassotisIbusEngine *self)
 {
+    stop_result_polling(self);
     self->context_created = FALSE;
     self->context_active = FALSE;
     self->surrounding_dirty = self->has_surrounding;
@@ -385,6 +392,60 @@ static void render_result(CassotisIbusEngine *self,
     ibus_engine_update_lookup_table(engine, table, TRUE);
 }
 
+static gboolean poll_async_result(gpointer user_data)
+{
+    CassotisIbusEngine *self = user_data;
+    CassotisEngineResult result;
+    GError *error = NULL;
+
+    if (!self->focused || !self->enabled || !self->context_created ||
+        self->result_poll_attempts >= CASSOTIS_RESULT_POLL_MAX_ATTEMPTS) {
+        self->result_poll_id = 0;
+        return G_SOURCE_REMOVE;
+    }
+    ++self->result_poll_attempts;
+    memset(&result, 0, sizeof(result));
+    result.selected_index = -1;
+    if (!cassotis_client_poll_result(&global_client, self->context_id,
+                                     self->generation_id, &result,
+                                     &error)) {
+        self->result_poll_id = 0;
+        mark_context_lost(self);
+        log_client_error("poll result failed", error);
+        return G_SOURCE_REMOVE;
+    }
+    if (result.error_code != 0)
+        g_warning("Cassotis async result error %u: %s", result.error_code,
+                  result.error_text != NULL ? result.error_text : "");
+    if (result.handled) {
+        render_result(self, &result);
+        cassotis_engine_result_clear(&result);
+        self->result_poll_id = 0;
+        return G_SOURCE_REMOVE;
+    }
+    cassotis_engine_result_clear(&result);
+    return G_SOURCE_CONTINUE;
+}
+
+static void stop_result_polling(CassotisIbusEngine *self)
+{
+    guint source_id = self->result_poll_id;
+
+    self->result_poll_id = 0;
+    self->result_poll_attempts = 0;
+    if (source_id != 0)
+        g_source_remove(source_id);
+}
+
+static void start_result_polling(CassotisIbusEngine *self)
+{
+    self->result_poll_attempts = 0;
+    if (self->result_poll_id != 0 || !self->focused || !self->enabled)
+        return;
+    self->result_poll_id = g_timeout_add(
+        CASSOTIS_RESULT_POLL_INTERVAL_MS, poll_async_result, self);
+}
+
 static gboolean send_key_event(CassotisIbusEngine *self,
                                CassotisSpecialKey special_key,
                                guint32 modifiers,
@@ -428,6 +489,10 @@ static gboolean send_key_event(CassotisIbusEngine *self,
     success = result.handled;
     if (success)
         render_result(self, &result);
+    if (result.async_pending)
+        start_result_polling(self);
+    else
+        stop_result_polling(self);
     cassotis_engine_result_clear(&result);
     return success;
 }
@@ -686,6 +751,7 @@ static void cassotis_disable(IBusEngine *engine)
 {
     CassotisIbusEngine *self = (CassotisIbusEngine *)engine;
     stop_state_polling(self);
+    stop_result_polling(self);
     self->enabled = FALSE;
     self->desired_active = FALSE;
     synchronize_context(self);
@@ -711,6 +777,7 @@ static void cassotis_focus_out(IBusEngine *engine)
 {
     CassotisIbusEngine *self = (CassotisIbusEngine *)engine;
     stop_state_polling(self);
+    stop_result_polling(self);
     self->focused = FALSE;
     self->desired_active = FALSE;
     synchronize_context(self);
@@ -731,6 +798,7 @@ static void cassotis_reset(IBusEngine *engine)
             log_client_error("reset context failed", error);
         }
     }
+    stop_result_polling(self);
     clear_ui(engine);
 }
 
@@ -858,6 +926,7 @@ static void cassotis_ibus_engine_finalize(GObject *object)
     CassotisIbusEngine *self = (CassotisIbusEngine *)object;
     GError *error = NULL;
     stop_state_polling(self);
+    stop_result_polling(self);
     if (self->context_created) {
         ++self->generation_id;
         if (!cassotis_client_destroy_context(&global_client, self->context_id,
@@ -886,6 +955,8 @@ static void cassotis_ibus_engine_init(CassotisIbusEngine *self)
     self->input_purpose = IBUS_INPUT_PURPOSE_FREE_FORM;
     self->input_hints = IBUS_INPUT_HINT_NONE;
     self->state_poll_id = 0;
+    self->result_poll_id = 0;
+    self->result_poll_attempts = 0;
     memset(&self->state, 0, sizeof(self->state));
     self->state_valid = FALSE;
     ensure_context(self);

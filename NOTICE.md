@@ -15,3 +15,9 @@ project. The attribution snapshot bundled with this release is available in
 The program links to platform libraries supplied by the target Linux
 distribution, including Free Pascal runtime components, SQLite, GLib, IBus,
 Fcitx 5, GTK, and PyGObject. Their respective licenses remain unchanged.
+
+Binary builds bundle the official CPU distribution of ONNX Runtime 1.20.1
+for the selected architecture. ONNX Runtime is distributed under the MIT
+License. Its license and third-party notices are included under
+`third_party/onnxruntime` in the source tree and under
+`third-party/onnxruntime` in binary release documentation.

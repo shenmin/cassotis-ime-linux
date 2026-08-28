@@ -21,6 +21,13 @@ CMake is not required by the current shell/FPC build. Both framework adapters
 are part of a full build, so their development headers are required even when
 only one adapter will be installed.
 
+The repository carries the reviewed ONNX Runtime 1.20.1 headers and native
+runtime libraries for x86_64 and aarch64, together with the deployed v1.18
+models. No system ONNX Runtime package, network download, CUDA toolkit, or GPU
+is required. `scripts/validate_runtime_assets.sh` selects the current native
+architecture and verifies every bundled model and runtime artifact by SHA-256
+before compilation.
+
 The settings interface requires Python 3 and GTK 3 introspection at build and
 runtime. Optional real-application validation additionally requires GTK 4 and
 AT-SPI introspection data plus an active graphical desktop session; those
@@ -52,10 +59,12 @@ This performs the following deterministic sequence:
 
 1. Validate that the host and FPC target are Linux.
 2. Safely remove only the repository's `build/` directory.
-3. Force-rebuild the engine CLI, tests, benchmarks, IBus adapter, and native
-   Fcitx 5 addon.
-4. Run CLI smoke tests, including all six shuangpin schemes.
-5. Run the complete FPCUnit suite.
+3. Build the C++20 ONNX Runtime bridge and stage the architecture-matched
+   runtime and model assets.
+4. Force-rebuild the engine CLI, tests, benchmarks, neural runtime smokes,
+   IBus adapter, and native Fcitx 5 addon.
+5. Run CLI and neural-runtime smoke tests, including all six shuangpin schemes.
+6. Run the complete FPCUnit suite.
 
 Options:
 
@@ -122,6 +131,8 @@ Current binaries are written to `build/bin/`:
 - `cassotis-candidate-benchmark`
 - `cassotis-quality-benchmark`
 - `cassotis-candidate-regression`
+- `cassotis-neural-runtime-smoke`
+- `cassotis-neural-engine-smoke`
 - `ibus-engine-cassotis`
 - `libcassotis.so`
 - `cassotis-control`
@@ -156,7 +167,9 @@ Artifact names follow each packaging ecosystem's architecture convention:
 
 The `.tar.gz` files contain prebuilt, dynamically linked binaries for the
 named architecture. They are not source archives or distribution-independent
-packages.
+packages. Each artifact also contains the matching ONNX Runtime libraries,
+the v1.18 long-sentence reranker and local-completion assets, and the required
+third-party notices; end users do not install a separate inference runtime.
 
 The release builder does not produce RPM or Arch packages from Debian-built
 binaries. Other distributions should build both native adapters from source.
@@ -177,14 +190,19 @@ Cassotis simplified dictionary:
 
 The rootless script stages the dictionary and binaries, runs an isolated
 adapter-to-engine self-test, stops the active GNOME IBus service, gracefully
-shuts down a compatible installed engine, and atomically replaces each
-artifact. Because current IBus builds do not search user components by
+shuts down installed adapter and engine processes by exact executable path,
+and atomically replaces each artifact. Do not layer this per-user installation
+over the Debian package: IBus gives the system component with the same engine
+identifier precedence. Remove the package first, or continue using its
+system-wide installation. Because current IBus builds do not search user components by
 default, it adds a private `IBUS_COMPONENT_PATH` environment and GNOME
-user-service override that preserve the system component directory. After the
-restart it restores the exact GNOME input-source list, MRU order, and active
-index captured before the stop, then adds Cassotis and creates an isolated
-context through the real desktop IBus daemon to verify preedit, candidates,
-and raw commit. Failure cleanup follows the same restore path. Pass
+user-service override that preserve the system component directory and refresh
+the IBus registry when the daemon starts. Uninstall removes this override and
+restores the distribution service definition. After the restart the installer
+restores the exact GNOME input-source list, MRU order, and active index captured
+before the stop, then adds Cassotis and creates an isolated context through the
+real desktop IBus daemon to verify preedit, candidates, and raw commit. Failure
+cleanup follows the same restore path. Pass
 `--no-enable` to skip adding Cassotis or `--skip-build` to install
 already-built binaries. The latter does not require IBus development headers
 or `pkg-config`. The install also registers `Cassotis IME Settings` as both

@@ -395,6 +395,33 @@ type
 
     TncLongFinalCandidateDebugArray = TArray<TncLongFinalCandidateDebug>;
 
+    TncLongNeuralCompletionRequest = record
+        query_prefix: string;
+        query_syllables: string;
+        context_text: string;
+        top1_text: string;
+        top1_path: string;
+        top1_anchor_path: string;
+        top2_text: string;
+        top2_path: string;
+        top2_anchor_path: string;
+    end;
+
+    TncLongNeuralCompletionResult = record
+        suffix_text: string;
+        suffix_pinyin_path: string;
+        suffix_path: string;
+        base_rank: Integer;
+        confidence: Single;
+    end;
+
+    IncLongNeuralReranker = interface
+        ['{B4FC23F4-4F65-4F8B-A3E8-A69442BA57A1}']
+        function try_select(const query_text: string;
+            const candidates: TncLongFinalCandidateDebugArray;
+            out selected_index: Integer): Boolean;
+    end;
+
     TncLongRankingStageDebug = record
         stage_name: string;
         top1_text: string;
@@ -524,8 +551,12 @@ type
         m_composition_display_text: string;
         m_candidates: TncCandidateList;
         m_one_key_completion: TncOneKeyCompletion;
+        m_debug_long_one_key_completion_pool: TncOneKeyCompletionList;
+        m_debug_capture_long_one_key_completion_pool: Boolean;
         m_one_key_completion_query_prefix: string;
         m_one_key_completion_score: Integer;
+        m_long_neural_completion_request: TncLongNeuralCompletionRequest;
+        m_has_long_neural_completion_request: Boolean;
         m_completion_feedback_origin_prefix: string;
         m_allow_one_key_completion_lookup: Boolean;
         m_visible_candidates_cache: TncCandidateList;
@@ -699,6 +730,7 @@ type
         m_debug_target_candidate_stage_mask: Integer;
         m_debug_target_full_path_budget_exhausted: Boolean;
         m_debug_capture_long_beam_states: Boolean;
+        m_debug_capture_long_final_candidates: Boolean;
         m_debug_expand_long_beam_states: Boolean;
         m_debug_long_beam_states: TncLongBeamStateDebugArray;
         m_debug_long_exact_edge_stages: TncLongExactEdgeStageDebugArray;
@@ -711,6 +743,7 @@ type
         m_runtime_long_complete_pool_candidates:
             TncLongCompletePoolRuntimeCandidateArray;
         m_runtime_long_retained_exact_edges: TncLongRetainedExactEdgeArray;
+        m_long_neural_reranker: IncLongNeuralReranker;
         m_long_complete_pool_pairwise_text: string;
         m_long_complete_pool_pairwise_insert_rank: Integer;
         m_debug_long_chain_beam_width: Integer;
@@ -921,7 +954,8 @@ type
             var source_indices: TArray<Integer>;
             const unified_pool_final: Boolean = False;
             const exact_edge_baseline_top1: string = '';
-            const exact_edge_baseline_top2: string = '');
+            const exact_edge_baseline_top2: string = '';
+            const run_host_neural_reranker: Boolean = False);
         function build_segment_candidates(out out_candidates: TncCandidateList;
             const include_full_path: Boolean; out out_path_search_elapsed_ms: Int64;
             const allow_relaxed_missing_apostrophe: Boolean = False): Boolean;
@@ -988,6 +1022,8 @@ type
             const traditional_dictionary_path: string;
             const user_dictionary_path: string);
         procedure set_dictionary_provider(const dictionary: TncDictionaryProvider);
+        procedure set_long_neural_reranker(
+            const reranker: IncLongNeuralReranker);
         function detach_dictionary_provider: TncDictionaryProvider;
         procedure adopt_ready_dictionary_provider(
             const dictionary: TncDictionaryProvider);
@@ -1001,6 +1037,12 @@ type
         function debug_query_one_key_completion_candidates(
             const query_text: string;
             out completions: TncOneKeyCompletionList): Boolean;
+        function debug_get_long_one_key_completion_pool(
+            out completions: TncOneKeyCompletionList): Boolean;
+        procedure debug_enable_long_one_key_completion_pool_capture(
+            const enabled: Boolean);
+        function debug_get_ranked_candidates(
+            out candidates: TncCandidateList): Boolean;
         function debug_score_one_key_completion_candidates(
             const query_text: string; const left_context: string;
             out completions: TncOneKeyCompletionList;
@@ -1010,6 +1052,10 @@ type
             out prefix2_lm_scores: TArray<Integer>): Boolean;
         procedure debug_set_target_recall_text(const text: string);
         procedure debug_enable_long_beam_state_capture(const enabled: Boolean);
+        procedure debug_enable_long_final_candidate_capture(
+            const enabled: Boolean);
+        procedure debug_enable_long_beam_state_expansion(
+            const enabled: Boolean);
         procedure debug_enable_long_ranking_stage_capture(
             const enabled: Boolean);
         procedure debug_set_long_chain_beam_widths(const beam_width: Integer;
@@ -1027,6 +1073,11 @@ type
         function process_key(const key_code: Word; const key_state: TncKeyState): Boolean;
         function get_candidates: TncCandidateList;
         function get_one_key_completion: TncOneKeyCompletion;
+        function get_long_neural_completion_request(
+            out request: TncLongNeuralCompletionRequest): Boolean;
+        function apply_long_neural_completion(
+            const request: TncLongNeuralCompletionRequest;
+            const completion_result: TncLongNeuralCompletionResult): Boolean;
         function get_page_index: Integer;
         function get_page_count: Integer;
         function get_selected_index: Integer;
@@ -1140,7 +1191,9 @@ uses
     nc_short_nocontext_residual_model,
     nc_one_key_completion_ranker_model,
     nc_one_key_completion_difference_model,
-    nc_one_key_completion_topk_model;
+    nc_one_key_completion_topk_model,
+    nc_one_key_completion_ncgpt_model,
+    nc_one_key_completion_ncgpt_sparse_audit_model;
 
 const
     c_suppress_nonlexicon_complete_long_candidates = True;
@@ -1439,6 +1492,7 @@ constructor TncEngine.create(const config: TncEngineConfig;
     const initialize_dictionary: Boolean = True);
 begin
     inherited create;
+    m_long_neural_reranker := nil;
     m_config := config;
     m_defer_optional_dictionary_models :=
         defer_optional_dictionary_models;
@@ -1508,6 +1562,7 @@ begin
     m_runtime_redup_text := '';
     m_debug_target_recall_text := '';
     m_debug_capture_long_beam_states := False;
+    m_debug_capture_long_final_candidates := False;
     m_debug_capture_long_ranking_stages := False;
     m_debug_expand_long_beam_states := False;
     SetLength(m_debug_long_beam_states, 0);
@@ -1667,6 +1722,7 @@ end;
 
 destructor TncEngine.Destroy;
 begin
+    m_long_neural_reranker := nil;
     if m_dictionary <> nil then
     begin
         m_dictionary.Free;
@@ -2169,7 +2225,7 @@ begin
                 provider_ok := m_dictionary.get_char_lm_short_context_scores(
                     left_context, texts, scores);
             clsm_span:
-                provider_ok := m_dictionary.get_char_lm_cached_span_scores(
+                provider_ok := m_dictionary.get_char_lm_span_scores(
                     texts, scores);
             clsm_reverse:
                 provider_ok := m_dictionary.get_char_reverse_lm_suffix_scores(
@@ -2237,7 +2293,7 @@ begin
             provider_ok := m_dictionary.get_char_lm_short_context_scores(
                 left_context, missing_texts, missing_scores);
         clsm_span:
-            provider_ok := m_dictionary.get_char_lm_cached_span_scores(
+            provider_ok := m_dictionary.get_char_lm_span_scores(
                 missing_texts, missing_scores);
         clsm_reverse:
             provider_ok := m_dictionary.get_char_reverse_lm_suffix_scores(
@@ -4399,6 +4455,21 @@ begin
     end;
 end;
 
+procedure TncEngine.debug_enable_long_beam_state_expansion(
+    const enabled: Boolean);
+begin
+    m_debug_expand_long_beam_states := enabled;
+end;
+
+procedure TncEngine.debug_enable_long_final_candidate_capture(
+    const enabled: Boolean);
+begin
+    // Copy the already-ranked runtime pool without expanding search or
+    // retaining every beam state. This keeps Oracle/training data faithful to
+    // production candidate generation.
+    m_debug_capture_long_final_candidates := enabled;
+end;
+
 procedure TncEngine.debug_enable_long_ranking_stage_capture(
     const enabled: Boolean);
 begin
@@ -4497,6 +4568,15 @@ function TncEngine.search_budget_should_stop(const start_tick: UInt64;
 var
     elapsed_ms: UInt64;
 begin
+    // Deterministic quality runs must never fall back to elapsed-time gates.
+    // Some nested short-window searches bypass the production policy, but
+    // their work limits still provide a stable bound in deterministic mode.
+    if m_search_budget_mode = sbm_deterministic then
+    begin
+        Exit(nc_search_budget_should_stop(m_search_budget_mode, 0,
+            work_count, work_limit, timed_budget_ms,
+            emergency_budget_ms, m_search_budget_scale_percent));
+    end;
     if not apply_configured_policy then
     begin
         if (start_tick = 0) or (timed_budget_ms = 0) then
@@ -4509,12 +4589,6 @@ begin
         end;
         Exit(nc_search_budget_should_stop(sbm_wall_clock, elapsed_ms,
             work_count, 0, timed_budget_ms, 0, 100));
-    end;
-    if m_search_budget_mode = sbm_deterministic then
-    begin
-        Exit(nc_search_budget_should_stop(m_search_budget_mode, 0,
-            work_count, work_limit, timed_budget_ms,
-            emergency_budget_ms, m_search_budget_scale_percent));
     end;
     if (work_limit > 0) and (work_count >= work_limit) then
     begin
@@ -4595,6 +4669,30 @@ begin
     SetLength(completions, 0);
     Result := (m_dictionary <> nil) and
         m_dictionary.lookup_one_key_completions(query_text, completions);
+end;
+
+function TncEngine.debug_get_long_one_key_completion_pool(
+    out completions: TncOneKeyCompletionList): Boolean;
+begin
+    completions := Copy(m_debug_long_one_key_completion_pool);
+    Result := Length(completions) > 0;
+end;
+
+procedure TncEngine.debug_enable_long_one_key_completion_pool_capture(
+    const enabled: Boolean);
+begin
+    m_debug_capture_long_one_key_completion_pool := enabled;
+    if not enabled then
+    begin
+        SetLength(m_debug_long_one_key_completion_pool, 0);
+    end;
+end;
+
+function TncEngine.debug_get_ranked_candidates(
+    out candidates: TncCandidateList): Boolean;
+begin
+    candidates := Copy(m_candidates);
+    Result := Length(candidates) > 0;
 end;
 
 function TncEngine.debug_score_one_key_completion_candidates(
@@ -4790,6 +4888,12 @@ begin
     clear_lookup_bonus_caches;
     m_last_dictionary_reload_check_tick := 0;
     update_dictionary_state;
+end;
+
+procedure TncEngine.set_long_neural_reranker(
+    const reranker: IncLongNeuralReranker);
+begin
+    m_long_neural_reranker := reranker;
 end;
 
 function TncEngine.detach_dictionary_provider: TncDictionaryProvider;
@@ -5439,8 +5543,12 @@ end;
 procedure TncEngine.clear_one_key_completion;
 begin
     m_one_key_completion := Default(TncOneKeyCompletion);
+    SetLength(m_debug_long_one_key_completion_pool, 0);
     m_one_key_completion_query_prefix := '';
     m_one_key_completion_score := Low(Integer);
+    m_long_neural_completion_request :=
+        Default(TncLongNeuralCompletionRequest);
+    m_has_long_neural_completion_request := False;
 end;
 
 procedure TncEngine.clear_one_key_completion_feedback_target;
@@ -5495,6 +5603,7 @@ type
     end;
     TncLongCompletionAnchor = record
         path_text: string;
+        text: string;
         segment_count: Integer;
     end;
     TncLongCompletionScoredItem = record
@@ -5502,10 +5611,18 @@ type
         anchor: TncLongCompletionAnchor;
         score: Integer;
     end;
+    TncLongCompletionDebugItem = record
+        completion: TncOneKeyCompletion;
+        score: Integer;
+    end;
 var
     top_index: Integer;
     second_index: Integer;
     top_path: string;
+    second_path: string;
+    top1_anchor_path: string;
+    top2_anchor_path: string;
+    query_syllable_text: string;
     top_analysis: TncLongCompletionPathAnalysis;
     second_analysis: TncLongCompletionPathAnalysis;
     anchors: TArray<TncLongCompletionAnchor>;
@@ -5530,6 +5647,29 @@ var
     best_score: Integer;
     second_best_score: Integer;
     suffix_compact_pinyin: string;
+
+    function build_query_syllable_text: string;
+    var
+        syllable_idx: Integer;
+        syllable_text: string;
+    begin
+        Result := '';
+        for syllable_idx := 0 to High(syllables) do
+        begin
+            syllable_text := normalize_pinyin_text(
+                syllables[syllable_idx].text);
+            if syllable_text = '' then
+            begin
+                Result := '';
+                Exit;
+            end;
+            if Result <> '' then
+            begin
+                Result := Result + '''';
+            end;
+            Result := Result + syllable_text;
+        end;
+    end;
 
     function is_complete_candidate(const candidate_idx: Integer): Boolean;
     begin
@@ -5640,6 +5780,57 @@ var
         end;
     end;
 
+    function exact_anchor_path_matches_query_tail(
+        const path_text: string): Boolean;
+    var
+        path_segments: TArray<string>;
+        segment_text: string;
+        segment_units: Integer;
+        total_units: Integer;
+        syllable_pos: Integer;
+        segment_idx: Integer;
+        segment_query: string;
+    begin
+        Result := False;
+        path_segments := path_text.Split([#3],
+            TStringSplitOptions.ExcludeEmpty);
+        if Length(path_segments) = 0 then
+        begin
+            Exit;
+        end;
+        total_units := 0;
+        for segment_text in path_segments do
+        begin
+            segment_units := get_candidate_text_unit_count(
+                Trim(segment_text));
+            if segment_units <= 0 then
+            begin
+                Exit;
+            end;
+            Inc(total_units, segment_units);
+        end;
+        syllable_pos := Length(syllables) - total_units;
+        if syllable_pos < 0 then
+        begin
+            Exit;
+        end;
+        for segment_idx := 0 to High(path_segments) do
+        begin
+            segment_text := Trim(path_segments[segment_idx]);
+            segment_units := get_candidate_text_unit_count(segment_text);
+            segment_query := query_key_for_span(syllable_pos,
+                segment_units);
+            if (segment_query = '') or
+                (not m_dictionary.is_base_entry(segment_query,
+                segment_text)) then
+            begin
+                Exit;
+            end;
+            Inc(syllable_pos, segment_units);
+        end;
+        Result := syllable_pos = Length(syllables);
+    end;
+
     function analysis_ends_with_path(
         const analysis: TncLongCompletionPathAnalysis;
         const path_text: string): Boolean;
@@ -5673,20 +5864,22 @@ var
         Result := True;
     end;
 
-    procedure append_anchor(const path_text: string;
+    procedure append_anchor(const path_text, anchor_text: string;
         const segment_count: Integer);
     var
         idx: Integer;
     begin
         for idx := 0 to High(anchors) do
         begin
-            if SameText(anchors[idx].path_text, path_text) then
+            if SameText(anchors[idx].path_text, path_text) and
+                SameText(anchors[idx].text, anchor_text) then
             begin
                 Exit;
             end;
         end;
         SetLength(anchors, Length(anchors) + 1);
         anchors[High(anchors)].path_text := path_text;
+        anchors[High(anchors)].text := anchor_text;
         anchors[High(anchors)].segment_count := segment_count;
     end;
 
@@ -5697,6 +5890,171 @@ var
             right_value.suffix_text) and
             SameText(normalize_pinyin_text(left_item.value.suffix_pinyin),
             normalize_pinyin_text(right_value.suffix_pinyin));
+    end;
+
+    procedure capture_debug_completion_pool;
+    var
+        debug_items: TArray<TncLongCompletionDebugItem>;
+        debug_used: TArray<Boolean>;
+        candidate_analysis: TncLongCompletionPathAnalysis;
+        candidate_path: string;
+        candidate_anchor_text: string;
+        candidate_results: TncLongOneKeyCompletionList;
+        candidate_units: TArray<string>;
+        candidate_idx: Integer;
+        anchor_unit_count: Integer;
+        unit_idx: Integer;
+        debug_idx: Integer;
+        debug_rank: Integer;
+        debug_best_idx: Integer;
+
+        procedure append_candidate_completions(const specificity: Integer);
+        var
+            local_completion_idx: Integer;
+            local_existing_idx: Integer;
+            local_debug_idx: Integer;
+            local_debug_item: TncLongCompletionDebugItem;
+            local_suffix_key: string;
+        begin
+            for local_completion_idx := 0 to High(candidate_results) do
+            begin
+                if (candidate_results[local_completion_idx].evidence <= 0) or
+                    (candidate_results[local_completion_idx].source_count < 1) or
+                    (Trim(candidate_results[local_completion_idx].suffix_text) = '') or
+                    (not exact_anchor_path_matches_query_tail(
+                    candidate_results[local_completion_idx].anchor_path)) then
+                begin
+                    Continue;
+                end;
+                local_suffix_key := normalize_pinyin_text(
+                    candidate_results[local_completion_idx].suffix_pinyin);
+                if local_suffix_key = '' then
+                begin
+                    Continue;
+                end;
+                local_debug_item := Default(TncLongCompletionDebugItem);
+                local_debug_item.completion.anchor_text :=
+                    Trim(m_candidates[candidate_idx].text);
+                local_debug_item.completion.suffix_text :=
+                    candidate_results[local_completion_idx].suffix_text;
+                local_debug_item.completion.anchor_path :=
+                    candidate_results[local_completion_idx].anchor_path;
+                local_debug_item.completion.text :=
+                    local_debug_item.completion.anchor_text +
+                    local_debug_item.completion.suffix_text;
+                local_debug_item.completion.full_pinyin := compact_query +
+                    local_suffix_key;
+                local_debug_item.completion.path_text := candidate_path + #3 +
+                    candidate_results[local_completion_idx].suffix_path;
+                local_debug_item.completion.source_count :=
+                    candidate_results[local_completion_idx].source_count;
+                local_debug_item.completion.feedback_count :=
+                    candidate_results[local_completion_idx].feedback_count;
+                local_debug_item.completion.feedback_reject_count :=
+                    candidate_results[local_completion_idx].feedback_reject_count;
+                local_debug_item.completion.prefix_anchored := True;
+                local_debug_item.completion.source := okcs_long_transition;
+                local_debug_item.score :=
+                    (candidate_results[local_completion_idx].evidence * 8) +
+                    (Min(candidate_results[local_completion_idx].source_count,
+                    64) * 3) + (specificity * 24) -
+                    (candidate_idx * 96);
+                local_debug_item.completion.weight := local_debug_item.score;
+                local_existing_idx := -1;
+                for local_debug_idx := 0 to High(debug_items) do
+                begin
+                    if SameText(debug_items[local_debug_idx].completion.text,
+                        local_debug_item.completion.text) and
+                        SameText(debug_items[local_debug_idx].completion.full_pinyin,
+                        local_debug_item.completion.full_pinyin) then
+                    begin
+                        local_existing_idx := local_debug_idx;
+                        Break;
+                    end;
+                end;
+                if local_existing_idx < 0 then
+                begin
+                    SetLength(debug_items, Length(debug_items) + 1);
+                    debug_items[High(debug_items)] := local_debug_item;
+                end
+                else if local_debug_item.score >
+                    debug_items[local_existing_idx].score then
+                begin
+                    debug_items[local_existing_idx] := local_debug_item;
+                end;
+            end;
+        end;
+    begin
+        SetLength(m_debug_long_one_key_completion_pool, 0);
+        SetLength(debug_items, 0);
+        for candidate_idx := 0 to Min(High(m_candidates),
+            c_max_visible_scan - 1) do
+        begin
+            if not analyze_candidate_path(candidate_idx,
+                candidate_analysis) then
+            begin
+                Continue;
+            end;
+            candidate_path := Trim(get_segment_path_for_candidate(
+                m_candidates[candidate_idx], candidate_idx));
+            if candidate_path = '' then
+            begin
+                Continue;
+            end;
+            candidate_units := split_text_units(
+                Trim(m_candidates[candidate_idx].text));
+            for anchor_unit_count := Min(8,
+                Length(candidate_units)) downto 1 do
+            begin
+                candidate_anchor_text := '';
+                for unit_idx := Length(candidate_units) - anchor_unit_count to
+                    High(candidate_units) do
+                begin
+                    candidate_anchor_text := candidate_anchor_text +
+                        candidate_units[unit_idx];
+                end;
+                SetLength(candidate_results, 0);
+                if not m_dictionary.lookup_long_one_key_completions_by_text(
+                    candidate_anchor_text, candidate_results) then
+                begin
+                    Continue;
+                end;
+                append_candidate_completions(Min(c_max_anchor_segments,
+                    Max(1, (anchor_unit_count + 1) div 2)));
+            end;
+        end;
+
+        SetLength(m_debug_long_one_key_completion_pool,
+            Length(debug_items));
+        SetLength(debug_used, Length(debug_items));
+        for debug_rank := 0 to High(debug_items) do
+        begin
+            debug_best_idx := -1;
+            for debug_idx := 0 to High(debug_items) do
+            begin
+                if debug_used[debug_idx] then
+                begin
+                    Continue;
+                end;
+                if (debug_best_idx < 0) or
+                    (debug_items[debug_idx].score >
+                    debug_items[debug_best_idx].score) or
+                    ((debug_items[debug_idx].score =
+                    debug_items[debug_best_idx].score) and
+                    (CompareText(debug_items[debug_idx].completion.text,
+                    debug_items[debug_best_idx].completion.text) < 0)) then
+                begin
+                    debug_best_idx := debug_idx;
+                end;
+            end;
+            if debug_best_idx < 0 then
+            begin
+                Break;
+            end;
+            debug_used[debug_best_idx] := True;
+            m_debug_long_one_key_completion_pool[debug_rank] :=
+                debug_items[debug_best_idx].completion;
+        end;
     end;
 begin
     Result := False;
@@ -5732,11 +6090,78 @@ begin
     begin
         Exit;
     end;
+    if m_debug_capture_long_one_key_completion_pool then
+    begin
+        capture_debug_completion_pool;
+    end;
 
     second_analysis := Default(TncLongCompletionPathAnalysis);
+    second_path := '';
     if second_index >= 0 then
     begin
-        analyze_candidate_path(second_index, second_analysis);
+        if analyze_candidate_path(second_index, second_analysis) then
+        begin
+            second_path := Trim(get_segment_path_for_candidate(
+                m_candidates[second_index], second_index));
+        end;
+    end;
+
+    top1_anchor_path := '';
+    for anchor_segment_count := Min(c_max_anchor_segments,
+        Length(top_analysis.segments)) downto 1 do
+    begin
+        if exact_suffix_path(top_analysis, anchor_segment_count,
+            top1_anchor_path) then
+        begin
+            Break;
+        end;
+    end;
+    top2_anchor_path := '';
+    if second_analysis.valid then
+    begin
+        for anchor_segment_count := Min(c_max_anchor_segments,
+            Length(second_analysis.segments)) downto 1 do
+        begin
+            if exact_suffix_path(second_analysis, anchor_segment_count,
+                top2_anchor_path) then
+            begin
+                Break;
+            end;
+        end;
+    end;
+    query_syllable_text := build_query_syllable_text;
+    if (top1_anchor_path <> '') and (query_syllable_text <> '') then
+    begin
+        context_value := m_left_context;
+        if m_segment_left_context <> '' then
+        begin
+            context_value := m_segment_left_context;
+        end
+        else if m_external_left_context <> '' then
+        begin
+            context_value := m_external_left_context;
+        end;
+        m_long_neural_completion_request :=
+            Default(TncLongNeuralCompletionRequest);
+        m_long_neural_completion_request.query_prefix := compact_query;
+        m_long_neural_completion_request.query_syllables :=
+            query_syllable_text;
+        m_long_neural_completion_request.context_text :=
+            trim_left_context_to_sentence(context_value, c_context_length);
+        m_long_neural_completion_request.top1_text :=
+            Trim(m_candidates[top_index].text);
+        m_long_neural_completion_request.top1_path := top_path;
+        m_long_neural_completion_request.top1_anchor_path :=
+            top1_anchor_path;
+        if (second_index >= 0) and (top2_anchor_path <> '') then
+        begin
+            m_long_neural_completion_request.top2_text :=
+                Trim(m_candidates[second_index].text);
+            m_long_neural_completion_request.top2_path := second_path;
+            m_long_neural_completion_request.top2_anchor_path :=
+                top2_anchor_path;
+        end;
+        m_has_long_neural_completion_request := True;
     end;
     top1_strong := (second_index < 0) or
         (Int64(m_candidates[top_index].score) -
@@ -5756,7 +6181,10 @@ begin
         if analysis_ends_with_path(second_analysis, anchor.path_text) or
             top1_strong then
         begin
-            append_anchor(anchor.path_text, anchor.segment_count);
+            anchor.text := StringReplace(anchor.path_text, #3, '',
+                [rfReplaceAll]);
+            append_anchor(anchor.path_text, anchor.text,
+                anchor.segment_count);
         end;
     end;
     if Length(anchors) = 0 then
@@ -5768,8 +6196,12 @@ begin
     for anchor_idx := 0 to High(anchors) do
     begin
         SetLength(anchor_results, 0);
-        if not m_dictionary.lookup_long_one_key_completions(
-            anchors[anchor_idx].path_text, anchor_results) then
+        if anchors[anchor_idx].path_text <> '' then
+        begin
+            m_dictionary.lookup_long_one_key_completions(
+                anchors[anchor_idx].path_text, anchor_results);
+        end;
+        if Length(anchor_results) = 0 then
         begin
             Continue;
         end;
@@ -5779,6 +6211,8 @@ begin
                 (anchor_results[result_idx].source_count <
                 c_min_source_count) or
                 (Trim(anchor_results[result_idx].suffix_text) = '') or
+                (not exact_anchor_path_matches_query_tail(
+                anchor_results[result_idx].anchor_path)) or
                 (anchor_results[result_idx].feedback_reject_count >
                 anchor_results[result_idx].feedback_count + 6) then
             begin
@@ -5801,6 +6235,10 @@ begin
             item.score := 0;
             item.value := anchor_results[result_idx];
             item.anchor := anchors[anchor_idx];
+            if Trim(item.value.anchor_path) <> '' then
+            begin
+                item.anchor.path_text := item.value.anchor_path;
+            end;
             item.score := (item.value.evidence * 8) +
                 (Min(item.value.source_count, 64) * 3) +
                 (item.anchor.segment_count * 24) +
@@ -5885,6 +6323,7 @@ begin
             second_best_score := items[item_idx].score;
         end;
     end;
+
     if (best_idx < 0) or ((second_best_idx >= 0) and
         (best_score - second_best_score < c_min_winner_margin)) then
     begin
@@ -5896,8 +6335,7 @@ begin
         SetLength(anchor_lm_texts, 1);
         anchor_lm_texts[0] := items[best_idx].value.suffix_text;
         if get_cached_char_lm_scores(anchor_lm_texts, anchor_lm_scores,
-            clsm_context, StringReplace(
-            items[best_idx].anchor.path_text, #3, '', [rfReplaceAll])) and
+            clsm_context, items[best_idx].anchor.text) and
             (Length(anchor_lm_scores) = 1) and
             (char_lm_scores[best_idx] +
             c_context_contradiction_tolerance < anchor_lm_scores[0]) then
@@ -6078,6 +6516,33 @@ var
     pair_best_observations: Integer;
     pair_confidence: Integer;
     pair_observations: Integer;
+    ncgpt_candidate_features:
+        array of TncOneKeyCompletionNcgptCandidateFeatures;
+    ncgpt_pair_features: TncOneKeyCompletionNcgptPairFeatures;
+    ncgpt_needed_indices: TArray<Integer>;
+    ncgpt_stage1_features: TncShortContextDifferenceFeatures;
+    ncgpt_best_idx: Integer;
+    ncgpt_incumbent_idx: Integer;
+    ncgpt_primary_idx: Integer;
+    ncgpt_candidate_idx: Integer;
+    ncgpt_best_score: Double;
+    ncgpt_primary_score: Double;
+    ncgpt_candidate_score: Double;
+    ncgpt_threshold: Double;
+    ncgpt_primary_threshold: Double;
+    ncgpt_category: TncOneKeyCompletionDifferenceCategory;
+    ncgpt_primary_category: TncOneKeyCompletionDifferenceCategory;
+    ncgpt_common_prefix: Integer;
+    ncgpt_common_suffix: Integer;
+    ncgpt_prior_score: Double;
+    ncgpt_candidate_scores: TArray<Double>;
+    ncgpt_candidate_thresholds: TArray<Double>;
+    ncgpt_candidate_categories:
+        TArray<TncOneKeyCompletionDifferenceCategory>;
+    ncgpt_candidate_scored: TArray<Boolean>;
+    ncgpt_fallback_idx: Integer;
+    ncgpt_fallback_score: Double;
+    ncgpt_fallback_candidate_score: Double;
     has_completion_lookup: Boolean;
 
     function competition_score_for_candidate(const candidate_idx: Integer;
@@ -6180,6 +6645,135 @@ var
                 Result := candidate_idx;
             end;
         end;
+    end;
+
+    procedure get_common_completion_fragment_units(const left_text,
+        right_text: string; out common_prefix, common_suffix: Integer);
+    var
+        left_units: TArray<string>;
+        right_units: TArray<string>;
+        compare_limit: Integer;
+    begin
+        common_prefix := 0;
+        common_suffix := 0;
+        left_units := split_text_units(left_text);
+        right_units := split_text_units(right_text);
+        compare_limit := Min(Length(left_units), Length(right_units));
+        while (common_prefix < compare_limit) and
+            (left_units[common_prefix] = right_units[common_prefix]) do
+        begin
+            Inc(common_prefix);
+        end;
+        compare_limit := compare_limit - common_prefix;
+        while (common_suffix < compare_limit) and
+            (left_units[High(left_units) - common_suffix] =
+            right_units[High(right_units) - common_suffix]) do
+        begin
+            Inc(common_suffix);
+        end;
+    end;
+
+    procedure fill_ncgpt_completion_candidate_features(
+        const candidate_idx: Integer;
+        out features: TncOneKeyCompletionNcgptCandidateFeatures);
+    var
+        item: TncOneKeyCompletion;
+    begin
+        FillChar(features, SizeOf(features), 0);
+        item := completions[candidate_idx];
+        features[0] := item.weight;
+        features[1] := item.popularity_prior;
+        features[2] := item.corpus_score;
+        features[3] := item.document_score;
+        features[4] := item.source_count;
+        features[5] := item.path_score;
+        features[6] := item.vertical_penalty;
+        features[7] := item.vertical_layer_kind;
+        features[8] := Ord(item.prefix_anchored);
+        features[9] := item.feedback_count;
+        features[10] := item.feedback_reject_count;
+        features[11] := char_lm_scores[candidate_idx];
+
+        ncgpt_stage1_features := Default(TncShortContextDifferenceFeatures);
+        short_context_difference_fill_stage1_evidence(context_value,
+            completions[0].text, item.text, ncgpt_stage1_features);
+        features[12] := ncgpt_stage1_features.pair_log_odds;
+        features[13] := ncgpt_stage1_features.pair_log_total;
+        features[14] := ncgpt_stage1_features.pair_context_log_odds;
+        features[15] := ncgpt_stage1_features.pair_context_log_total;
+        features[16] := ncgpt_stage1_features.pair_context_width;
+        features[17] := ncgpt_stage1_features.mined_log_odds;
+        features[18] := ncgpt_stage1_features.mined_log_total;
+        features[19] := ncgpt_stage1_features.mined_context_width;
+        features[20] := ncgpt_stage1_features.novel_log_odds;
+        features[21] := ncgpt_stage1_features.chat_log_odds;
+        features[22] := ncgpt_stage1_features.formal_log_odds;
+        features[23] := ncgpt_stage1_features.total_log_odds;
+        features[24] := candidate_idx + 1;
+        features[25] := Ord(item.source = okcs_user_exact);
+        features[26] := Ord(item.source = okcs_base_exact);
+        features[27] := Ord(item.source = okcs_transition);
+        features[28] := get_candidate_text_unit_count(item.text);
+        features[29] := Length(item.full_pinyin);
+        features[30] := Max(0, Length(item.full_pinyin) -
+            Length(compact_query));
+        features[31] := Length(compact_query);
+        features[32] := get_candidate_text_unit_count(context_value);
+        features[33] := Length(syllables);
+    end;
+
+    function prepare_ncgpt_completion_features: Boolean;
+    var
+        feature_idx: Integer;
+        completion_idx: Integer;
+        category: TncOneKeyCompletionDifferenceCategory;
+        threshold: Double;
+    begin
+        Result := False;
+        if (context_value = '') or (not has_char_lm) or
+            (Length(completions) < 2) then
+        begin
+            Exit;
+        end;
+
+        // Only materialize the settled incumbent and categories whose
+        // independently calibrated threshold permits a challenge. Most
+        // completion groups therefore avoid all extra LM/evidence work.
+        SetLength(ncgpt_needed_indices, 1);
+        ncgpt_needed_indices[0] := best_idx;
+        for completion_idx := 0 to High(completions) do
+        begin
+            if (completion_idx = best_idx) or
+                (not eligible[completion_idx]) or
+                (completions[best_idx].feedback_count >
+                completions[completion_idx].feedback_count) then
+            begin
+                Continue;
+            end;
+            category := one_key_completion_difference_category(
+                completions[best_idx], completions[completion_idx]);
+            threshold := one_key_completion_ncgpt_threshold(category);
+            if threshold >= 1.0E29 then
+            begin
+                Continue;
+            end;
+            SetLength(ncgpt_needed_indices,
+                Length(ncgpt_needed_indices) + 1);
+            ncgpt_needed_indices[High(ncgpt_needed_indices)] := completion_idx;
+        end;
+        if Length(ncgpt_needed_indices) < 2 then
+        begin
+            Exit;
+        end;
+
+        SetLength(ncgpt_candidate_features, Length(completions));
+        for feature_idx := 0 to High(ncgpt_needed_indices) do
+        begin
+            completion_idx := ncgpt_needed_indices[feature_idx];
+            fill_ncgpt_completion_candidate_features(completion_idx,
+                ncgpt_candidate_features[completion_idx]);
+        end;
+        Result := True;
     end;
 begin
     previous_completion := m_one_key_completion;
@@ -7247,6 +7841,178 @@ begin
         end;
     end;
 
+    // nc_gpt is used only offline. The generated trees and sparse priors
+    // below are static distillations of its hard-pair decisions. The primary
+    // prior audits the tree choice; a stricter fallback may rescue another
+    // existing Top-K item only when the primary path keeps the incumbent.
+    if (best_idx >= 0) and (eligible_count > 1) and
+        prepare_ncgpt_completion_features then
+    begin
+        ncgpt_incumbent_idx := best_idx;
+        ncgpt_best_idx := -1;
+        ncgpt_best_score := -1.0E30;
+        ncgpt_primary_idx := -1;
+        ncgpt_primary_score := -1.0E30;
+        SetLength(ncgpt_candidate_scores, Length(completions));
+        SetLength(ncgpt_candidate_thresholds, Length(completions));
+        SetLength(ncgpt_candidate_categories, Length(completions));
+        SetLength(ncgpt_candidate_scored, Length(completions));
+        for ncgpt_candidate_idx := 0 to High(completions) do
+        begin
+            if (ncgpt_candidate_idx = ncgpt_incumbent_idx) or
+                (not eligible[ncgpt_candidate_idx]) or
+                (completions[ncgpt_incumbent_idx].feedback_count >
+                completions[ncgpt_candidate_idx].feedback_count) then
+            begin
+                Continue;
+            end;
+            ncgpt_category := one_key_completion_difference_category(
+                completions[ncgpt_incumbent_idx],
+                completions[ncgpt_candidate_idx]);
+            ncgpt_threshold := one_key_completion_ncgpt_threshold(
+                ncgpt_category);
+            if ncgpt_threshold >= 1.0E29 then
+            begin
+                Continue;
+            end;
+            get_common_completion_fragment_units(
+                completions[ncgpt_incumbent_idx].text,
+                completions[ncgpt_candidate_idx].text,
+                ncgpt_common_prefix, ncgpt_common_suffix);
+            build_one_key_completion_ncgpt_pair_features(
+                ncgpt_candidate_features[ncgpt_candidate_idx],
+                ncgpt_candidate_features[ncgpt_incumbent_idx],
+                ncgpt_common_prefix, ncgpt_common_suffix,
+                get_candidate_text_unit_count(
+                completions[ncgpt_candidate_idx].text) -
+                get_candidate_text_unit_count(
+                completions[ncgpt_incumbent_idx].text),
+                Length(completions[ncgpt_candidate_idx].full_pinyin) -
+                Length(completions[ncgpt_incumbent_idx].full_pinyin),
+                completions[ncgpt_candidate_idx].source =
+                completions[ncgpt_incumbent_idx].source,
+                (completions[ncgpt_candidate_idx].source =
+                okcs_base_exact) and
+                (completions[ncgpt_incumbent_idx].source = okcs_transition),
+                (completions[ncgpt_candidate_idx].source =
+                okcs_transition) and
+                (completions[ncgpt_incumbent_idx].source = okcs_base_exact),
+                ncgpt_pair_features);
+            ncgpt_candidate_score := one_key_completion_ncgpt_score(
+                ncgpt_pair_features);
+            ncgpt_candidate_scores[ncgpt_candidate_idx] :=
+                ncgpt_candidate_score;
+            ncgpt_candidate_thresholds[ncgpt_candidate_idx] :=
+                ncgpt_threshold;
+            ncgpt_candidate_categories[ncgpt_candidate_idx] :=
+                ncgpt_category;
+            ncgpt_candidate_scored[ncgpt_candidate_idx] := True;
+            if (ncgpt_primary_idx < 0) or
+                (ncgpt_candidate_score > ncgpt_primary_score) or
+                ((ncgpt_candidate_score = ncgpt_primary_score) and
+                (ncgpt_candidate_idx < ncgpt_primary_idx)) then
+            begin
+                ncgpt_primary_idx := ncgpt_candidate_idx;
+                ncgpt_primary_score := ncgpt_candidate_score;
+                ncgpt_primary_threshold := ncgpt_threshold;
+                ncgpt_primary_category := ncgpt_category;
+            end;
+            if (ncgpt_candidate_score >= ncgpt_threshold) and
+                ((ncgpt_best_idx < 0) or
+                (ncgpt_candidate_score > ncgpt_best_score) or
+                ((ncgpt_candidate_score = ncgpt_best_score) and
+                (ncgpt_candidate_idx < ncgpt_best_idx))) then
+            begin
+                ncgpt_best_idx := ncgpt_candidate_idx;
+                ncgpt_best_score := ncgpt_candidate_score;
+            end;
+        end;
+        if ncgpt_best_idx >= 0 then
+        begin
+            best_idx := ncgpt_best_idx;
+        end
+        else
+        begin
+            best_idx := ncgpt_incumbent_idx;
+        end;
+
+        if (ncgpt_primary_idx >= 0) and
+            lookup_one_key_completion_ncgpt_primary_prior(
+            context_value, compact_query,
+            completions[ncgpt_incumbent_idx],
+            completions[ncgpt_primary_idx], ncgpt_primary_category,
+            ncgpt_primary_score, ncgpt_primary_threshold,
+            ncgpt_prior_score) then
+        begin
+            if (ncgpt_prior_score >=
+                one_key_completion_ncgpt_primary_approve_threshold(
+                ncgpt_primary_category)) and
+                (ncgpt_primary_score >= ncgpt_primary_threshold -
+                c_one_key_completion_ncgpt_primary_expansion_margin) then
+            begin
+                best_idx := ncgpt_primary_idx;
+            end
+            else if (best_idx = ncgpt_primary_idx) and
+                (ncgpt_prior_score <=
+                one_key_completion_ncgpt_primary_veto_threshold(
+                ncgpt_primary_category)) then
+            begin
+                best_idx := ncgpt_incumbent_idx;
+            end;
+        end;
+
+        if best_idx = ncgpt_incumbent_idx then
+        begin
+            ncgpt_fallback_idx := -1;
+            ncgpt_fallback_score := -1.0E30;
+            for ncgpt_candidate_idx := 0 to High(completions) do
+            begin
+                if (not ncgpt_candidate_scored[ncgpt_candidate_idx]) or
+                    (ncgpt_candidate_scores[ncgpt_candidate_idx] <
+                    ncgpt_candidate_thresholds[ncgpt_candidate_idx] -
+                    c_one_key_completion_ncgpt_fallback_expansion_margin) or
+                    (not lookup_one_key_completion_ncgpt_fallback_prior(
+                    context_value, compact_query,
+                    completions[ncgpt_incumbent_idx],
+                    completions[ncgpt_candidate_idx],
+                    ncgpt_candidate_categories[ncgpt_candidate_idx],
+                    ncgpt_candidate_scores[ncgpt_candidate_idx],
+                    ncgpt_candidate_thresholds[ncgpt_candidate_idx],
+                    ncgpt_prior_score)) or (ncgpt_prior_score <= 0.0) then
+                begin
+                    Continue;
+                end;
+                ncgpt_fallback_candidate_score := ncgpt_prior_score +
+                    c_one_key_completion_ncgpt_fallback_tree_weight *
+                    (ncgpt_candidate_scores[ncgpt_candidate_idx] -
+                    ncgpt_candidate_thresholds[ncgpt_candidate_idx]);
+                if (ncgpt_fallback_idx < 0) or
+                    (ncgpt_fallback_candidate_score >
+                    ncgpt_fallback_score) or
+                    ((ncgpt_fallback_candidate_score =
+                    ncgpt_fallback_score) and
+                    (ncgpt_candidate_scores[ncgpt_candidate_idx] >
+                    ncgpt_candidate_scores[ncgpt_fallback_idx])) or
+                    ((ncgpt_fallback_candidate_score =
+                    ncgpt_fallback_score) and
+                    (ncgpt_candidate_scores[ncgpt_candidate_idx] =
+                    ncgpt_candidate_scores[ncgpt_fallback_idx]) and
+                    (ncgpt_candidate_idx < ncgpt_fallback_idx)) then
+                begin
+                    ncgpt_fallback_idx := ncgpt_candidate_idx;
+                    ncgpt_fallback_score :=
+                        ncgpt_fallback_candidate_score;
+                end;
+            end;
+            if (ncgpt_fallback_idx >= 0) and
+                (ncgpt_fallback_score >=
+                c_one_key_completion_ncgpt_fallback_threshold) then
+            begin
+                best_idx := ncgpt_fallback_idx;
+            end;
+        end;
+    end;
+
     m_one_key_completion := completions[best_idx];
     m_one_key_completion_query_prefix := compact_query;
     m_one_key_completion_score := scores[best_idx];
@@ -7277,6 +8043,8 @@ begin
         clear_one_key_completion_feedback_target;
     end
     else if (m_dictionary <> nil) and
+        (not (m_one_key_completion.source in
+        [okcs_long_transition, okcs_long_neural])) and
         (m_one_key_completion_query_prefix <> '') and
         (completion_pinyin <> '') then
     begin
@@ -7284,7 +8052,8 @@ begin
             m_one_key_completion_query_prefix, completion_pinyin,
             completion_text);
     end;
-    if m_one_key_completion.source = okcs_long_transition then
+    if m_one_key_completion.source in
+        [okcs_long_transition, okcs_long_neural] then
     begin
         clear_one_key_completion_feedback_target;
     end
@@ -7448,6 +8217,7 @@ var
     supported_complete_encoded_path: string;
     direct_three_syllable_one_plus_two_candidate: TncCandidate;
     direct_three_syllable_one_plus_two_encoded_path: string;
+    direct_three_syllable_one_plus_two_registered: Boolean;
     direct_three_syllable_two_plus_one_candidate: TncCandidate;
     direct_three_syllable_two_plus_one_encoded_path: string;
     fast_chain_seed_candidate: TncCandidate;
@@ -78266,6 +79036,7 @@ var
         c_tail_probe_limit = 24;
         c_preferred_head_bonus = 96;
         c_complete_bonus = 120000;
+        c_strong_char_lm_score = -1200;
     var
         syllables_local: TncPinyinParseResult;
         head_key: string;
@@ -78282,6 +79053,10 @@ var
         best_head_weight: Integer;
         best_tail_weight: Integer;
         is_preferred_head: Boolean;
+        combined_text: string;
+        char_lm_texts: TArray<string>;
+        char_lm_scores: TArray<Integer>;
+        char_lm_supported: Boolean;
 
         function get_candidate_weight_local(
             const candidate: TncCandidate): Integer;
@@ -78312,6 +79087,20 @@ var
                 $771F, $633A, $8F83, $628A, $88AB, $8BA9, $7ED9, $5411,
                 $5BF9, $4ECE, $4E8E, $548C, $4E0E,
                 $7B2C, $6211, $4F60, $60A8, $5148:
+                    Result := True;
+            end;
+        end;
+
+        function is_direct_complete_head_text_local(
+            const text_value: string): Boolean;
+        begin
+            Result := False;
+            if get_candidate_text_unit_count(text_value) <> 1 then
+            begin
+                Exit;
+            end;
+            case Ord(text_value[1]) of
+                $6211, $4F60, $60A8, $6700:
                     Result := True;
             end;
         end;
@@ -78415,12 +79204,30 @@ var
             Exit;
         end;
 
-        out_candidate.text := best_head_text + best_tail_text;
+        combined_text := best_head_text + best_tail_text;
+        char_lm_supported := False;
+        if not is_direct_complete_head_text_local(best_head_text) then
+        begin
+            SetLength(char_lm_texts, 1);
+            char_lm_texts[0] := combined_text;
+            if get_cached_char_lm_scores(char_lm_texts, char_lm_scores,
+                clsm_full, '') and (Length(char_lm_scores) = 1) and
+                (char_lm_scores[0] >= c_strong_char_lm_score) then
+            begin
+                char_lm_supported := True;
+            end;
+        end;
+
+        out_candidate.text := combined_text;
         out_candidate.comment := '';
         out_candidate.score := c_complete_bonus + best_head_weight + best_tail_weight;
         out_candidate.source := cs_rule;
         out_candidate.has_dict_weight := True;
         out_candidate.dict_weight := out_candidate.score;
+        if char_lm_supported then
+        begin
+            out_candidate.display_kind := cdk_lm_compound;
+        end;
         out_encoded_path := best_head_text + c_segment_path_separator +
             best_tail_text;
         remember_segment_path_for_candidate(out_candidate.text, '',
@@ -113825,7 +114632,7 @@ var
         Result := Length(out_candidates) > 0;
     end;
 
-    function try_preserve_short_four_lm_prefix_from_previous_local(
+    function try_preserve_short_lm_prefix_from_previous_local(
         out out_candidate: TncCandidate): Boolean;
     const
         c_previous_probe_limit = 12;
@@ -113836,6 +114643,7 @@ var
         current_tail_local: string;
         previous_tail_local: string;
         previous_idx_local: Integer;
+        syllable_idx_local: Integer;
         appending_local: Boolean;
         deleting_local: Boolean;
 
@@ -113939,7 +114747,7 @@ var
             Length(lookup_text) + 1) and
             SameText(Copy(previous_lookup_key, 1, Length(lookup_text)),
             lookup_text);
-        if (input_syllable_count <> 4) or
+        if (input_syllable_count < 4) or (input_syllable_count > 8) or
             ((Length(previous_candidates) = 0) and
             (Length(previous_visible_candidates) = 0) and
             (Length(previous_short_three_exact_pair_texts) = 0)) or
@@ -113956,15 +114764,25 @@ var
             lookup_text);
         previous_syllables_local := get_effective_compact_pinyin_syllables(
             previous_lookup_key);
-        if (Length(current_syllables_local) <> 4) or
-            ((Length(previous_syllables_local) <> 3) and
-            (Length(previous_syllables_local) <> 4)) then
+        if (Length(current_syllables_local) <> input_syllable_count) or
+            (Length(previous_syllables_local) < 3) or
+            (Length(previous_syllables_local) > 8) or
+            ((Length(current_syllables_local) <>
+            Length(previous_syllables_local) + 1) and
+            (Length(current_syllables_local) <>
+            Length(previous_syllables_local)) and
+            (Length(previous_syllables_local) <>
+            Length(current_syllables_local) + 1)) then
         begin
             Exit;
         end;
 
-        current_tail_local := normalize_pinyin_text(
-            current_syllables_local[3].text);
+        current_tail_local := '';
+        for syllable_idx_local := 3 to High(current_syllables_local) do
+        begin
+            current_tail_local := current_tail_local + normalize_pinyin_text(
+                current_syllables_local[syllable_idx_local].text);
+        end;
         if current_tail_local = '' then
         begin
             Exit;
@@ -113998,8 +114816,12 @@ var
             Exit(try_take_previous_supported_pair_local);
         end;
 
-        previous_tail_local := normalize_pinyin_text(
-            previous_syllables_local[3].text);
+        previous_tail_local := '';
+        for syllable_idx_local := 3 to High(previous_syllables_local) do
+        begin
+            previous_tail_local := previous_tail_local + normalize_pinyin_text(
+                previous_syllables_local[syllable_idx_local].text);
+        end;
         if (previous_tail_local = '') or
             SameText(current_tail_local, previous_tail_local) or
             (appending_local and
@@ -121003,7 +121825,7 @@ begin
         end;
         subspan_oracle_budget_remaining := 0;
         m_last_lookup_syllable_count := input_syllable_count;
-        if try_preserve_short_four_lm_prefix_from_previous_local(
+        if try_preserve_short_lm_prefix_from_previous_local(
             short_four_preserved_prefix_candidate) then
         begin
             m_has_forced_visible_top_candidate := True;
@@ -122167,6 +122989,36 @@ begin
             else
             begin
                 m_candidates[0] := direct_three_syllable_one_plus_two_candidate;
+            end;
+            ensure_short_three_exact_pair_candidates_visible_local(m_candidates);
+            if direct_three_syllable_one_plus_two_candidate.display_kind =
+                cdk_lm_compound then
+            begin
+                if not SameText(m_short_three_exact_pair_query,
+                    normalize_pinyin_text(lookup_text)) then
+                begin
+                    m_short_three_exact_pair_query :=
+                        normalize_pinyin_text(lookup_text);
+                    SetLength(m_short_three_exact_pair_texts, 0);
+                end;
+                direct_three_syllable_one_plus_two_registered := False;
+                for i := 0 to High(m_short_three_exact_pair_texts) do
+                begin
+                    if SameText(Trim(m_short_three_exact_pair_texts[i]),
+                        Trim(direct_three_syllable_one_plus_two_candidate.text)) then
+                    begin
+                        direct_three_syllable_one_plus_two_registered := True;
+                        Break;
+                    end;
+                end;
+                if not direct_three_syllable_one_plus_two_registered then
+                begin
+                    SetLength(m_short_three_exact_pair_texts,
+                        Length(m_short_three_exact_pair_texts) + 1);
+                    m_short_three_exact_pair_texts[
+                        High(m_short_three_exact_pair_texts)] := Trim(
+                        direct_three_syllable_one_plus_two_candidate.text);
+                end;
             end;
             finalize_preserved_candidates_and_prepare_exit(Format(
                 'multi=%d seg=%d dangling=%d head_only=%d runtime=%d redup=%d short312head=1 allinit=%d',
@@ -133664,7 +134516,8 @@ begin
         copy_runtime_pool_to_internal(internal_candidates,
             internal_source_indices);
         apply_long_final_visible_candidate_ranking(internal_candidates,
-            internal_source_indices, True, baseline_top1, baseline_top2);
+            internal_source_indices, True, baseline_top1, baseline_top2,
+            True);
         note_pool_phase('rank');
 
         SetLength(merged_candidates, original_visible_count);
@@ -133756,7 +134609,8 @@ procedure TncEngine.apply_long_final_visible_candidate_ranking(
     var source_indices: TArray<Integer>;
     const unified_pool_final: Boolean;
     const exact_edge_baseline_top1: string;
-    const exact_edge_baseline_top2: string);
+    const exact_edge_baseline_top2: string;
+    const run_host_neural_reranker: Boolean);
 const
     c_ranking_stage_legacy_input = 0;
     c_ranking_stage_unified_ranker = 1;
@@ -133816,6 +134670,9 @@ var
     ordered_candidates: TncCandidateList;
     legacy_source_indices: TArray<Integer>;
     ordered_source_indices: TArray<Integer>;
+    neural_candidates: TncLongFinalCandidateDebugArray;
+    neural_candidate_indices: TArray<Integer>;
+    neural_selected_index: Integer;
     path_structure: TncLongPathStructureCacheValue;
     top_chain_score: Int64;
     abstain_features: TncLongFinalAbstainFeatures;
@@ -137031,6 +137888,157 @@ var
             features.complete_pool_edge_model_word_score_mean;
     end;
 
+    procedure apply_host_neural_reranker;
+    const
+        c_neural_candidate_limit = 16;
+    var
+        ordered_position_local: Integer;
+        candidate_index_local: Integer;
+        neural_index_local: Integer;
+        duplicate_index_local: Integer;
+        selected_candidate_index_local: Integer;
+        candidate_text_local: string;
+        duplicate_local: Boolean;
+    begin
+        if (not run_host_neural_reranker) or
+            (m_long_neural_reranker = nil) or (not unified_pool_final) or
+            (candidate_count < 2) or (m_last_lookup_syllable_count < 6) or
+            (m_last_lookup_syllable_count > 40) then
+        begin
+            Exit;
+        end;
+
+        SetLength(neural_candidates, Min(candidate_count,
+            c_neural_candidate_limit));
+        SetLength(neural_candidate_indices, Length(neural_candidates));
+        neural_index_local := 0;
+        for ordered_position_local := 0 to candidate_count - 1 do
+        begin
+            candidate_index_local := ordered_indices[ordered_position_local];
+            if (not rank_features[candidate_index_local].complete_match) or
+                (Trim(legacy_candidates[candidate_index_local].comment) <> '') or
+                (rank_features[candidate_index_local].text_units <>
+                m_last_lookup_syllable_count) then
+            begin
+                Continue;
+            end;
+            if rank_features[candidate_index_local].source_user or
+                rank_features[candidate_index_local].complete_user then
+            begin
+                { User choices remain authoritative and are never submitted to
+                  the corpus-trained model. }
+                SetLength(neural_candidates, 0);
+                SetLength(neural_candidate_indices, 0);
+                Exit;
+            end;
+            candidate_text_local := Trim(
+                legacy_candidates[candidate_index_local].text);
+            if candidate_text_local = '' then
+            begin
+                Continue;
+            end;
+            duplicate_local := False;
+            for duplicate_index_local := 0 to neural_index_local - 1 do
+            begin
+                if SameText(neural_candidates[duplicate_index_local].text,
+                    candidate_text_local) then
+                begin
+                    duplicate_local := True;
+                    Break;
+                end;
+            end;
+            if duplicate_local then
+            begin
+                Continue;
+            end;
+
+            neural_candidates[neural_index_local] :=
+                Default(TncLongFinalCandidateDebug);
+            neural_candidates[neural_index_local].legacy_rank :=
+                candidate_index_local + 1;
+            neural_candidates[neural_index_local].final_rank :=
+                neural_index_local + 1;
+            copy_features_to_debug(rank_features[candidate_index_local],
+                neural_candidates[neural_index_local]);
+            if SameText(candidate_text_local,
+                Trim(exact_edge_baseline_top1)) then
+            begin
+                neural_candidates[neural_index_local].exact_edge_shadow_rank := 1;
+            end
+            else if SameText(candidate_text_local,
+                Trim(exact_edge_baseline_top2)) then
+            begin
+                neural_candidates[neural_index_local].exact_edge_shadow_rank := 2;
+            end;
+            neural_candidates[neural_index_local].exact_edge_auditor_decision :=
+                exact_edge_auditor_decision;
+            neural_candidates[neural_index_local].exact_edge_pre_auditor_rank :=
+                exact_edge_pre_auditor_ranks[candidate_index_local];
+            if exact_edge_auditor_decision >= 0 then
+            begin
+                neural_candidates[neural_index_local].exact_edge_auditor_score :=
+                    Round(exact_edge_auditor_score * 1000000.0);
+                neural_candidates[neural_index_local].exact_edge_auditor_threshold :=
+                    Round(exact_edge_auditor_threshold * 1000000.0);
+            end;
+            neural_candidates[neural_index_local].ranker_score :=
+                rank_scores[candidate_index_local];
+            neural_candidates[neural_index_local].abstain_score := abstain_score;
+            neural_candidates[neural_index_local].ranker_applied := apply_ranker;
+            neural_candidates[neural_index_local].text :=
+                legacy_candidates[candidate_index_local].text;
+            neural_candidates[neural_index_local].comment :=
+                legacy_candidates[candidate_index_local].comment;
+            neural_candidates[neural_index_local].segment_path :=
+                legacy_paths[candidate_index_local];
+            neural_candidate_indices[neural_index_local] :=
+                candidate_index_local;
+            Inc(neural_index_local);
+            if neural_index_local >= c_neural_candidate_limit then
+            begin
+                Break;
+            end;
+        end;
+        SetLength(neural_candidates, neural_index_local);
+        SetLength(neural_candidate_indices, neural_index_local);
+        if neural_index_local < 2 then
+        begin
+            Exit;
+        end;
+
+        neural_selected_index := 0;
+        try
+            if (not m_long_neural_reranker.try_select(normalized_query,
+                neural_candidates, neural_selected_index)) or
+                (neural_selected_index <= 0) or
+                (neural_selected_index >= neural_index_local) then
+            begin
+                Exit;
+            end;
+        except
+            { A missing or unhealthy optional model must never break input. }
+            Exit;
+        end;
+
+        selected_candidate_index_local :=
+            neural_candidate_indices[neural_selected_index];
+        for ordered_position_local := 0 to candidate_count - 1 do
+        begin
+            if ordered_indices[ordered_position_local] =
+                selected_candidate_index_local then
+            begin
+                for candidate_index_local := ordered_position_local downto 1 do
+                begin
+                    ordered_indices[candidate_index_local] :=
+                        ordered_indices[candidate_index_local - 1];
+                end;
+                ordered_indices[0] := selected_candidate_index_local;
+                apply_ranker := True;
+                Break;
+            end;
+        end;
+    end;
+
 begin
     ranking_phase_tick := 0;
     ranking_phase_frequency := 0;
@@ -138252,6 +139260,10 @@ begin
     end;
     exact_edge_current_top_index := ordered_indices[0];
     apply_exact_edge_final_auditor;
+    { The optional host-only Transformer sees the settled complete Top16 and
+      may make one confidence-gated promotion. A nil/not-ready model is an
+      exact no-op, so TSF and cold-start paths retain the native ordering. }
+    apply_host_neural_reranker;
 
     if apply_ranker then
     begin
@@ -138291,7 +139303,8 @@ begin
       and final ranking work without affecting candidate order. }
     if (not m_config.debug_mode) and
         (not m_debug_capture_long_ranking_stages) and
-        (not m_debug_capture_long_beam_states) then
+        (not m_debug_capture_long_beam_states) and
+        (not m_debug_capture_long_final_candidates) then
     begin
         Exit;
     end;
@@ -160030,6 +161043,7 @@ var
             local_full_complete: Boolean;
             local_direct_exact: Boolean;
             local_supported_exact_pair: Boolean;
+            local_preserved_lm_prefix: Boolean;
             local_predictive_prefix: Boolean;
             local_particle_tail_rule: Boolean;
             local_fuzzy_exact: Boolean;
@@ -160144,6 +161158,12 @@ var
                 local_particle_tail_rule or
                 (local_predictive_prefix and
                 predictive_prefix_units_allowed_local(local_units)));
+            local_preserved_lm_prefix := (local_comment <> '') and
+                m_last_lookup_incremental_partial_reuse and
+                (candidate_value.source = cs_rule) and
+                (candidate_value.display_kind = cdk_lm_compound) and
+                (local_units >= 3) and
+                (local_units + local_comment_units = expected_units);
             if local_full_complete then
             begin
                 local_direct_exact := exact_weights.ContainsKey(local_text);
@@ -160314,7 +161334,8 @@ var
             end
             else if (local_comment <> '') and
                 (local_units + local_comment_units = expected_units) and
-                ((local_units = 1) or prefix_candidate_keys.ContainsKey(
+                (local_preserved_lm_prefix or (local_units = 1) or
+                prefix_candidate_keys.ContainsKey(
                 prefix_candidate_cache_key_local(local_text, local_tail_key)) or
                 prefix_candidate_matches_query_local(local_text, local_units,
                 local_tail_key)) then
@@ -188102,6 +189123,137 @@ end;
 function TncEngine.get_one_key_completion: TncOneKeyCompletion;
 begin
     Result := m_one_key_completion;
+end;
+
+function TncEngine.get_long_neural_completion_request(
+    out request: TncLongNeuralCompletionRequest): Boolean;
+begin
+    request := Default(TncLongNeuralCompletionRequest);
+    Result := m_has_long_neural_completion_request and
+        (m_one_key_completion.text = '') and
+        (m_long_neural_completion_request.query_prefix <> '') and
+        (m_long_neural_completion_request.query_syllables <> '') and
+        (m_long_neural_completion_request.top1_text <> '') and
+        (m_long_neural_completion_request.top1_anchor_path <> '');
+    if Result then
+    begin
+        request := m_long_neural_completion_request;
+    end;
+end;
+
+function TncEngine.apply_long_neural_completion(
+    const request: TncLongNeuralCompletionRequest;
+    const completion_result: TncLongNeuralCompletionResult): Boolean;
+var
+    suffix_segments: TArray<string>;
+    pinyin_segments: TArray<string>;
+    base_text: string;
+    base_path: string;
+    anchor_path: string;
+    suffix_text: string;
+    suffix_pinyin: string;
+    segment_text: string;
+    segment_pinyin: string;
+    segment_idx: Integer;
+    syllable_count: Integer;
+
+    function same_request(const left_value,
+        right_value: TncLongNeuralCompletionRequest): Boolean;
+    begin
+        Result := SameText(left_value.query_prefix,
+            right_value.query_prefix) and
+            SameText(left_value.query_syllables,
+            right_value.query_syllables) and
+            SameText(left_value.context_text,
+            right_value.context_text) and
+            SameText(left_value.top1_text, right_value.top1_text) and
+            SameText(left_value.top1_path, right_value.top1_path) and
+            SameText(left_value.top1_anchor_path,
+            right_value.top1_anchor_path) and
+            SameText(left_value.top2_text, right_value.top2_text) and
+            SameText(left_value.top2_path, right_value.top2_path) and
+            SameText(left_value.top2_anchor_path,
+            right_value.top2_anchor_path);
+    end;
+begin
+    Result := False;
+    if (m_dictionary = nil) or (m_one_key_completion.text <> '') or
+        (not m_has_long_neural_completion_request) or
+        (not same_request(request, m_long_neural_completion_request)) or
+        (completion_result.base_rank < 1) or
+        (completion_result.base_rank > 2) then
+    begin
+        Exit;
+    end;
+    if completion_result.base_rank = 1 then
+    begin
+        base_text := request.top1_text;
+        base_path := request.top1_path;
+        anchor_path := request.top1_anchor_path;
+    end
+    else
+    begin
+        base_text := request.top2_text;
+        base_path := request.top2_path;
+        anchor_path := request.top2_anchor_path;
+    end;
+    if (base_text = '') or (base_path = '') or (anchor_path = '') then
+    begin
+        Exit;
+    end;
+
+    suffix_segments := completion_result.suffix_path.Split([#3],
+        TStringSplitOptions.ExcludeEmpty);
+    pinyin_segments := completion_result.suffix_pinyin_path.Split([#3],
+        TStringSplitOptions.ExcludeEmpty);
+    if (Length(suffix_segments) < 1) or (Length(suffix_segments) > 3) or
+        (Length(pinyin_segments) <> Length(suffix_segments)) then
+    begin
+        Exit;
+    end;
+    suffix_text := '';
+    suffix_pinyin := '';
+    syllable_count := 0;
+    for segment_idx := 0 to High(suffix_segments) do
+    begin
+        segment_text := Trim(suffix_segments[segment_idx]);
+        segment_pinyin := normalize_pinyin_text(
+            pinyin_segments[segment_idx]);
+        if (segment_text = '') or (segment_pinyin = '') or
+            (not m_dictionary.is_base_entry(segment_pinyin,
+            segment_text)) then
+        begin
+            Exit;
+        end;
+        Inc(syllable_count,
+            get_effective_compact_pinyin_unit_count(segment_pinyin));
+        suffix_text := suffix_text + segment_text;
+        suffix_pinyin := suffix_pinyin + segment_pinyin;
+    end;
+    if (syllable_count < 1) or (syllable_count > 6) or
+        (not SameText(suffix_text,
+        Trim(completion_result.suffix_text))) then
+    begin
+        Exit;
+    end;
+
+    m_one_key_completion := Default(TncOneKeyCompletion);
+    m_one_key_completion.anchor_text := base_text;
+    m_one_key_completion.suffix_text := suffix_text;
+    m_one_key_completion.anchor_path := anchor_path;
+    m_one_key_completion.text := base_text + suffix_text;
+    m_one_key_completion.full_pinyin := request.query_prefix +
+        suffix_pinyin;
+    m_one_key_completion.path_text := base_path + #3 +
+        completion_result.suffix_path;
+    m_one_key_completion.weight := Round(
+        completion_result.confidence * 1000.0);
+    m_one_key_completion.prefix_anchored := True;
+    m_one_key_completion.source := okcs_long_neural;
+    m_one_key_completion_query_prefix := request.query_prefix;
+    m_one_key_completion_score := m_one_key_completion.weight;
+    m_has_long_neural_completion_request := False;
+    Result := True;
 end;
 
 function TncEngine.get_page_count_internal(const page_size: Integer): Integer;

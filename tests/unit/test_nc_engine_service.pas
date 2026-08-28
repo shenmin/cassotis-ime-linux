@@ -33,6 +33,7 @@ type
         procedure RecallsAndFiltersMixedJianpinCandidates;
         procedure BuildsSegmentedSentencePathWithoutLosingSyllables;
         procedure ReranksLongSegmentedPathsWithoutCrossingDirectTier;
+        procedure DeterministicSpanScoringWarmsCompleteCache;
         procedure PersistsExplicitUserWordsAcrossContextsAndRestart;
         procedure DeletesOnlySelectedUserCandidateWithControlDelete;
         procedure ClearsUserDictionaryWithoutResettingSettings;
@@ -58,6 +59,7 @@ implementation
 uses
     SysUtils,
     nc_sqlite,
+    nc_dictionary_sqlite,
     nc_dictionary_reader,
     nc_platform_compat,
     nc_shortcut,
@@ -884,6 +886,54 @@ begin
             engine_result.candidates[0].text);
     finally
         service.Free;
+    end;
+end;
+
+procedure TncEngineServiceTests.DeterministicSpanScoringWarmsCompleteCache;
+var
+    connection: TncSqliteConnection;
+    dictionary: TncSqliteDictionary;
+    texts: TArray<string>;
+    cold_scores: TArray<Integer>;
+    deterministic_scores: TArray<Integer>;
+    warm_scores: TArray<Integer>;
+    score_index: Integer;
+begin
+    connection := TncSqliteConnection.Create(FDatabasePath);
+    try
+        AssertTrue(connection.Open);
+        AssertTrue(connection.Exec('INSERT INTO dict_base_char_lm ' +
+            '(ngram, score, backoff) VALUES ' +
+            '(char(30002), -1200, -50), ' +
+            '(char(20057), -1300, -60), ' +
+            '(char(30002, 20057), -250, 0);'));
+    finally
+        connection.Free;
+    end;
+
+    SetLength(texts, 2);
+    texts[0] := UnicodeString(WideChar(30002)) + WideChar(20057);
+    texts[1] := UnicodeString(WideChar(20057)) + WideChar(30002);
+    dictionary := TncSqliteDictionary.Create(FDatabasePath,
+        FUserDatabasePath, False);
+    try
+        AssertTrue(dictionary.Open);
+        AssertFalse('cache-only span scoring must reject a cold cache',
+            dictionary.get_char_lm_cached_span_scores(texts, cold_scores));
+        AssertTrue('deterministic span scoring must load missing n-grams',
+            dictionary.get_char_lm_span_scores(texts,
+            deterministic_scores));
+        AssertTrue('cache-only span scoring must succeed after prewarming',
+            dictionary.get_char_lm_cached_span_scores(texts, warm_scores));
+        AssertEquals(Length(texts), Length(deterministic_scores));
+        AssertEquals(Length(texts), Length(warm_scores));
+        for score_index := 0 to High(texts) do
+        begin
+            AssertEquals(deterministic_scores[score_index],
+                warm_scores[score_index]);
+        end;
+    finally
+        dictionary.Free;
     end;
 end;
 

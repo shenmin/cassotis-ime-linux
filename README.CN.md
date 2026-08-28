@@ -19,29 +19,40 @@
 本项目源自
 [言泉输入法 Windows 版](https://github.com/shenmin/cassotis-ime)，并使用
 [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon) 生成的词库。
-共享的 Free Pascal 引擎以言泉输入法 v1.17.0 为行为基线，移植了候选召回、
-短词排序、长句排序、一键补全、用户学习、模糊拼音与双拼逻辑。词库查询、
-排序、补全与学习均在本地完成，不依赖云服务或网络连接。
+共享的 Free Pascal 引擎以言泉输入法 v1.18.0 为行为基线，移植了候选召回、
+短词排序、长句排序、一键补全、用户学习、模糊拼音与双拼逻辑，并接入语料训练
+的多阶段排序链、用于歧义长句的紧凑 Transformer 重排器和受约束的异步本地
+补全。词库查询、模型推理、补全与学习均在本地完成，不依赖云服务、网络连接
+或 GPU。
 
 ## 主要功能
 
 - 使用 [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon)
   生成的简体、繁体词库。
 - 支持全拼及微软、小鹤、自然码、搜狗、紫光、拼音加加六套双拼方案。
-- 移植言泉输入法 v1.17.0 的短词、上下文候选和长句本地统计排序模型链。
+- 移植言泉输入法 v1.18.0 的短词、上下文候选和长句本地统计排序模型链；
+  歧义长句比较可以使用与 Windows 版相同的宿主侧紧凑 Transformer，短词
+  exact 查询仍使用独立的确定性排序路径。
 - 持久化用户学习；选中已学习候选后按 `Ctrl+Delete` 可以删除。
-- 受控的一键补全和可配置快捷键。
+- 受控的一键补全和可配置快捷键；静态 exact 补全仍是第一层，只有静态层
+  未命中时，受限的后台模型才可能给出一个完全由词库 exact 词组成的续写，
+  置信不足则主动放弃。
 - IBus 与 Fcitx 5 使用各自的原生适配层，共享同一引擎、设置状态和用户
   词库；候选窗口外观与位置由当前框架及桌面主题负责。
 - 提供 GTK 3 设置程序，配置 Linux 版支持的跨平台输入选项。
 
 ## 已验证发行环境
 
-v0.1.1 同时提供 amd64 与 arm64 的 `.deb` 安装包和便携二进制包。完整发行
-验收目前在 Ubuntu 26.04 LTS、GNOME、Wayland、x86_64 环境完成。ARM64
-产物已在 Ubuntu 26.04.1 ARM64 主机上原生构建，并通过核心测试、简繁词库
-回归、产物一致性与完整性校验、软件包实际安装及已安装引擎自检；ARM64 上的
-完整 IBus/Fcitx 桌面矩阵和人工 GUI 验收仍待完成。
+v0.2.0 源码和二进制版本以言泉输入法和 Cassotis Lexicon v1.18.0、
+schema 24 词库为基线，并已在 x86_64 与 aarch64 上原生通过
+[BENCHMARK.CN.md](BENCHMARK.CN.md) 与 [RELEASE.md](RELEASE.md) 中定义的
+完整自动化发行门禁。
+
+v0.2.0 同时提供 amd64 与 arm64 的 `.deb` 安装包和便携二进制包。基于
+v1.18.0 的源码已分别在 Ubuntu 26.04 GNOME Wayland x86_64 与 Ubuntu
+26.04.1 GNOME Wayland aarch64 上完成验证。两个架构均通过干净原生构建、
+核心与词库测试、冻结质量门禁、产物与安装包检查，以及完整的 IBus/Fcitx
+自动化桌面矩阵。每次发行前仍需执行面向实际应用的人工界面检查。
 
 两种架构的安装包均包含 IBus 与 Fcitx 5 适配层，安装后选择其中一个框架
 启用即可。
@@ -60,7 +71,7 @@ v0.1.1 同时提供 amd64 与 arm64 的 `.deb` 安装包和便携二进制包。
 
 ```bash
 arch="$(dpkg --print-architecture)"  # 输出 amd64 或 arm64
-package="cassotis-ime_0.1.1_${arch}.deb"
+package="cassotis-ime_0.2.0_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -83,10 +94,10 @@ sudo apt install "./${package}"
 
 ```bash
 arch="$(uname -m)"  # 输出 x86_64 或 aarch64
-archive="cassotis-ime-linux-0.1.1-${arch}.tar.gz"
+archive="cassotis-ime-linux-0.2.0-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-0.1.1-${arch}"
+cd "cassotis-ime-linux-0.2.0-${arch}"
 sudo ./install.sh
 ```
 

@@ -42,11 +42,16 @@ cassotis_require_executable "$tests"
 cassotis_require_command python3
 
 python3 "$cassotis_root/tools/parity/validate_docs.py"
+python3 "$cassotis_root/tests/scripts/test_quality_validators.py"
+python3 "$cassotis_root/tests/scripts/test_threaded_entrypoints.py"
 python3 "$cassotis_root/scripts/fcitx5_profile.py" self-test
 bash "$cassotis_root/tests/scripts/test_gnome_input_sources.sh"
 bash "$cassotis_root/tests/scripts/test_session_refresh.sh"
+bash "$cassotis_root/tests/scripts/test_process_stop.sh"
 
 "$engine" --self-test
+"$cassotis_root/build/bin/cassotis-neural-runtime-smoke" \
+    "$cassotis_root/build/bin"
 
 if [[ -x "$ibus_adapter" && -f "$installed_dictionary" ]]; then
     adapter_test_dir="$(mktemp -d "${TMPDIR:-/tmp}/cassotis-adapter-test.XXXXXX")"

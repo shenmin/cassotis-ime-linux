@@ -133,7 +133,8 @@ install -m 0755 "$cassotis_root/packaging/portable/install.sh" \
 install -m 0755 "$cassotis_root/packaging/portable/uninstall.sh" \
     "$bundle_dir/uninstall.sh"
 for document in README.md README.CN.md BUILD.md RELEASE.md COMPATIBILITY.md \
-                BENCHMARK.md CONFIGURATION.md CONFIGURATION.CN.md \
+                BENCHMARK.md BENCHMARK.CN.md CONFIGURATION.md \
+                CONFIGURATION.CN.md \
                 CHANGELOG.md LICENSE NOTICE.md; do
     [[ ! -r "$cassotis_root/$document" ]] ||
         install -m 0644 "$cassotis_root/$document" "$bundle_dir/$document"

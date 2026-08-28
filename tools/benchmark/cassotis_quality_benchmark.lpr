@@ -3,9 +3,12 @@ program cassotis_quality_benchmark;
 {$codepage utf8}
 {$mode delphiunicode}
 {$H+}
+{$WARN IMPLICIT_STRING_CAST OFF}
+{$WARN IMPLICIT_STRING_CAST_LOSS OFF}
 
 uses
 {$IFDEF UNIX}
+    cthreads,
     cwstring,
 {$ENDIF}
     Classes,
@@ -14,6 +17,7 @@ uses
     nc_config,
     nc_dictionary_sqlite,
     nc_engine_intf,
+    nc_pinyin_transformer_host,
     nc_types,
     nc_platform_compat;
 
@@ -44,10 +48,21 @@ type
         peak_hwm_kb: QWord;
     end;
 
+    TLongAccuracyResult = record
+        case_index: string;
+        expected_text: string;
+        pinyin: string;
+        rank: Integer;
+        top1_text: string;
+    end;
+
+    TLongAccuracyResultArray = array of TLongAccuracyResult;
+
     TOptions = record
         dictionary_path: string;
         long_cases_path: string;
         short_cases_path: string;
+        neural_runtime_path: string;
         report_directory: string;
         long_limit: Integer;
         short_limit: Integer;
@@ -163,6 +178,7 @@ begin
     WriteLn('Usage: cassotis-quality-benchmark --dictionary DB [OPTIONS]');
     WriteLn('  --long-cases FILE    Windows long_sentence_16300.tsv');
     WriteLn('  --short-cases FILE   Windows word_input_yhwd_context.tsv');
+    WriteLn('  --neural-runtime DIR Enable the v1.18 long-sentence ONNX reranker');
     WriteLn('  --report-dir DIR     Summary/failure output directory');
     WriteLn('  --long-limit N       Limit long cases (0 means all)');
     WriteLn('  --short-limit N      Limit short cases (0 means all)');
@@ -194,6 +210,8 @@ begin
             Result.long_cases_path := ParamStr(index)
         else if argument = '--short-cases' then
             Result.short_cases_path := ParamStr(index)
+        else if argument = '--neural-runtime' then
+            Result.neural_runtime_path := ParamStr(index)
         else if argument = '--report-dir' then
             Result.report_directory := ParamStr(index)
         else if argument = '--long-limit' then
@@ -392,13 +410,20 @@ begin
             Exit(index + 1);
 end;
 
-function create_benchmark_engine(const dictionary_path: string): TncEngine;
+function create_benchmark_engine(const dictionary_path: string;
+    const neural_runtime_path: string = '';
+    const neural_result_timeout_ms: QWord =
+    c_nc_pinyin_transformer_result_timeout_ms): TncEngine;
 var
     config: TncEngineConfig;
     provider: TncSqliteDictionary;
+    reranker: IncLongNeuralReranker;
+    reranker_instance: TncPinyinTransformerHostReranker;
 begin
     config := nc_default_engine_config;
     Result := TncEngine.Create(config, False, True, False);
+    reranker := nil;
+    reranker_instance := nil;
     provider := TncSqliteDictionary.Create(dictionary_path, '', False);
     try
         if not provider.open or not provider.base_ready then
@@ -406,7 +431,18 @@ begin
         Result.configure_dictionary_paths(dictionary_path, '', '');
         Result.adopt_ready_dictionary_provider(provider);
         provider := nil;
+        if neural_runtime_path <> '' then
+        begin
+            reranker_instance := TncPinyinTransformerHostReranker.Create(
+                neural_runtime_path, False, neural_result_timeout_ms);
+            reranker := reranker_instance;
+            if not reranker_instance.Ready then
+                raise Exception.Create('neural runtime failed: ' +
+                    reranker_instance.last_error);
+            Result.set_long_neural_reranker(reranker);
+        end;
     except
+        reranker := nil;
         provider.Free;
         Result.Free;
         Result := nil;
@@ -522,21 +558,33 @@ var
     line_number: Integer;
     fields: array[0..4] of string;
     line: string;
-    engine: TncEngine;
+    accuracy_engine: TncEngine;
+    latency_engine: TncEngine;
     candidates: TncCandidateList;
     elapsed_ms: QWord;
     rank: Integer;
+    result_index: Integer;
+    accuracy_results: TLongAccuracyResultArray;
     totals: TTrackTotals;
     failures: TUTF8LineWriter;
+    latencies: TUTF8LineWriter;
 begin
     content := read_utf8_file(options.long_cases_path);
-    engine := create_benchmark_engine(options.dictionary_path);
+    accuracy_results := nil;
+    accuracy_engine := create_benchmark_engine(options.dictionary_path,
+        options.neural_runtime_path, 0);
+    accuracy_engine.debug_set_search_budget_policy(sbm_deterministic, 100);
     failures := TUTF8LineWriter.Create(
         IncludeTrailingPathDelimiter(options.report_directory) +
         'long-failures.tsv');
+    latencies := TUTF8LineWriter.Create(
+        IncludeTrailingPathDelimiter(options.report_directory) +
+        'long-latencies.tsv');
     try
         failures.WriteLine('index'#9'expected'#9'pinyin'#9'rank'#9'top1'#9'latency_ms');
+        latencies.WriteLine('index'#9'expected'#9'pinyin'#9'rank'#9'top1'#9'latency_ms');
         totals := Default(TTrackTotals);
+        SetLength(accuracy_results, 0);
         cursor := 1;
         line_number := 0;
         while next_line(content, cursor, line) do
@@ -547,30 +595,75 @@ begin
             if split_tabs(line, fields) < 5 then
                 raise Exception.CreateFmt('invalid long case at line %d',
                     [line_number]);
-            current_track := 'long';
+            current_track := 'long.accuracy';
             current_case := fields[0];
             current_query := fields[4];
-            elapsed_ms := run_query(engine, LowerCase(Trim(fields[4])), '',
+            run_query(accuracy_engine, LowerCase(Trim(fields[4])), '',
                 candidates);
             sample_process_memory(current_track, current_case, totals);
             rank := candidate_rank(candidates, Trim(fields[3]));
-            record_rank(totals, rank, False, elapsed_ms);
-            if rank <> 1 then
-                failures.WriteLine(fields[0] + #9 + fields[3] + #9 +
-                    fields[4] + #9 + IntToStr(rank) + #9 +
-                    IfThen(Length(candidates) > 0,
-                        candidates[0].text, '') + #9 +
-                    IntToStr(elapsed_ms));
+            record_rank(totals, rank, False, 0);
+            result_index := Length(accuracy_results);
+            SetLength(accuracy_results, result_index + 1);
+            accuracy_results[result_index].case_index := fields[0];
+            accuracy_results[result_index].expected_text := fields[3];
+            accuracy_results[result_index].pinyin := fields[4];
+            accuracy_results[result_index].rank := rank;
+            accuracy_results[result_index].top1_text :=
+                IfThen(Length(candidates) > 0, candidates[0].text, '');
             if (totals.total mod options.progress_every) = 0 then
-                WriteLn('progress.long=', totals.total);
+                WriteLn('progress.long.accuracy=', totals.total);
             if (options.long_limit > 0) and
                 (totals.total >= options.long_limit) then
                 Break;
         end;
+        accuracy_engine.Free;
+        accuracy_engine := nil;
+
+        latency_engine := create_benchmark_engine(options.dictionary_path,
+            options.neural_runtime_path);
+        try
+            latency_engine.debug_set_search_budget_policy(sbm_production, 100);
+            for result_index := 0 to High(accuracy_results) do
+            begin
+                current_track := 'long.latency';
+                current_case := accuracy_results[result_index].case_index;
+                current_query := accuracy_results[result_index].pinyin;
+                elapsed_ms := run_query(latency_engine,
+                    LowerCase(Trim(current_query)), '', candidates);
+                sample_process_memory(current_track, current_case, totals);
+                totals.latencies[result_index] := elapsed_ms;
+                Inc(totals.elapsed_ms, elapsed_ms);
+                latencies.WriteLine(accuracy_results[result_index].case_index +
+                    #9 + accuracy_results[result_index].expected_text + #9 +
+                    accuracy_results[result_index].pinyin + #9 +
+                    IntToStr(accuracy_results[result_index].rank) + #9 +
+                    accuracy_results[result_index].top1_text + #9 +
+                    IntToStr(elapsed_ms));
+                if accuracy_results[result_index].rank <> 1 then
+                    failures.WriteLine(
+                        accuracy_results[result_index].case_index + #9 +
+                        accuracy_results[result_index].expected_text + #9 +
+                        accuracy_results[result_index].pinyin + #9 +
+                        IntToStr(accuracy_results[result_index].rank) + #9 +
+                        accuracy_results[result_index].top1_text + #9 +
+                        IntToStr(elapsed_ms));
+                if ((result_index + 1) mod options.progress_every) = 0 then
+                    WriteLn('progress.long.latency=', result_index + 1);
+            end;
+        finally
+            latency_engine.Free;
+        end;
+        write_metric(writer, 'long.accuracy_mode', 'deterministic');
+        write_metric(writer, 'long.accuracy_neural_timeout_ms', '0');
+        write_metric(writer, 'long.latency_mode', 'production');
+        write_metric(writer, 'long.latency_neural_timeout_ms',
+            IntToStr(c_nc_pinyin_transformer_result_timeout_ms));
         write_totals(writer, 'long', totals);
     finally
+        latencies.Free;
         failures.Free;
-        engine.Free;
+        accuracy_engine.Free;
     end;
 end;
 
@@ -681,6 +774,12 @@ begin
                 resource_events.WriteLine(
                     'track'#9'case'#9'vm_rss_kb'#9'vm_hwm_kb');
                 write_metric(summary_writer, 'format', 'cassotis-quality-v1');
+                if options.neural_runtime_path = '' then
+                    write_metric(summary_writer, 'long.neural_runtime',
+                        'disabled')
+                else
+                    write_metric(summary_writer, 'long.neural_runtime',
+                        'enabled');
                 if options.long_cases_path <> '' then
                     run_long_suite(options, summary_writer);
                 if options.short_cases_path <> '' then

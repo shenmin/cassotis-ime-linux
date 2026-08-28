@@ -6,6 +6,7 @@ program cassotis_candidate_benchmark;
 
 uses
 {$IFDEF UNIX}
+    cthreads,
     cwstring,
 {$ENDIF}
     SysUtils,

@@ -17,6 +17,48 @@ ROOT = Path(__file__).resolve().parents[2]
 BASELINE_PATH = ROOT / "porting" / "windows-baseline.txt"
 SOURCE_MANIFEST_PATH = ROOT / "porting" / "source-parity-manifest.json"
 DIRECTIVE_RE = re.compile(r"^\{\$(?:codepage|mode|H\+).*$", re.IGNORECASE)
+DEPLOYED_MODEL_ASSETS = (
+    (
+        "data/models/pinyin_transformer/pinyin_difference_reranker_int8.onnx",
+        "pinyin_transformer_model_sha256",
+    ),
+    (
+        "data/models/pinyin_transformer/vocab.json",
+        "pinyin_transformer_vocab_sha256",
+    ),
+    (
+        "data/models/local_completion/local_completion_path_ranker_int8.onnx",
+        "local_completion_model_sha256",
+    ),
+    (
+        "data/models/local_completion/local_completion_index.bin",
+        "local_completion_index_sha256",
+    ),
+    (
+        "data/models/local_completion/model_manifest.json",
+        "local_completion_manifest_sha256",
+    ),
+)
+LINUX_RUNTIME_ASSETS = (
+    (
+        "third_party/onnxruntime/linux-x86_64/libonnxruntime.so.1.20.1",
+        "onnxruntime_linux_x86_64_sha256",
+    ),
+    (
+        "third_party/onnxruntime/linux-x86_64/"
+        "libonnxruntime_providers_shared.so",
+        "onnxruntime_provider_linux_x86_64_sha256",
+    ),
+    (
+        "third_party/onnxruntime/linux-aarch64/libonnxruntime.so.1.20.1",
+        "onnxruntime_linux_aarch64_sha256",
+    ),
+    (
+        "third_party/onnxruntime/linux-aarch64/"
+        "libonnxruntime_providers_shared.so",
+        "onnxruntime_provider_linux_aarch64_sha256",
+    ),
+)
 
 
 def read_baseline() -> dict[str, str]:
@@ -136,8 +178,8 @@ def validate_models(windows_root: Path) -> tuple[int, list[str]]:
     linux_engine = ROOT / "src" / "engine"
     names = sorted(path.name for path in windows_engine.glob("nc_*_model.pas"))
     failures: list[str] = []
-    if len(names) != 40:
-        failures.append(f"expected 40 Windows generated models, found {len(names)}")
+    if len(names) != 42:
+        failures.append(f"expected 42 Windows generated models, found {len(names)}")
     for name in names:
         windows_path = windows_engine / name
         linux_path = linux_engine / name
@@ -158,7 +200,77 @@ def validate_models(windows_root: Path) -> tuple[int, list[str]]:
         linux_evidence
     ):
         failures.append(f"expanded evidence differs: {evidence_name}")
+
+    gate_name = "nc_pinyin_transformer_ambiguity_gate_model.pas"
+    windows_gate = windows_root / "src" / "host" / gate_name
+    linux_gate = ROOT / "src" / "host" / gate_name
+    if not windows_gate.is_file() or not linux_gate.is_file():
+        failures.append(f"missing Transformer ambiguity gate: {gate_name}")
+    elif normalize_generated_pascal(windows_gate) != normalize_generated_pascal(
+        linux_gate
+    ):
+        failures.append(f"Transformer ambiguity gate differs: {gate_name}")
     return len(names), failures
+
+
+def validate_deployed_assets(
+    windows_root: Path, windows_revision: str, baseline: dict[str, str]
+) -> tuple[list[dict[str, object]], list[str]]:
+    results: list[dict[str, object]] = []
+    failures: list[str] = []
+    for path, baseline_key in DEPLOYED_MODEL_ASSETS:
+        expected = baseline.get(baseline_key, "").lower()
+        try:
+            windows_hash = hashlib.sha256(
+                git_file(windows_root, windows_revision, path)
+            ).hexdigest()
+        except (OSError, subprocess.CalledProcessError):
+            windows_hash = ""
+        try:
+            linux_hash = sha256_file(ROOT / path)
+        except OSError:
+            linux_hash = ""
+        ok = bool(expected) and windows_hash == expected and linux_hash == expected
+        if not ok:
+            failures.append(f"deployed model asset differs: {path}")
+        results.append(
+            {
+                "path": path,
+                "baseline_key": baseline_key,
+                "sha256": linux_hash,
+                "windows_sha256": windows_hash,
+                "expected_sha256": expected,
+                "ok": ok,
+            }
+        )
+
+    runtime_version = baseline.get("onnxruntime_version", "")
+    version_path = ROOT / "third_party" / "onnxruntime" / "VERSION"
+    try:
+        actual_version = version_path.read_text(encoding="utf-8-sig").strip()
+    except OSError:
+        actual_version = ""
+    if not runtime_version or actual_version != runtime_version:
+        failures.append("bundled ONNX Runtime version differs from baseline")
+    for path, baseline_key in LINUX_RUNTIME_ASSETS:
+        expected = baseline.get(baseline_key, "").lower()
+        try:
+            actual = sha256_file(ROOT / path)
+        except OSError:
+            actual = ""
+        ok = bool(expected) and actual == expected
+        if not ok:
+            failures.append(f"bundled ONNX Runtime asset differs: {path}")
+        results.append(
+            {
+                "path": path,
+                "baseline_key": baseline_key,
+                "sha256": actual,
+                "expected_sha256": expected,
+                "ok": ok,
+            }
+        )
+    return results, failures
 
 
 def validate_dictionary(
@@ -214,6 +326,10 @@ def main() -> int:
 
     model_count, model_failures = validate_models(args.windows_root)
     failures.extend(model_failures)
+    deployed_assets, deployed_asset_failures = validate_deployed_assets(
+        args.windows_root, baseline["reviewed_through"], baseline
+    )
+    failures.extend(deployed_asset_failures)
     reviewed_sources, reviewed_source_failures = validate_reviewed_sources(
         args.windows_root, baseline["reviewed_through"]
     )
@@ -242,6 +358,7 @@ def main() -> int:
         "lexicon_worktree_clean": lexicon_clean,
         "generated_models": model_count,
         "expanded_evidence": True,
+        "deployed_assets": deployed_assets,
         "reviewed_production_sources": reviewed_sources,
         "dictionary": dictionary,
         "dictionary_traditional": traditional_dictionary,

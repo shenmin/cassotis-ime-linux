@@ -298,6 +298,9 @@ type
             out results: TncOneKeyCompletionList): Boolean; override;
         function lookup_long_one_key_completions(const anchor_path: string;
             out results: TncLongOneKeyCompletionList): Boolean; override;
+        function lookup_long_one_key_completions_by_text(
+            const anchor_text: string;
+            out results: TncLongOneKeyCompletionList): Boolean; override;
         function lookup_one_key_completion_competition(
             const pinyin_prefix: string; const left_context: string;
             out results: TncOneKeyCompletionCompetitionEvidenceList): Boolean; override;
@@ -368,6 +371,8 @@ type
             out scores: TArray<Integer>): Boolean; override;
         function get_char_reverse_lm_suffix_scores(const texts: TArray<string>;
             out scores: TArray<Integer>): Boolean; override;
+        function get_char_lm_span_scores(const texts: TArray<string>;
+            out scores: TArray<Integer>): Boolean; override;
         function get_char_lm_cached_span_scores(const texts: TArray<string>;
             out scores: TArray<Integer>): Boolean; override;
         function get_char_lm_continuation_scores(const left_context: string;
@@ -424,14 +429,15 @@ const
         '    value TEXT NOT NULL' + sLineBreak +
         ');' + sLineBreak +
         sLineBreak +
-        'INSERT OR IGNORE INTO meta(key, value) VALUES(''schema_version'', ''22'');' + sLineBreak +
+        'INSERT OR IGNORE INTO meta(key, value) VALUES(''schema_version'', ''24'');' + sLineBreak +
         sLineBreak +
         'CREATE TABLE IF NOT EXISTS dict_base (' + sLineBreak +
         '    id INTEGER PRIMARY KEY AUTOINCREMENT,' + sLineBreak +
         '    pinyin TEXT NOT NULL,' + sLineBreak +
         '    text TEXT NOT NULL,' + sLineBreak +
         '    weight INTEGER DEFAULT 0,' + sLineBreak +
-        '    comment TEXT DEFAULT ''''' + sLineBreak +
+        '    comment TEXT DEFAULT '''',' + sLineBreak +
+        '    contains_popularity_eligible INTEGER NOT NULL DEFAULT 1' + sLineBreak +
         ');' + sLineBreak +
         sLineBreak +
         'CREATE INDEX IF NOT EXISTS idx_dict_base_pinyin ON dict_base(pinyin);' + sLineBreak +
@@ -736,6 +742,21 @@ const
         sLineBreak +
         'CREATE INDEX IF NOT EXISTS idx_dict_base_long_completion_anchor ' +
         'ON dict_base_long_completion(anchor_path, evidence DESC, source_count DESC);' +
+        sLineBreak +
+        sLineBreak +
+        'CREATE TABLE IF NOT EXISTS dict_base_long_completion_text (' + sLineBreak +
+        '    anchor_text TEXT NOT NULL,' + sLineBreak +
+        '    anchor_path TEXT NOT NULL,' + sLineBreak +
+        '    suffix_pinyin TEXT NOT NULL,' + sLineBreak +
+        '    suffix_text TEXT NOT NULL,' + sLineBreak +
+        '    suffix_path TEXT NOT NULL,' + sLineBreak +
+        '    evidence INTEGER NOT NULL DEFAULT 0,' + sLineBreak +
+        '    source_count INTEGER NOT NULL DEFAULT 0,' + sLineBreak +
+        '    PRIMARY KEY(anchor_text, anchor_path, suffix_pinyin, suffix_text)' + sLineBreak +
+        ') WITHOUT ROWID;' + sLineBreak +
+        sLineBreak +
+        'CREATE INDEX IF NOT EXISTS idx_dict_base_long_completion_text_anchor ' +
+        'ON dict_base_long_completion_text(anchor_text, evidence DESC, source_count DESC);' +
         sLineBreak +
         sLineBreak +
         'CREATE TABLE IF NOT EXISTS dict_base_char_lm (' + sLineBreak +
@@ -4375,6 +4396,7 @@ const
         'FROM dict_user_long_completion_feedback WHERE anchor_path = ?1';
 var
     anchor_key: string;
+    cache_key: string;
     item: TncLongOneKeyCompletion;
     stmt: Psqlite3_stmt;
     step_result: Integer;
@@ -4391,9 +4413,10 @@ begin
     begin
         Exit;
     end;
+    cache_key := 'path' + #1 + anchor_key;
     refresh_user_data_version_if_changed(False);
     if (m_long_one_key_completion_cache <> nil) and
-        m_long_one_key_completion_cache.TryGetValue(anchor_key, results) then
+        m_long_one_key_completion_cache.TryGetValue(cache_key, results) then
     begin
         results := Copy(results, 0, Length(results));
         Exit(Length(results) > 0);
@@ -4411,6 +4434,8 @@ begin
         while step_result = SQLITE_ROW do
         begin
             item := Default(TncLongOneKeyCompletion);
+            item.anchor_text := StringReplace(anchor_key, #3, '',
+                [rfReplaceAll]);
             item.anchor_path := anchor_key;
             item.suffix_pinyin := m_base_connection.ColumnText(stmt, 0);
             item.suffix_text := Trim(m_base_connection.ColumnText(stmt, 1));
@@ -4478,7 +4503,88 @@ begin
         begin
             m_long_one_key_completion_cache.Clear;
         end;
-        m_long_one_key_completion_cache.AddOrSetValue(anchor_key,
+        m_long_one_key_completion_cache.AddOrSetValue(cache_key,
+            Copy(results, 0, Length(results)));
+    end;
+    Result := Length(results) > 0;
+end;
+
+function TncSqliteDictionary.lookup_long_one_key_completions_by_text(
+    const anchor_text: string;
+    out results: TncLongOneKeyCompletionList): Boolean;
+const
+    c_result_cache_limit = 2048;
+    c_query_limit = 64;
+    completion_sql =
+        'SELECT anchor_path, suffix_pinyin, suffix_text, suffix_path, ' +
+        'evidence, source_count FROM dict_base_long_completion_text ' +
+        'WHERE anchor_text = ?1 AND evidence > 0 ' +
+        'ORDER BY evidence DESC, source_count DESC, length(suffix_text), ' +
+        'suffix_text LIMIT ?2';
+var
+    anchor_key: string;
+    cache_key: string;
+    item: TncLongOneKeyCompletion;
+    stmt: Psqlite3_stmt;
+    step_result: Integer;
+begin
+    SetLength(results, 0);
+    Result := False;
+    anchor_key := Trim(anchor_text);
+    if (anchor_key = '') or (not ensure_open) or (not m_base_ready) or
+        (m_base_connection = nil) then
+    begin
+        Exit;
+    end;
+    cache_key := 'text' + #1 + anchor_key;
+    if (m_long_one_key_completion_cache <> nil) and
+        m_long_one_key_completion_cache.TryGetValue(cache_key, results) then
+    begin
+        results := Copy(results, 0, Length(results));
+        Exit(Length(results) > 0);
+    end;
+
+    stmt := nil;
+    try
+        if (not m_base_connection.prepare(completion_sql, stmt)) or
+            (not m_base_connection.BindText(stmt, 1, anchor_key)) or
+            (not m_base_connection.BindInt(stmt, 2, c_query_limit)) then
+        begin
+            Exit;
+        end;
+        step_result := m_base_connection.step(stmt);
+        while step_result = SQLITE_ROW do
+        begin
+            item := Default(TncLongOneKeyCompletion);
+            item.anchor_text := anchor_key;
+            item.anchor_path := m_base_connection.ColumnText(stmt, 0);
+            item.suffix_pinyin := m_base_connection.ColumnText(stmt, 1);
+            item.suffix_text := Trim(m_base_connection.ColumnText(stmt, 2));
+            item.suffix_path := m_base_connection.ColumnText(stmt, 3);
+            item.evidence := m_base_connection.ColumnInt(stmt, 4);
+            item.source_count := m_base_connection.ColumnInt(stmt, 5);
+            if (item.anchor_path <> '') and (item.suffix_pinyin <> '') and
+                (item.suffix_text <> '') and (item.suffix_path <> '') then
+            begin
+                SetLength(results, Length(results) + 1);
+                results[High(results)] := item;
+            end;
+            step_result := m_base_connection.step(stmt);
+        end;
+    finally
+        if stmt <> nil then
+        begin
+            m_base_connection.finalize(stmt);
+        end;
+    end;
+
+    if m_long_one_key_completion_cache <> nil then
+    begin
+        if m_long_one_key_completion_cache.Count >= c_result_cache_limit then
+        begin
+            m_long_one_key_completion_cache.Clear;
+        end;
+        m_long_one_key_completion_cache.AddOrSetValue(cache_key,
             Copy(results, 0, Length(results)));
     end;
     Result := Length(results) > 0;
@@ -5299,14 +5405,16 @@ begin
             Exit;
         end;
 
-        candidate := IncludeTrailingPathDelimiter(base_dir) + 'data\\schema.sql';
+        candidate := IncludeTrailingPathDelimiter(base_dir) + 'data' +
+            PathDelim + 'schema.sql';
         if FileExists(candidate) then
         begin
             Result := candidate;
             Exit;
         end;
 
-        candidate := ExpandFileName(IncludeTrailingPathDelimiter(base_dir) + '..\\data\\schema.sql');
+        candidate := ExpandFileName(IncludeTrailingPathDelimiter(base_dir) +
+            '..' + PathDelim + 'data' + PathDelim + 'schema.sql');
         if FileExists(candidate) then
         begin
             Result := candidate;
@@ -5314,7 +5422,7 @@ begin
         end;
     end;
 
-    candidate := ExpandFileName('data\\schema.sql');
+    candidate := ExpandFileName('data' + PathDelim + 'schema.sql');
     if FileExists(candidate) then
     begin
         Result := candidate;
@@ -5385,6 +5493,16 @@ begin
     end;
 
     if not connection.exec(schema_text) then
+    begin
+        Result := False;
+        Exit;
+    end;
+
+    if (not table_has_column('dict_base',
+        'contains_popularity_eligible')) and
+        (not connection.exec(
+        'ALTER TABLE dict_base ADD COLUMN ' +
+        'contains_popularity_eligible INTEGER NOT NULL DEFAULT 1;')) then
     begin
         Result := False;
         Exit;
@@ -5917,6 +6035,31 @@ begin
     end;
 
     if not connection.exec(
+        'CREATE TABLE IF NOT EXISTS dict_base_long_completion_text (' +
+        'anchor_text TEXT NOT NULL,' +
+        'anchor_path TEXT NOT NULL,' +
+        'suffix_pinyin TEXT NOT NULL,' +
+        'suffix_text TEXT NOT NULL,' +
+        'suffix_path TEXT NOT NULL,' +
+        'evidence INTEGER NOT NULL DEFAULT 0,' +
+        'source_count INTEGER NOT NULL DEFAULT 0,' +
+        'PRIMARY KEY(anchor_text, anchor_path, suffix_pinyin, suffix_text)' +
+        ') WITHOUT ROWID;') then
+    begin
+        Result := False;
+        Exit;
+    end;
+
+    if not connection.exec(
+        'CREATE INDEX IF NOT EXISTS idx_dict_base_long_completion_text_anchor ' +
+        'ON dict_base_long_completion_text(anchor_text, evidence DESC, ' +
+        'source_count DESC);') then
+    begin
+        Result := False;
+        Exit;
+    end;
+
+    if not connection.exec(
         'CREATE TABLE IF NOT EXISTS dict_base_char_lm (' +
         'ngram TEXT NOT NULL PRIMARY KEY,' +
         'score INTEGER NOT NULL DEFAULT 0,' +
@@ -6061,6 +6204,16 @@ begin
     if schema_version < 22 then
     begin
         set_schema_version(connection, 22);
+    end;
+
+    if schema_version < 23 then
+    begin
+        set_schema_version(connection, 23);
+    end;
+
+    if schema_version < 24 then
+    begin
+        set_schema_version(connection, 24);
     end;
 
     Result := True;
@@ -16274,6 +16427,13 @@ function TncSqliteDictionary.get_char_lm_suffix_scores(const texts: TArray<strin
     out scores: TArray<Integer>): Boolean;
 begin
     Result := get_char_lm_text_scores_internal(texts, scores, False, '', True);
+end;
+
+function TncSqliteDictionary.get_char_lm_span_scores(
+    const texts: TArray<string>; out scores: TArray<Integer>): Boolean;
+begin
+    Result := get_char_lm_text_scores_internal(texts, scores, False, '',
+        False);
 end;
 
 function TncSqliteDictionary.get_char_lm_cached_scores_internal(

@@ -17,6 +17,7 @@ type
         procedure RejectsMalformedPayloadAndStaleGeneration;
         procedure EchoesPingAndRejectsResponseFrames;
         procedure RoundTripsEngineStateRequests;
+        procedure PollsAsynchronousEngineResult;
         procedure AcknowledgesShutdownAfterValidEmptyRequest;
     end;
 
@@ -25,10 +26,102 @@ implementation
 uses
     SysUtils,
     nc_types,
+    nc_engine_contract,
     nc_engine_service,
     nc_ipc_protocol,
     nc_ipc_payload,
     nc_ipc_dispatcher;
+
+type
+    TncPollingTestEngine = class(TncEngineCore)
+    public
+        last_context_id: QWord;
+        last_generation_id: QWord;
+        function CreateContext(const context_id: QWord): Boolean; override;
+        function DestroyContext(const context_id: QWord): Boolean; override;
+        function ResetContext(const context_id: QWord;
+            const generation_id: QWord): Boolean; override;
+        function SetActive(const context_id: QWord; const active: Boolean;
+            const generation_id: QWord): Boolean; override;
+        function SetSurrounding(const context_id: QWord; const text: string;
+            const cursor_offset: Integer; const generation_id: QWord): Boolean;
+            override;
+        function GetState(out state: TncEngineState): Boolean; override;
+        function SetState(const state: TncEngineState): Boolean; override;
+        function ClearUserDictionary: Boolean; override;
+        function ProcessKey(const context_id: QWord;
+            const generation_id: QWord;
+            const key_event: TncKeyEvent): TncEngineResult; override;
+        function PollResult(const context_id: QWord;
+            const generation_id: QWord): TncEngineResult; override;
+    end;
+
+function TncPollingTestEngine.CreateContext(
+    const context_id: QWord): Boolean;
+begin
+    Result := True;
+end;
+
+function TncPollingTestEngine.DestroyContext(
+    const context_id: QWord): Boolean;
+begin
+    Result := True;
+end;
+
+function TncPollingTestEngine.ResetContext(const context_id: QWord;
+    const generation_id: QWord): Boolean;
+begin
+    Result := True;
+end;
+
+function TncPollingTestEngine.SetActive(const context_id: QWord;
+    const active: Boolean; const generation_id: QWord): Boolean;
+begin
+    Result := True;
+end;
+
+function TncPollingTestEngine.SetSurrounding(const context_id: QWord;
+    const text: string; const cursor_offset: Integer;
+    const generation_id: QWord): Boolean;
+begin
+    Result := True;
+end;
+
+function TncPollingTestEngine.GetState(out state: TncEngineState): Boolean;
+begin
+    nc_initialize_engine_state(state);
+    Result := True;
+end;
+
+function TncPollingTestEngine.SetState(
+    const state: TncEngineState): Boolean;
+begin
+    Result := True;
+end;
+
+function TncPollingTestEngine.ClearUserDictionary: Boolean;
+begin
+    Result := True;
+end;
+
+function TncPollingTestEngine.ProcessKey(const context_id: QWord;
+    const generation_id: QWord;
+    const key_event: TncKeyEvent): TncEngineResult;
+begin
+    nc_initialize_engine_result(Result);
+end;
+
+function TncPollingTestEngine.PollResult(const context_id: QWord;
+    const generation_id: QWord): TncEngineResult;
+begin
+    last_context_id := context_id;
+    last_generation_id := generation_id;
+    nc_initialize_engine_result(Result);
+    Result.handled := True;
+    Result.async_pending := False;
+    Result.query_text := 'pianruo';
+    Result.completion_text := #$7FE9#$82E5#$60CA#$9E3F;
+end;
 
 procedure InitializeRequest(out request: TncIpcEnvelope;
     const message_type: TncIpcMessageType; const request_id: QWord;
@@ -217,6 +310,41 @@ begin
     finally
         dispatcher.Free;
         service.Free;
+    end;
+end;
+
+procedure TncIpcDispatcherTests.PollsAsynchronousEngineResult;
+var
+    engine: TncPollingTestEngine;
+    dispatcher: TncIpcDispatcher;
+    request: TncIpcEnvelope;
+    response: TncIpcEnvelope;
+    engine_result: TncEngineResult;
+    error_text: string;
+begin
+    engine := TncPollingTestEngine.Create;
+    dispatcher := TncIpcDispatcher.Create(engine);
+    try
+        InitializeRequest(request, imt_poll_result, 25, 77, 9);
+        dispatcher.DispatchRequest(request, response);
+        AssertSuccessfulResponse(Self, request, response);
+        AssertEquals(Ord(imt_engine_result), Ord(response.message_type));
+        AssertEquals(Int64(77), Int64(engine.last_context_id));
+        AssertEquals(Int64(9), Int64(engine.last_generation_id));
+        AssertTrue(nc_try_decode_engine_result_payload(response.payload,
+            engine_result, error_text));
+        AssertTrue(engine_result.handled);
+        AssertFalse(engine_result.async_pending);
+        AssertEquals('pianruo', engine_result.query_text);
+        AssertEquals(#$7FE9#$82E5#$60CA#$9E3F,
+            engine_result.completion_text);
+
+        request.payload := nc_utf8_payload('invalid');
+        dispatcher.DispatchRequest(request, response);
+        AssertEquals(Ord(imt_error), Ord(response.message_type));
+    finally
+        dispatcher.Free;
+        engine.Free;
     end;
 end;
 

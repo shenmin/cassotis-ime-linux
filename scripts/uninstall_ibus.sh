@@ -83,40 +83,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-stop_installed_engine_by_path() {
-    local executable_link
-    local executable_path
-    local process_id
-    local attempt
-    local any_running
-    local -a process_ids=()
-
-    for executable_link in /proc/[0-9]*/exe; do
-        executable_path="$(readlink "$executable_link" 2>/dev/null || true)"
-        if [[ "$executable_path" == "$installed_engine_path" ||
-              "$executable_path" == "$installed_engine_path (deleted)" ]]; then
-            process_id="${executable_link#/proc/}"
-            process_id="${process_id%/exe}"
-            process_ids+=("$process_id")
-        fi
-    done
-    [[ ${#process_ids[@]} -gt 0 ]] || return 0
-
-    kill -TERM "${process_ids[@]}" 2>/dev/null || true
-    for ((attempt = 0; attempt < 40; attempt += 1)); do
-        any_running=0
-        for process_id in "${process_ids[@]}"; do
-            if kill -0 "$process_id" 2>/dev/null; then
-                any_running=1
-                break
-            fi
-        done
-        [[ $any_running -eq 0 ]] && return 0
-        sleep 0.05
-    done
-    kill -KILL "${process_ids[@]}" 2>/dev/null || true
-}
-
 cassotis_gnome_input_sources_capture || true
 if command -v systemctl >/dev/null 2>&1 &&
    systemctl --user is-active --quiet org.freedesktop.IBus.session.GNOME.service; then
@@ -125,7 +91,11 @@ if command -v systemctl >/dev/null 2>&1 &&
     gnome_ibus_was_active=1
     systemctl --user stop org.freedesktop.IBus.session.GNOME.service
     ibus_service_stopped=1
+    unset IBUS_ADDRESS
 fi
+
+cassotis_stop_executable_by_path "$adapter_path" ||
+    cassotis_die "could not stop the installed IBus adapter"
 
 fcitx_installed=0
 if [[ -f "$fcitx_addon_metadata" || -f "$fcitx_addon" ]]; then
@@ -142,7 +112,8 @@ if [[ $fcitx_installed -eq 0 && -S "$engine_socket" &&
     done
 fi
 if [[ $fcitx_installed -eq 0 ]]; then
-    stop_installed_engine_by_path
+    cassotis_stop_executable_by_path "$installed_engine_path" ||
+        cassotis_die "could not stop the installed engine"
     rm -f -- "$engine_socket"
 fi
 
@@ -159,6 +130,7 @@ if [[ $fcitx_installed -eq 0 ]]; then
     rm -f -- "$desktop_file" "$legacy_desktop_file" "$installed_engine_path" \
         "$installed_control_path" "$installed_settings_path" \
         "$installed_icon"
+    cassotis_remove_neural_runtime "$libexec_dir"
     rmdir -- "$libexec_dir" 2>/dev/null || true
     shared_runtime='removed; no Fcitx 5 addon is installed'
 fi

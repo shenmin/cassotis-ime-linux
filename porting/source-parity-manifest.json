@@ -13,23 +13,23 @@
     },
     {
       "path": "src/common/nc_types.pas",
-      "windows_sha256": "96923368be6a2e58856055758176f0d4f68a7815bb0681ff255697db1f925de0",
-      "linux_sha256": "ef57b23055ef3c7349475d403c940bc92b3e2552fcd4b85ea1b53217fba962c5"
+      "windows_sha256": "fc72b7e255ee183ac9b46a18a604475f01fa4427b4bb3dbfb5b0647f4889dca4",
+      "linux_sha256": "2d235853fde1eb68614a10eae7717f60153862c797ee8b293cd349a37cd8a142"
     },
     {
       "path": "src/engine/nc_dictionary_intf.pas",
-      "windows_sha256": "33d9771bac057852762c0179ee44fc314bbc9e874354ef315d16cbed61176399",
-      "linux_sha256": "2fea744f408a0950233eaa4789e052190ba9218c8a4ffe019e7eaf867868cd6b"
+      "windows_sha256": "df26e4763b12a79425f3357b06d9a0e82670177acd83cb345252db881639b14a",
+      "linux_sha256": "c9f8638804c39aa749ba18b0220076a65d8992c4d2bdcfef20e858e7976463a2"
     },
     {
       "path": "src/engine/nc_dictionary_sqlite.pas",
-      "windows_sha256": "daf5bf074b99457379f348a2d832958f0f399f12210880622b69b8179dfc932c",
-      "linux_sha256": "1b8495d017c57ace89a0c4a8a36d9a2d7a45a94f83603426fa0a38f7969cd6e1"
+      "windows_sha256": "93b65c6ee5961979c8c02e1620b41c8c4746ac7ea6d1eff75aaabdad29251c32",
+      "linux_sha256": "99066f9aa6e5cd18f63cb80911b6be0914a7dd5af96abb28f15cfc0d1b45f3af"
     },
     {
       "path": "src/engine/nc_engine_intf.pas",
-      "windows_sha256": "fa30804d1714e46271d6b87791a504bf5eaf4a15faf36769717ddf24983703eb",
-      "linux_sha256": "98cd299a15b0f639bf837da30157bf9f7d6e6a6b6794753dca85e06a199df31a"
+      "windows_sha256": "d7f75be807508a1722985891054128615de5b593ae4f0f05cee0e6fe9aa0bf3d",
+      "linux_sha256": "13393d8af877a8dbe83b649ee21f74b9eb3497d40d25ed896fb8a7b3f921127a"
     },
     {
       "path": "src/engine/nc_fuzzy_pinyin.pas",
@@ -45,6 +45,21 @@
       "path": "src/engine/nc_shuangpin_decoder.pas",
       "windows_sha256": "b5f749431d3f51f41bcbd3d8f769d0be3a95757840c04d19c9737ff10d39928b",
       "linux_sha256": "98f8f4244431e1e0f68661e9950cf5ddd9320954c6439db687e45d75563fac04"
+    },
+    {
+      "path": "src/host/nc_pinyin_transformer_host.pas",
+      "windows_sha256": "613437de2ae90886f5fb93f58ab9be9a4e4e7103c8563490cee5c33b8fb0f639",
+      "linux_sha256": "de7e1fb5c0c2810a1ef6bb17a74132fd5d4b3eb1df0553303a1b4a5c8668aa18"
+    },
+    {
+      "path": "src/host/nc_local_completion_host.pas",
+      "windows_sha256": "9f0c10478a57665738095d3e9a79880e2ed79b4bcbc295022b5563bda9b02493",
+      "linux_sha256": "c3aa4bea51907100a79b261102033505edbe7e1f42cdf0694753e881b8994876"
+    },
+    {
+      "path": "src/host/native/nc_pinyin_transformer_ort.cpp",
+      "windows_sha256": "a8b8c556b1cc16a38eb9017e056f4c994dbbb652ec2479ac4d34c3546531af0a",
+      "linux_sha256": "2f5713340de8a62573d50e368aa562c258ed31c9f0cdc96acc5aff1cbff1b057"
     }
   ]
 }

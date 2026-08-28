@@ -85,6 +85,7 @@ engine_binary="$cassotis_root/build/bin/cassotis-engine"
 addon_binary="$cassotis_root/build/bin/libcassotis.so"
 smoke_binary="$cassotis_root/build/bin/cassotis-fcitx5-smoke"
 control_binary="$cassotis_root/build/bin/cassotis-control"
+neural_smoke_binary="$cassotis_root/build/bin/cassotis-neural-runtime-smoke"
 settings_source="$cassotis_root/adapters/ibus/cassotis_settings.py"
 icon_source="$cassotis_root/cassotis_ime_yanquan_mark.png"
 release_version="$(tr -d '\r\n' < "$cassotis_root/VERSION")"
@@ -93,6 +94,7 @@ cassotis_require_executable "$engine_binary"
 [[ -r "$addon_binary" ]] || cassotis_die "Fcitx addon was not built"
 cassotis_require_executable "$smoke_binary"
 cassotis_require_executable "$control_binary"
+cassotis_require_executable "$neural_smoke_binary"
 [[ -r "$settings_source" ]] ||
     cassotis_die "settings program is not readable: $settings_source"
 [[ -r "$icon_source" ]] ||
@@ -195,9 +197,12 @@ if [[ -n "$traditional_dictionary_path" ]]; then
 fi
 install -m 0755 "$engine_binary" "$stage_libexec/cassotis-engine"
 install -m 0755 "$control_binary" "$stage_libexec/cassotis-control"
+install -m 0755 "$neural_smoke_binary" \
+    "$stage_libexec/cassotis-neural-runtime-smoke"
 install -m 0755 "$smoke_binary" \
     "$stage_libexec/cassotis-fcitx5-smoke"
 install -m 0755 "$settings_source" "$stage_libexec/cassotis-settings"
+cassotis_stage_neural_runtime "$cassotis_root/build/bin" "$stage_libexec"
 install -m 0755 "$addon_binary" "$stage_addon"
 
 fcitx_version="$(pkg-config --modversion Fcitx5Core)"
@@ -214,6 +219,7 @@ sed "s|@SETUP@|$installed_settings|g" \
     > "$stage_desktop"
 
 NO_AT_BRIDGE=1 "$stage_libexec/cassotis-settings" --check-ui
+"$stage_libexec/cassotis-neural-runtime-smoke" "$stage_libexec"
 
 if cassotis_prepare_desktop_session_environment &&
    command -v fcitx5-remote >/dev/null 2>&1 &&
@@ -252,10 +258,13 @@ cassotis_atomic_install "$stage_libexec/cassotis-engine" \
     "$installed_engine" 0755
 cassotis_atomic_install "$stage_libexec/cassotis-control" \
     "$installed_control" 0755
+cassotis_atomic_install "$stage_libexec/cassotis-neural-runtime-smoke" \
+    "$libexec_dir/cassotis-neural-runtime-smoke" 0755
 cassotis_atomic_install "$stage_libexec/cassotis-fcitx5-smoke" \
     "$installed_smoke" 0755
 cassotis_atomic_install "$stage_libexec/cassotis-settings" \
     "$installed_settings" 0755
+cassotis_atomic_install_neural_runtime "$stage_libexec" "$libexec_dir"
 cassotis_atomic_install "$stage_addon" "$installed_addon" 0755
 cassotis_atomic_install "$stage_addon_metadata" "$addon_metadata" 0644
 cassotis_atomic_install "$stage_input_method" \

@@ -6,6 +6,7 @@ program cassotis_candidate_regression;
 
 uses
 {$IFDEF UNIX}
+    cthreads,
     cwstring,
 {$ENDIF}
     Classes,

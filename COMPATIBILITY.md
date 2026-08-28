@@ -4,23 +4,24 @@
 
 | Platform | IBus | Fcitx 5 | Status |
 | --- | --- | --- | --- |
-| Ubuntu 26.04 x86_64, GNOME, Wayland | Native adapter, real daemon input-context smoke | Native addon, official testfrontend plus desktop discovery/reload | Release gate |
+| Ubuntu 26.04 x86_64, GNOME, Wayland | Native adapter, real daemon input-context smoke | Native addon, official testfrontend plus desktop discovery/reload | Automated release gate passed |
 | Ubuntu 26.04 x86_64, GNOME, X11 | Expected from the same framework APIs | Expected from the same framework APIs | Not yet release-gated |
-| Ubuntu 26.04.1 aarch64 | Native adapter built and packaged | Native addon built and packaged | Native build, core/regression tests, artifact validation, package installation, and installed-engine self-test passed; desktop matrix pending |
+| Ubuntu 26.04.1 aarch64, GNOME, Wayland | Native adapter, real daemon input-context smoke | Native addon, official testfrontend plus desktop discovery/reload | Automated release gate passed |
 | Other distributions | Source build | Source build | Community-tested; no repackaged Debian binaries |
 
 The x86_64 release-gated host uses Linux 7.0.0, Free Pascal 3.2.2, IBus
 1.5.34-rc2, and Fcitx 5.1.19. Its automated desktop matrix was last completed
-on 2026-08-25. Native ARM64 package validation was completed on 2026-08-27
+on 2026-08-28. Native ARM64 validation was completed on 2026-08-28
 using Ubuntu 26.04.1, Linux 7.0.0-30, Free Pascal 3.2.2, IBus 1.5.34-rc2, and
 Fcitx 5.1.19. Package/portable validation uses the same native binaries and
-schema-22 simplified/traditional dictionaries.
+schema-24 simplified/traditional dictionaries.
 
-The ARM64 run covered the core test suite, simplified/traditional dictionary
-regressions, portable/Debian payload parity and integrity, actual package
-installation, and installed-engine self-test. It did not run the complete
-desktop framework matrix or the manual GUI checklist, so ARM64 is not yet a
-full release-gated desktop target.
+Both architecture runs covered the core test suite, simplified/traditional
+dictionary regressions, frozen corpus quality and memory gates, neural-runtime
+smokes, portable/Debian payload parity and integrity, real package installation
+checks, installed-engine self-test, and all five automated IBus/Fcitx desktop
+matrix stages. Manual application focus, rendering, and desktop appearance
+remain checklist items on both architectures.
 
 Both framework adapters are deliberately thin. Parsing, dictionaries,
 ranking, completion, settings state, and user learning live in the same local
@@ -65,5 +66,5 @@ following remain explicit manual checks before publishing a release:
   learning/deletion, completion, and the settings launcher.
 - Confirm candidate placement and scaling on the release desktop.
 
-Floating status-window styling, a tray application, and product logging are
-not part of the Linux v0.1.0 release scope.
+Floating status-window styling, a tray application, and product logging remain
+outside the current Linux product scope.

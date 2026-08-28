@@ -210,9 +210,30 @@ def validate_baseline(
     if baseline.get("format") != "cassotis-quality-baseline-v1":
         return ["unsupported or missing quality baseline format"]
 
+    for metadata_key, metric_key in (
+        ("metadata.long_neural_runtime", "long.neural_runtime"),
+        ("metadata.long_accuracy_mode", "long.accuracy_mode"),
+        (
+            "metadata.long_accuracy_neural_timeout_ms",
+            "long.accuracy_neural_timeout_ms",
+        ),
+        ("metadata.long_latency_mode", "long.latency_mode"),
+        (
+            "metadata.long_latency_neural_timeout_ms",
+            "long.latency_neural_timeout_ms",
+        ),
+    ):
+        expected_value = baseline.get(metadata_key)
+        if expected_value is not None and metrics.get(metric_key) != expected_value:
+            failures.append(
+                f"{metric_key}={metrics.get(metric_key, '<missing>')} does not "
+                f"match frozen baseline {expected_value}"
+            )
+
     for key, raw_value in baseline.items():
         if (key == "format" or key.startswith("metadata.") or
-                key.startswith("signature.")):
+                key.startswith("signature.") or
+                key.startswith("completion.")):
             continue
         metric_key = key
         comparison = "exact"

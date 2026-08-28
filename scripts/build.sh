@@ -49,6 +49,45 @@ bin_dir="$build_dir/bin"
 unit_dir="$build_dir/units"
 mkdir -p "$bin_dir" "$unit_dir"
 
+cassotis_require_command c++
+cassotis_require_command install
+cassotis_require_command ln
+"$cassotis_root/scripts/validate_runtime_assets.sh"
+
+case "$(uname -m)" in
+    x86_64) ort_arch='linux-x86_64' ;;
+    aarch64|arm64) ort_arch='linux-aarch64' ;;
+    *) cassotis_die "unsupported ONNX Runtime architecture: $(uname -m)" ;;
+esac
+ort_root="$cassotis_root/third_party/onnxruntime"
+ort_arch_dir="$ort_root/$ort_arch"
+ort_versioned_library="$ort_arch_dir/libonnxruntime.so.1.20.1"
+
+printf '[build] libcassotis_pinyin_transformer_ort.so\n'
+c++ -std=c++20 -O2 -g -Wall -Wextra -Werror -fPIC -shared -pthread \
+    -I"$ort_root/include" \
+    "$cassotis_root/src/host/native/nc_pinyin_transformer_ort.cpp" \
+    "$ort_versioned_library" \
+    -Wl,-rpath,'$ORIGIN' \
+    -o "$bin_dir/libcassotis_pinyin_transformer_ort.so"
+install -m 0755 "$ort_versioned_library" \
+    "$bin_dir/libonnxruntime.so.1.20.1"
+install -m 0755 "$ort_arch_dir/libonnxruntime_providers_shared.so" \
+    "$bin_dir/libonnxruntime_providers_shared.so"
+ln -sfn libonnxruntime.so.1.20.1 "$bin_dir/libonnxruntime.so.1"
+ln -sfn libonnxruntime.so.1 "$bin_dir/libonnxruntime.so"
+install -d -m 0755 "$bin_dir/pinyin_transformer" \
+    "$bin_dir/local_completion"
+install -m 0644 \
+    "$cassotis_root/data/models/pinyin_transformer/pinyin_difference_reranker_int8.onnx" \
+    "$cassotis_root/data/models/pinyin_transformer/vocab.json" \
+    "$bin_dir/pinyin_transformer/"
+install -m 0644 \
+    "$cassotis_root/data/models/local_completion/local_completion_path_ranker_int8.onnx" \
+    "$cassotis_root/data/models/local_completion/local_completion_index.bin" \
+    "$cassotis_root/data/models/local_completion/model_manifest.json" \
+    "$bin_dir/local_completion/"
+
 common_args=(
     -Mdelphiunicode
     -FcUTF8
@@ -66,6 +105,7 @@ common_args=(
     "-Fu$cassotis_root/src/dictionary"
     "-Fu$cassotis_root/src/ipc"
     "-Fu$cassotis_root/src/service"
+    "-Fu$cassotis_root/src/host"
     "-Fu$cassotis_root/tests/unit"
 )
 force_pending=$force_build
@@ -99,9 +139,12 @@ compile_target "$cassotis_root/tools/benchmark/cassotis_quality_benchmark.lpr" \
     cassotis-quality-benchmark
 compile_target "$cassotis_root/tools/regression/cassotis_candidate_regression.lpr" \
     cassotis-candidate-regression
+compile_target "$cassotis_root/tools/integration/cassotis_neural_runtime_smoke.lpr" \
+    cassotis-neural-runtime-smoke
+compile_target "$cassotis_root/tools/integration/cassotis_neural_engine_smoke.lpr" \
+    cassotis-neural-engine-smoke
 
 cassotis_require_command cc
-cassotis_require_command c++
 cassotis_require_command pkg-config
 pkg-config --exists ibus-1.0 ||
     cassotis_die "IBus development package ibus-1.0 was not found"

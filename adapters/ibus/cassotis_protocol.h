@@ -27,7 +27,8 @@ typedef enum {
     CASSOTIS_MESSAGE_SET_STATE = 13,
     CASSOTIS_MESSAGE_SHUTDOWN = 14,
     CASSOTIS_MESSAGE_ERROR = 15,
-    CASSOTIS_MESSAGE_CLEAR_USER_DICTIONARY = 16
+    CASSOTIS_MESSAGE_CLEAR_USER_DICTIONARY = 16,
+    CASSOTIS_MESSAGE_POLL_RESULT = 17
 } CassotisMessageType;
 
 typedef enum {
@@ -178,6 +179,7 @@ typedef struct {
 
 typedef struct {
     gboolean handled;
+    gboolean async_pending;
     gchar *commit_text;
     gchar *preedit_text;
     gchar *query_text;

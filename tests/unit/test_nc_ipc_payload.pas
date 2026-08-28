@@ -87,6 +87,7 @@ var
 begin
     nc_initialize_engine_result(source);
     source.handled := True;
+    source.async_pending := True;
     source.commit_text := '提交';
     source.preedit_text := '言泉输入法';
     source.query_text := 'yanquanshurufa';
@@ -122,6 +123,7 @@ begin
     AssertTrue(nc_try_decode_engine_result_payload(payload, decoded,
         error_text));
     AssertTrue(decoded.handled);
+    AssertTrue(decoded.async_pending);
     AssertEquals(source.commit_text, decoded.commit_text);
     AssertEquals(source.preedit_text, decoded.preedit_text);
     AssertEquals(source.query_text, decoded.query_text);

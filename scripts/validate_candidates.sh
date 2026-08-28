@@ -8,7 +8,7 @@ usage() {
     cat <<'EOF'
 Usage: scripts/validate_candidates.sh --dictionary FILE [--cases FILE]
 
-Runs the frozen Windows v1.17.0 candidate-parity set without loading a user
+Runs the frozen Windows v1.18.0 candidate-parity set without loading a user
 dictionary. Pass --cases tests/cases/candidate_quality_targets.tsv to inspect
 the separate, non-gating upstream quality backlog.
 EOF

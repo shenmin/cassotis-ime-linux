@@ -6,6 +6,7 @@ program cassotis_core_tests;
 
 uses
 {$IFDEF UNIX}
+    cthreads,
     cwstring,
 {$ENDIF}
     fpcunit,
@@ -21,6 +22,7 @@ uses
     test_nc_shuangpin_decoder,
     test_nc_fuzzy_pinyin,
     test_nc_sqlite,
+    test_nc_v118_regressions,
     test_nc_dictionary_reader,
     test_nc_user_dictionary;
 

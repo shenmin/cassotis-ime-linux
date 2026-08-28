@@ -72,6 +72,11 @@ gboolean cassotis_client_process_key(CassotisClient *client,
                                      const gchar *text,
                                      CassotisEngineResult *result,
                                      GError **error);
+gboolean cassotis_client_poll_result(CassotisClient *client,
+                                     guint64 context_id,
+                                     guint64 generation_id,
+                                     CassotisEngineResult *result,
+                                     GError **error);
 gboolean cassotis_client_get_state(CassotisClient *client,
                                    CassotisEngineState *state,
                                    GError **error);

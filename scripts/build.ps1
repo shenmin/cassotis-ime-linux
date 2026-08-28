@@ -45,6 +45,7 @@ $commonArgs = @(
     "-Fu$(Join-Path $root 'src\dictionary')",
     "-Fu$(Join-Path $root 'src\ipc')",
     "-Fu$(Join-Path $root 'src\service')",
+    "-Fu$(Join-Path $root 'src\host')",
     "-Fu$(Join-Path $root 'tests\unit')"
 )
 

@@ -57,6 +57,7 @@ cassotis_require_command install
 cassotis_require_command mktemp
 cassotis_require_command mv
 cassotis_require_command readlink
+cassotis_require_command grep
 cassotis_require_command sed
 cassotis_require_command python3
 [[ $EUID -ne 0 ]] ||
@@ -80,6 +81,7 @@ engine_binary="$cassotis_root/build/bin/cassotis-engine"
 adapter_binary="$cassotis_root/build/bin/ibus-engine-cassotis"
 smoke_binary="$cassotis_root/build/bin/cassotis-ibus-smoke"
 control_binary="$cassotis_root/build/bin/cassotis-control"
+neural_smoke_binary="$cassotis_root/build/bin/cassotis-neural-runtime-smoke"
 settings_source="$cassotis_root/adapters/ibus/cassotis_settings.py"
 icon_source="$cassotis_root/cassotis_ime_yanquan_mark.png"
 release_version="$(tr -d '\r\n' < "$cassotis_root/VERSION")"
@@ -87,6 +89,7 @@ cassotis_require_executable "$engine_binary"
 cassotis_require_executable "$adapter_binary"
 cassotis_require_executable "$smoke_binary"
 cassotis_require_executable "$control_binary"
+cassotis_require_executable "$neural_smoke_binary"
 [[ -r "$settings_source" ]] ||
     cassotis_die "settings program is not readable: $settings_source"
 [[ -r "$icon_source" ]] ||
@@ -112,6 +115,7 @@ ibus_dropin_file="$ibus_dropin_dir/80-cassotis-component-path.conf"
 legacy_service_file="$systemd_dir/cassotis-ibus.service"
 legacy_autostart_file="$config_dir/autostart/cassotis-ibus.desktop"
 system_component_dir="$(cassotis_ibus_system_component_dir)"
+system_component_file="$system_component_dir/cassotis.xml"
 component_path="$component_dir:$system_component_dir"
 adapter_path="$libexec_dir/ibus-engine-cassotis"
 installed_engine_path="$libexec_dir/cassotis-engine"
@@ -122,6 +126,14 @@ component_template="$cassotis_root/adapters/ibus/cassotis.xml.in"
 desktop_template="$cassotis_root/adapters/ibus/ibus-setup-cassotis.desktop.in"
 runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${UID:-$(id -u)}}"
 engine_socket="$runtime_dir/cassotis-ime/engine.sock"
+
+if [[ -r "$system_component_file" ]] &&
+   grep -q '<name>org.freedesktop.IBus.Cassotis</name>' \
+       "$system_component_file"; then
+    cassotis_die \
+        "a system-wide Cassotis IBus component is installed; remove the Cassotis package before using the per-user installer"
+fi
+
 staging_dir="$(mktemp -d)"
 temporary_user_dir="$(mktemp -d)"
 control_test_socket="$temporary_user_dir/control.sock"
@@ -155,39 +167,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-stop_installed_engine_by_path() {
-    local executable_link
-    local executable_path
-    local process_id
-    local attempt
-    local any_running
-    local -a process_ids=()
-
-    for executable_link in /proc/[0-9]*/exe; do
-        executable_path="$(readlink "$executable_link" 2>/dev/null || true)"
-        if [[ "$executable_path" == "$installed_engine_path" ||
-              "$executable_path" == "$installed_engine_path (deleted)" ]]; then
-            process_id="${executable_link#/proc/}"
-            process_id="${process_id%/exe}"
-            process_ids+=("$process_id")
-        fi
-    done
-    [[ ${#process_ids[@]} -gt 0 ]] || return 0
-    kill -TERM "${process_ids[@]}" 2>/dev/null || true
-    for ((attempt = 0; attempt < 40; attempt += 1)); do
-        any_running=0
-        for process_id in "${process_ids[@]}"; do
-            if kill -0 "$process_id" 2>/dev/null; then
-                any_running=1
-                break
-            fi
-        done
-        [[ $any_running -eq 0 ]] && return 0
-        sleep 0.05
-    done
-    kill -KILL "${process_ids[@]}" 2>/dev/null || true
-}
-
 stage_libexec="$staging_dir/libexec"
 stage_data="$staging_dir/data"
 stage_component="$staging_dir/cassotis.xml"
@@ -205,7 +184,10 @@ install -m 0755 "$engine_binary" "$stage_libexec/cassotis-engine"
 install -m 0755 "$adapter_binary" "$stage_libexec/ibus-engine-cassotis"
 install -m 0755 "$smoke_binary" "$stage_libexec/cassotis-ibus-smoke"
 install -m 0755 "$control_binary" "$stage_libexec/cassotis-control"
+install -m 0755 "$neural_smoke_binary" \
+    "$stage_libexec/cassotis-neural-runtime-smoke"
 install -m 0755 "$settings_source" "$stage_libexec/cassotis-settings"
+cassotis_stage_neural_runtime "$cassotis_root/build/bin" "$stage_libexec"
 sed -e "s|@EXECUTABLE@|$adapter_path|g" \
     -e "s|@SETUP@|$installed_settings_path|g" \
     -e "s|@VERSION@|$release_version|g" \
@@ -218,6 +200,8 @@ EOF
 cat > "$stage_dropin" <<EOF
 [Service]
 Environment="IBUS_COMPONENT_PATH=$component_path"
+ExecStart=
+ExecStart=/bin/sh -c 'exec /usr/bin/ibus-daemon --panel disable --cache=refresh \$([ "\$XDG_SESSION_TYPE" = "x11" ] && echo "--xim")'
 EOF
 
 CASSOTIS_DICTIONARY="$stage_data/dict_sc.db" \
@@ -225,6 +209,7 @@ CASSOTIS_USER_DICTIONARY="$temporary_user_dir/user_dict.db" \
     "$stage_libexec/ibus-engine-cassotis" --self-test
 
 NO_AT_BRIDGE=1 "$stage_libexec/cassotis-settings" --check-ui
+"$stage_libexec/cassotis-neural-runtime-smoke" "$stage_libexec"
 CASSOTIS_DICTIONARY="$stage_data/dict_sc.db" \
 CASSOTIS_USER_DICTIONARY="$temporary_user_dir/control_user_dict.db" \
 CASSOTIS_ENGINE_SOCKET="$control_test_socket" \
@@ -252,7 +237,11 @@ if command -v systemctl >/dev/null 2>&1 &&
     gnome_ibus_was_active=1
     systemctl --user stop org.freedesktop.IBus.session.GNOME.service
     ibus_service_stopped=1
+    unset IBUS_ADDRESS
 fi
+
+cassotis_stop_executable_by_path "$adapter_path" ||
+    cassotis_die "could not stop the installed IBus adapter"
 
 if [[ -S "$engine_socket" ]]; then
     XDG_RUNTIME_DIR="$runtime_dir" \
@@ -263,7 +252,8 @@ if [[ -S "$engine_socket" ]]; then
         sleep 0.05
     done
 fi
-stop_installed_engine_by_path
+cassotis_stop_executable_by_path "$installed_engine_path" ||
+    cassotis_die "could not stop the installed engine"
 rm -f -- "$engine_socket"
 
 install -d -m 0700 "$data_dir" "$component_dir" "$libexec_dir" \
@@ -281,8 +271,11 @@ cassotis_atomic_install "$stage_libexec/cassotis-ibus-smoke" \
     "$installed_smoke_path" 0755
 cassotis_atomic_install "$stage_libexec/cassotis-control" \
     "$installed_control_path" 0755
+cassotis_atomic_install "$stage_libexec/cassotis-neural-runtime-smoke" \
+    "$libexec_dir/cassotis-neural-runtime-smoke" 0755
 cassotis_atomic_install "$stage_libexec/cassotis-settings" \
     "$installed_settings_path" 0755
+cassotis_atomic_install_neural_runtime "$stage_libexec" "$libexec_dir"
 cassotis_atomic_install "$stage_component" "$component_file" 0644
 cassotis_atomic_install "$stage_desktop" "$desktop_file" 0644
 cassotis_atomic_install "$stage_icon" "$installed_icon" 0644
@@ -310,6 +303,7 @@ fi
 refresh_mode='next desktop login'
 if [[ $gnome_ibus_was_active -eq 1 ]]; then
     systemctl --user start org.freedesktop.IBus.session.GNOME.service
+    unset IBUS_ADDRESS
     refresh_mode='restarted GNOME IBus service'
 elif command -v ibus >/dev/null 2>&1 &&
      cassotis_prepare_ibus_environment; then

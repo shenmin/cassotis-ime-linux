@@ -12,7 +12,9 @@ uses
     nc_engine_context,
     nc_engine_intf,
     nc_dictionary_sqlite,
-    nc_user_dictionary;
+    nc_user_dictionary,
+    nc_pinyin_transformer_host,
+    nc_local_completion_host;
 
 const
     c_engine_error_unknown_context = 1;
@@ -29,6 +31,8 @@ type
         FStateStore: TncUserDictionary;
         FState: TncEngineState;
         FConfig: TncEngineConfig;
+        FLongNeuralReranker: IncLongNeuralReranker;
+        FLocalCompletionHost: TncLocalCompletionHost;
         FLoadedContextId: QWord;
         FDictionaryError: string;
         procedure Initialize(const dictionary_path: string;
@@ -49,6 +53,8 @@ type
         procedure SyncContext(const context: TncEngineContext);
         procedure PopulateResult(const context: TncEngineContext;
             var engine_result: TncEngineResult);
+        function QueueLongNeuralCompletion(
+            const context: TncEngineContext): Boolean;
         function RemoveCandidate(const context: TncEngineContext;
             const candidate_index: Integer): Boolean;
     public
@@ -74,6 +80,8 @@ type
         function ClearUserDictionary: Boolean; override;
         function ProcessKey(const context_id: QWord; const generation_id: QWord;
             const key_event: TncKeyEvent): TncEngineResult; override;
+        function PollResult(const context_id: QWord;
+            const generation_id: QWord): TncEngineResult; override;
         function ContextCount: Integer;
         procedure ClearContexts;
         function DictionaryReady: Boolean;
@@ -127,10 +135,13 @@ procedure TncEngineService.Initialize(const dictionary_path: string;
 var
     provider: TncSqliteDictionary;
     active_dictionary_path: string;
+    runtime_directory: string;
 begin
     FContexts := TncEngineContextRegistry.Create;
     FEngine := nil;
     FStateStore := nil;
+    FLongNeuralReranker := nil;
+    FLocalCompletionHost := nil;
     FLoadedContextId := c_invalid_context_id;
     FDictionaryError := '';
     nc_initialize_engine_state(FState);
@@ -184,11 +195,19 @@ begin
 
     FEngine.set_dictionary_provider(provider);
     FEngine.prewarm_dictionary_caches;
+    runtime_directory := ExtractFileDir(ParamStr(0));
+    FLongNeuralReranker := TncPinyinTransformerHostReranker.Create(
+        runtime_directory, True);
+    FEngine.set_long_neural_reranker(FLongNeuralReranker);
+    FLocalCompletionHost := TncLocalCompletionHost.Create(
+        runtime_directory);
 end;
 
 destructor TncEngineService.Destroy;
 begin
+    FLocalCompletionHost.Free;
     FEngine.Free;
+    FLongNeuralReranker := nil;
     FStateStore.Free;
     FContexts.Free;
     inherited Destroy;
@@ -475,6 +494,24 @@ begin
     engine_result.page_index := FEngine.get_page_index;
     engine_result.page_count := FEngine.get_page_count;
     engine_result.completion_text := context.CompletionText;
+end;
+
+function TncEngineService.QueueLongNeuralCompletion(
+    const context: TncEngineContext): Boolean;
+var
+    task: TncLocalCompletionTask;
+begin
+    Result := False;
+    if (context = nil) or (FEngine = nil) or
+        (FLocalCompletionHost = nil) or (not context.Active) or
+        (context.Composition = '') or (context.CompletionText <> '') then
+        Exit;
+    task := Default(TncLocalCompletionTask);
+    if not FEngine.get_long_neural_completion_request(task.request) then
+        Exit;
+    task.context_id := context.Id;
+    task.generation_id := context.Generation;
+    Result := FLocalCompletionHost.Enqueue(task);
 end;
 
 function TncEngineService.RemoveCandidate(const context: TncEngineContext;
@@ -825,6 +862,7 @@ begin
         end;
         SyncStateFromEngine;
         PopulateResult(context, Result);
+        Result.async_pending := QueueLongNeuralCompletion(context);
     except
         on exception_value: Exception do
         begin
@@ -834,6 +872,30 @@ begin
             FDictionaryError := UnicodeString(exception_value.Message);
         end;
     end;
+end;
+
+function TncEngineService.PollResult(const context_id: QWord;
+    const generation_id: QWord): TncEngineResult;
+var
+    context: TncEngineContext;
+    finished: TncLocalCompletionFinished;
+begin
+    nc_initialize_engine_result(Result);
+    context := FContexts.Find(context_id);
+    if (context = nil) or (FLocalCompletionHost = nil) or
+        (context.Generation <> generation_id) then
+        Exit;
+    if not FLocalCompletionHost.TryPopFinishedFor(context_id, finished) then
+        Exit;
+    if (finished.task.generation_id <> generation_id) or
+        (not context.Active) or (not ActivateContext(context)) then
+        Exit;
+
+    if finished.accepted then
+        FEngine.apply_long_neural_completion(finished.task.request,
+            finished.completion_result);
+    Result.handled := True;
+    PopulateResult(context, Result);
 end;
 
 function TncEngineService.ContextCount: Integer;

@@ -73,7 +73,7 @@ cassotis_require_command desktop-file-validate
 cassotis_require_command python3
 cassotis_require_command realpath
 if [[ -z "$quality_baseline" ]]; then
-    quality_baseline="$cassotis_root/tests/baselines/quality-v1.17.0-linux-$(uname -m).txt"
+    quality_baseline="$cassotis_root/tests/baselines/quality-v1.18.0-linux-$(uname -m).txt"
 fi
 for required in dictionary_path traditional_dictionary_path long_cases \
                 short_cases source_parity_report quality_baseline; do
@@ -134,6 +134,21 @@ if [[ $skip_build -eq 0 ]]; then
 fi
 "$cassotis_root/scripts/test.sh" --skip-build \
     >"$report_dir/logs/tests.log" 2>&1
+"$cassotis_root/build/bin/cassotis-neural-engine-smoke" \
+    "$dictionary_path" "$long_cases" 500 0 \
+    >"$report_dir/logs/neural-engine-smoke-deterministic.log" 2>&1
+python3 "$cassotis_root/tools/parity/validate_neural_engine_smoke.py" \
+    --log "$report_dir/logs/neural-engine-smoke-deterministic.log" \
+    --baseline "$quality_baseline" \
+    --report "$report_dir/neural-engine-smoke-deterministic-validation.json" \
+    >"$report_dir/logs/neural-engine-smoke-deterministic-validation.log"
+"$cassotis_root/build/bin/cassotis-neural-engine-smoke" \
+    "$dictionary_path" "$long_cases" 500 40 \
+    >"$report_dir/logs/neural-engine-smoke-production.log" 2>&1
+python3 "$cassotis_root/tools/parity/validate_neural_engine_smoke.py" \
+    --log "$report_dir/logs/neural-engine-smoke-production.log" \
+    --report "$report_dir/neural-engine-smoke-production-validation.json" \
+    >"$report_dir/logs/neural-engine-smoke-production-validation.log"
 "$cassotis_root/scripts/validate_candidates.sh" \
     --dictionary "$dictionary_path" \
     >"$report_dir/logs/candidate-parity.log" 2>&1
@@ -148,7 +163,8 @@ fi
 benchmark_inputs="$report_dir/benchmarks/benchmark-inputs.json"
 python3 - "$dictionary_path" "$long_cases" "$short_cases" \
     "$cassotis_root/build/bin/cassotis-quality-benchmark" \
-    "$cassotis_root/VERSION" "$benchmark_inputs" "$skip_benchmark" <<'PY'
+    "$cassotis_root/build/bin" "$cassotis_root/VERSION" \
+    "$benchmark_inputs" "$skip_benchmark" <<'PY'
 import hashlib
 import json
 from pathlib import Path
@@ -168,15 +184,26 @@ def file_record(path_text: str) -> dict[str, object]:
     }
 
 
-destination = Path(sys.argv[6])
-reuse = sys.argv[7] == "1"
+runtime = Path(sys.argv[5])
+destination = Path(sys.argv[7])
+reuse = sys.argv[8] == "1"
 current = {
     "format": "cassotis-quality-inputs-v1",
-    "release_version": Path(sys.argv[5]).read_text(encoding="utf-8").strip(),
+    "release_version": Path(sys.argv[6]).read_text(encoding="utf-8").strip(),
     "dictionary": file_record(sys.argv[1]),
     "long_cases": file_record(sys.argv[2]),
     "short_cases": file_record(sys.argv[3]),
     "benchmark_binary": file_record(sys.argv[4]),
+    "neural_runtime": {
+        name: file_record(runtime / name)
+        for name in (
+            "libcassotis_pinyin_transformer_ort.so",
+            "libonnxruntime.so.1.20.1",
+            "libonnxruntime_providers_shared.so",
+            "pinyin_transformer/pinyin_difference_reranker_int8.onnx",
+            "pinyin_transformer/vocab.json",
+        )
+    },
 }
 if reuse:
     if not destination.is_file():
@@ -195,6 +222,7 @@ if [[ $skip_benchmark -eq 0 ]]; then
     "$cassotis_root/build/bin/cassotis-quality-benchmark" \
         --dictionary "$dictionary_path" \
         --long-cases "$long_cases" --short-cases "$short_cases" \
+        --neural-runtime "$cassotis_root/build/bin" \
         --report-dir "$report_dir/benchmarks" --progress-every 1000 \
         >"$report_dir/logs/quality-benchmark.log" 2>&1
 fi
@@ -237,6 +265,16 @@ from datetime import datetime, timezone
 root = Path(sys.argv[1])
 version = Path(sys.argv[2]).read_text(encoding="utf-8").strip()
 quality = json.loads((root / "quality-validation.json").read_text(encoding="utf-8"))
+completion_deterministic = json.loads(
+    (root / "neural-engine-smoke-deterministic-validation.json").read_text(
+        encoding="utf-8"
+    )
+)
+completion_production = json.loads(
+    (root / "neural-engine-smoke-production-validation.json").read_text(
+        encoding="utf-8"
+    )
+)
 source = json.loads((root / "source-parity.json").read_text(encoding="utf-8"))
 quality_inputs = json.loads(
     (root / "benchmarks" / "benchmark-inputs.json").read_text(encoding="utf-8")
@@ -272,10 +310,15 @@ summary = {
         "dictionary_traditional": source["dictionary_traditional"],
     },
     "quality": quality["metrics"],
+    "neural_engine_smoke": completion_deterministic["metrics"],
+    "neural_engine_smoke_production": completion_production["metrics"],
     "quality_inputs": quality_inputs,
     "artifact_sha256": artifact_checksums,
     "platform_matrix_results": matrix,
     "core_tests": "passed",
+    "neural_engine_smoke_validation": "passed",
+    "neural_engine_smoke_deterministic_validation": "passed",
+    "neural_engine_smoke_production_validation": "passed",
     "candidate_parity_simplified": "passed",
     "candidate_parity_traditional": "passed",
     "transport_stress": "passed",

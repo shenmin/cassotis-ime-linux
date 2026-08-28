@@ -5,20 +5,23 @@ machine-readable validation record. Run it as the graphical desktop user on
 the Ubuntu release machine; use `sudo` only when manually installing a final
 package.
 
-The full release-gated target is Ubuntu 26.04 x86_64 on GNOME Wayland. Do not
-publish a binary for another architecture/session merely because it compiles.
-At minimum, run the native test suite, simplified/traditional regressions,
-artifact validation, package installation, and installed-engine self-test,
-then state any missing desktop-matrix or manual-GUI coverage explicitly. Do
-not describe another target as fully release-gated until it passes the same
-desktop matrix and manual checks.
+The full automated release-gated targets are Ubuntu 26.04 x86_64 and Ubuntu
+26.04.1 aarch64 on GNOME Wayland. Do not publish a binary for another
+architecture/session merely because it compiles. At minimum, run the native
+test suite, simplified/traditional regressions, quality and memory gates,
+artifact validation, package installation, installed-engine self-test, and
+the complete desktop matrix. State any missing manual-GUI coverage explicitly;
+manual application checks remain required for both current architectures.
 
 ## 1. Freeze Inputs
 
 Update `VERSION`, `src/common/nc_version.pas`,
 `porting/windows-baseline.txt`, and `porting/windows-map.yml` together. Build
 the final simplified and traditional databases from the tagged Cassotis
-Lexicon release. Do not substitute a database after validation.
+Lexicon release. The v1.18 gate also freezes the Transformer model,
+local-completion model/index/manifest, architecture-specific ONNX Runtime
+libraries, and native runtime bridge. Do not substitute any database, model,
+or runtime artifact after validation.
 
 ## 2. Source And Dictionary Parity
 
@@ -56,8 +59,10 @@ Pascal unit and native adapter. This is intentional: a release must never
 reuse an older PPU whose timestamp happens to look newer than synchronized
 source. The command is successful only after all of these pass:
 
-1. Native build with fatal C/C++ warnings.
-2. FPCUnit, native geometry/shortcut tests, and engine/socket tests.
+1. Native build with fatal C/C++ warnings and SHA-256 validation of every
+   bundled model and architecture-specific runtime artifact.
+2. FPCUnit, native geometry/shortcut tests, engine/socket tests, direct ONNX
+   runtime smoke, and a real-engine asynchronous completion smoke.
 3. Frozen simplified and traditional candidate parity.
 4. Multi-client IBus transport, malformed-frame, restart, latency, and
    bounded-memory stress tests against an isolated socket and user database.
@@ -72,7 +77,8 @@ source. The command is successful only after all of these pass:
 
 If a long benchmark must be resumed, `--skip-benchmark` is accepted only when
 the saved benchmark manifest exactly matches the current benchmark binary,
-dictionary, long cases, and short cases by SHA-256.
+dictionary, long cases, short cases, native bridge, ONNX Runtime libraries,
+Transformer model, and Transformer vocabulary by SHA-256.
 
 ## 4. Manual Desktop Check
 
@@ -101,8 +107,10 @@ the release record. RPM and Arch packages must be built natively from source;
 do not rename or repackage the Debian binaries for those distributions.
 
 The release notes should link [CHANGELOG.md](CHANGELOG.md), identify the
-validated Ubuntu/GNOME/Wayland target, and state that candidate appearance is
+validated Ubuntu/GNOME/Wayland targets, and state that candidate appearance is
 provided by the active framework. Do not claim KDE or X11 desktop validation,
 or RPM or Arch binary validation, until the corresponding matrix has passed.
-Describe ARM64 as natively package-validated, not fully desktop-release-gated,
-until its complete framework matrix and manual GUI checks pass.
+For each architecture, distinguish the complete automated framework matrix
+from the manual application-focus, rendering, and appearance checks. ARM64 has
+passed the same five-stage automated IBus/Fcitx matrix as x86_64; manual GUI
+checks remain release checklist items on both architectures.

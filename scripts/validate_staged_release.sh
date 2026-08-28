@@ -47,6 +47,10 @@ control="$libexec/cassotis-control"
 settings="$libexec/cassotis-settings"
 session_refresh="$libexec/cassotis-refresh-sessions"
 ibus_adapter="$libexec/ibus-engine-cassotis"
+neural_smoke="$libexec/cassotis-neural-runtime-smoke"
+runtime_wrapper="$libexec/libcassotis_pinyin_transformer_ort.so"
+runtime_library="$libexec/libonnxruntime.so.1.20.1"
+runtime_provider="$libexec/libonnxruntime_providers_shared.so"
 fcitx_addon="$(find "$release_root/usr" -type f \
     -path '*/fcitx5/libcassotis.so' -print -quit)"
 required_files=(
@@ -57,6 +61,17 @@ required_files=(
     "$ibus_adapter"
     "$libexec/cassotis-ibus-smoke"
     "$libexec/cassotis-fcitx5-smoke"
+    "$neural_smoke"
+    "$runtime_wrapper"
+    "$runtime_library"
+    "$runtime_provider"
+    "$libexec/libonnxruntime.so.1"
+    "$libexec/libonnxruntime.so"
+    "$libexec/pinyin_transformer/pinyin_difference_reranker_int8.onnx"
+    "$libexec/pinyin_transformer/vocab.json"
+    "$libexec/local_completion/local_completion_path_ranker_int8.onnx"
+    "$libexec/local_completion/local_completion_index.bin"
+    "$libexec/local_completion/model_manifest.json"
     "$fcitx_addon"
     "$icon"
     "$data/dict_sc.db"
@@ -73,6 +88,7 @@ required_files=(
     "$release_root/usr/share/doc/cassotis-ime/RELEASE.md"
     "$release_root/usr/share/doc/cassotis-ime/COMPATIBILITY.md"
     "$release_root/usr/share/doc/cassotis-ime/BENCHMARK.md"
+    "$release_root/usr/share/doc/cassotis-ime/BENCHMARK.CN.md"
     "$release_root/usr/share/doc/cassotis-ime/CONFIGURATION.md"
     "$release_root/usr/share/doc/cassotis-ime/CONFIGURATION.CN.md"
     "$release_root/usr/share/doc/cassotis-ime/CHANGELOG.md"
@@ -81,6 +97,8 @@ required_files=(
     "$release_root/usr/share/doc/cassotis-ime/docs/DICTIONARY.md"
     "$release_root/usr/share/doc/cassotis-ime/docs/IPC.md"
     "$release_root/usr/share/doc/cassotis-ime/docs/LEXICON_ATTRIBUTION.md"
+    "$release_root/usr/share/doc/cassotis-ime/third-party/onnxruntime/LICENSE"
+    "$release_root/usr/share/doc/cassotis-ime/third-party/onnxruntime/ThirdPartyNotices.txt"
 )
 for path in "${required_files[@]}"; do
     [[ -n "$path" && -r "$path" ]] ||
@@ -170,6 +188,8 @@ for path in "$engine" "$control" "$settings" "$session_refresh" \
             "$libexec/cassotis-fcitx5-smoke"; do
     cassotis_require_executable "$path"
 done
+[[ -x "$neural_smoke" ]] ||
+    cassotis_die "neural runtime smoke test is not executable: $neural_smoke"
 
 if grep -R -n -E '@(EXECUTABLE|SETUP|VERSION|FCITX_VERSION|LIBRARY)@' \
         "$release_root"; then
@@ -182,7 +202,8 @@ fi
 
 for binary in "$engine" "$control" "$ibus_adapter" \
               "$libexec/cassotis-ibus-smoke" \
-              "$libexec/cassotis-fcitx5-smoke" "$fcitx_addon"; do
+              "$libexec/cassotis-fcitx5-smoke" "$fcitx_addon" \
+              "$neural_smoke" "$runtime_wrapper"; do
     dependencies="$(ldd "$binary" 2>&1 || true)"
     if grep -q 'not found' <<<"$dependencies"; then
         printf '%s\n' "$dependencies" >&2
@@ -217,6 +238,7 @@ if command -v ibus >/dev/null 2>&1; then
 fi
 
 "$engine" --self-test
+"$neural_smoke" "$libexec"
 NO_AT_BRIDGE=1 "$settings" --check-ui
 CASSOTIS_USER_DICTIONARY="$temporary_dir/ibus-user.db" \
 CASSOTIS_ENGINE_PATH="$engine" \

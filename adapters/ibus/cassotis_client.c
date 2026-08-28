@@ -476,6 +476,31 @@ gboolean cassotis_client_process_key(CassotisClient *client,
     return TRUE;
 }
 
+gboolean cassotis_client_poll_result(CassotisClient *client,
+                                     guint64 context_id,
+                                     guint64 generation_id,
+                                     CassotisEngineResult *result,
+                                     GError **error)
+{
+    guint64 request_id = client->next_request_id++;
+    GByteArray *request = cassotis_protocol_build_empty_request(
+        CASSOTIS_MESSAGE_POLL_RESULT, request_id, context_id,
+        generation_id);
+    GByteArray *response = NULL;
+    if (!exchange(client, request, CASSOTIS_MESSAGE_ENGINE_RESULT,
+                  request_id, context_id, generation_id, &response, error))
+        return FALSE;
+    if (!cassotis_protocol_decode_engine_result(response->data,
+                                                response->len, result,
+                                                error)) {
+        g_byte_array_unref(response);
+        close_socket(client);
+        return FALSE;
+    }
+    g_byte_array_unref(response);
+    return TRUE;
+}
+
 gboolean cassotis_client_get_state(CassotisClient *client,
                                    CassotisEngineState *state,
                                    GError **error)

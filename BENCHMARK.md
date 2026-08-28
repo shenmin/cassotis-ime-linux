@@ -9,21 +9,24 @@ presented as proof of equivalence.
 
 ## Baseline
 
-The Linux v0.1.0 engine is reviewed against:
+The current Linux engine is reviewed against:
 
-- Cassotis IME v1.17.0 (`e9056cefb479c2df778664ec49e6da2056c59525`)
-- Cassotis Lexicon v1.17.0 (`a9a29c4a5d4679a65b34e9556decc31925a0857a`)
-- Simplified dictionary schema 22, SHA-256
-  `a07942f79fe607bdb7dad14e0b0e82b87fef47473380cf98eda415afc6a9c354`
-- Traditional dictionary schema 22, SHA-256
-  `3cb9de47d9ff3dbc9a517d53a64ac0a547ecd4c72b1767e26c13152a8963c17e`
+- Cassotis IME v1.18.0 (`48b8bc21bc408faa32a756764b39cf109e4be0fc`)
+- Cassotis Lexicon v1.18.0 (`51f41d211aa062cf70e96a017ee6e5b9d79474a7`)
+- Simplified dictionary schema 24, SHA-256
+  `db8a59c61fe8d306b33dd08a8932a17007fdab8ac0480f49389cc9430493cc07`
+- Traditional dictionary schema 24, SHA-256
+  `06b2cba302e61bd016e4a7f8e47ba2c317d18cdda32457ac8ad232585ce4c829`
 
 `tools/parity/validate_source_parity.py` checks both reviewed revisions, a
 manifest of the reviewed production engine, SQLite provider, pinyin parser,
-fuzzy-pinyin and shuangpin sources on both platforms, all 40 generated model
-units, expanded model evidence, and the frozen dictionary. The manifest pins
-the reviewed Delphi and FPC adaptations independently; it does not pretend
-that platform-specific source files are textually identical.
+fuzzy-pinyin and shuangpin sources on both platforms, all 42 generated model
+units, expanded model evidence, and the frozen dictionary. It also binds the
+Transformer and local-completion models, their runtime index and manifest,
+the native inference bridge, and the architecture-specific ONNX Runtime
+libraries. The manifest pins the reviewed Delphi and FPC adaptations
+independently; it does not pretend that platform-specific source files are
+textually identical.
 The small `tests/cases/candidate_quality.tsv` and
 `tests/cases/candidate_quality_tc.tsv` sets then guard known simplified and
 traditional candidate behavior through the actual SQLite provider.
@@ -48,6 +51,7 @@ Build and run it directly:
   --dictionary /path/to/dict_sc.db \
   --long-cases /path/to/long_sentence_16300.tsv \
   --short-cases /path/to/word_input_yhwd_context.tsv \
+  --neural-runtime ./build/bin \
   --report-dir ./quality-report
 
 python3 tools/parity/validate_quality_report.py \
@@ -55,8 +59,15 @@ python3 tools/parity/validate_quality_report.py \
   --dictionary /path/to/dict_sc.db \
   --long-cases /path/to/long_sentence_16300.tsv \
   --short-cases /path/to/word_input_yhwd_context.tsv \
-  --baseline tests/baselines/quality-v1.17.0-linux-x86_64.txt
+  --baseline tests/baselines/quality-v1.18.0-linux-x86_64.txt
 ```
+
+The long-sentence accuracy pass uses deterministic work limits and accepts a
+completed Transformer decision without a wall-clock cutoff. A separate
+production-mode pass measures latency with the deployed 30 ms neural-result
+acceptance budget. Both passes use the same model and bounded search; this
+separation prevents transient host load from changing the frozen accuracy
+result while retaining realistic production latency behavior.
 
 The runner reports Top1/Top2/Top5/Top9 counts, mean/P50/P95/maximum query
 latency, and Linux process RSS/high-water marks. Memory events contain only
@@ -64,7 +75,7 @@ the track and case identifier, never the private query text. It writes every
 non-Top1 result to `long-failures.tsv` or `short-failures.tsv`; those files are
 diagnostics, not ignored failures and are not public release artifacts.
 
-## Frozen v0.1.0 Results
+## Frozen v1.18.0 Port Results
 
 The complete release run uses externally supplied frozen case files. They are
 not redistributed by this repository because the source sentences are not
@@ -77,31 +88,42 @@ set:
 | Long sentence | 16,300 | 2,673,936 | `3f50a9323ad798e691f86ea70c6dffa13b4a9f55b624fc3499a138258190ff0f` |
 | Short word with frozen context | 65,000 | 9,200,779 | `cd02fc1a24e89a106c200f4864d5ad2c11afd4c8d784059a4b6e9a10c51fbab8` |
 
-The Ubuntu 26.04 x86_64 release host produced the following native-engine
-results against the reviewed schema-22 simplified dictionary:
+The Ubuntu 26.04 x86_64 and Ubuntu 26.04.1 aarch64 release hosts produced the
+following native-engine results against the reviewed schema-24 simplified
+dictionary. Candidate ranks come from the deterministic accuracy pass without
+a neural wall-clock cutoff; latency columns come from the separate production
+pass with the deployed 30 ms neural-result budget:
 
-| Track | Top1 | Top2 | Top5 | Top9 | Mean | P50 | P95 | Max |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Long sentence | 10,553/16,300 (64.74%) | 12,008/16,300 (73.67%) | 12,008 | 12,008 | 111.051 ms | 92 ms | 246 ms | 868 ms |
-| Short word, context off | 60,346/65,000 (92.84%) | 63,163/65,000 (97.17%) | 64,498 | 64,619 | 7.602 ms | 6 ms | 19 ms | 169 ms |
-| Short word, context on | 61,827/65,000 (95.12%) | 63,516/65,000 (97.72%) | 64,540 | 64,619 | 8.485 ms | 7 ms | 20 ms | 160 ms |
+| Architecture | Track | Top1 | Top2 | Top5 | Top9 | Mean | P50 | P95 | Max |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | Long sentence | 10,685/16,300 | 12,096/16,300 | 12,096 | 12,096 | 147.365 ms | 133 ms | 298 ms | 1,087 ms |
+| x86_64 | Short word, context off | 60,346/65,000 | 63,163/65,000 | 64,498 | 64,619 | 9.270 ms | 7 ms | 24 ms | 87 ms |
+| x86_64 | Short word, context on | 61,827/65,000 | 63,517/65,000 | 64,540 | 64,619 | 10.396 ms | 8 ms | 26 ms | 119 ms |
+| aarch64 | Long sentence | 10,703/16,300 | 12,104/16,300 | 12,104 | 12,104 | 94.443 ms | 79 ms | 207 ms | 657 ms |
+| aarch64 | Short word, context off | 60,346/65,000 | 63,163/65,000 | 64,498 | 64,619 | 5.984 ms | 5 ms | 15 ms | 49 ms |
+| aarch64 | Short word, context on | 61,827/65,000 | 63,517/65,000 | 64,540 | 64,619 | 6.646 ms | 5 ms | 16 ms | 48 ms |
 
 The 11,728 short-word rows marked as genuine competing-candidate cases score
-8,737/10,528 Top1/Top2 without context and 9,596/10,775 with context. The
-context-enabled short-word quality counts are identical to the Windows
-v1.17.0 reference. The Windows long-sentence reference is 10,595 Top1 and
-12,023 Top2. The Linux baseline retains the small reviewed compiler/runtime
-difference but now permits no further regression in any recorded quality
-count or substitution of different passing/failing cases. Latency is
-host-specific and must not be compared across Windows and Linux hardware as an
-implementation-speed ratio.
+8,737/10,528 Top1/Top2 without context and 9,596/10,775 with context on both
+architectures. All short-word aggregate counts and per-case failure signatures
+are identical across x86_64 and aarch64. The Windows v1.18.0 long-sentence
+reference is 10,731 Top1 and 12,128 Top2. The reviewed Linux long-sentence
+results are close but not byte-for-byte identical because ONNX Runtime and
+floating-point evaluation can cross a small number of model decision
+boundaries. The release therefore freezes a separate exact per-case signature
+for each architecture; there is no architecture-specific ranking branch.
+Latency is host-specific and must not be compared across different hardware as
+an implementation-speed ratio.
 
-The single benchmark process reached 557,252 KiB maximum RSS/high-water mark,
-below the 768 MiB release ceiling. The same clean-build gate also passed all
-123 FPCUnit tests, 22/22 simplified and 9/9 traditional frozen candidates, and
-an 8,300-key eight-context transport run. That transport run measured
-19,855.531 microseconds mean and 152,703 microseconds maximum IPC key latency,
-with 12 KiB post-warmup RSS growth and successful engine-restart recovery.
+The x86_64 and aarch64 benchmark processes reached 836,948 KiB and 882,712 KiB
+maximum RSS/high-water mark respectively, below the 960 MiB release ceiling.
+Each clean-build gate also passed all 128 FPCUnit tests, 22/22 simplified and
+9/9 traditional frozen candidates, and the deterministic 500-case neural
+completion exercise. The eight-context, 8,300-key transport run measured
+21,274.350 microseconds mean and 101,198 microseconds maximum IPC key latency
+on x86_64, with 8 KiB post-warmup RSS growth. On aarch64 it measured 12,847.534
+microseconds mean and 50,152 microseconds maximum, with zero post-warmup RSS
+growth. Both runs passed engine-restart recovery.
 
 ## Complete Release Gate
 
@@ -132,11 +154,12 @@ Then run the Linux release gate inside the target desktop session:
 The resulting `release-validation.json`, platform matrix, logs, benchmark
 files, package checksums, and packages form one auditable release record.
 
-The checked-in x86_64 baseline is a release floor, not a target to train
-against. It requires complete case counts, bounded mean/P95/maximum latency
-and peak memory, and Top1/Top2 results close to the reviewed Windows v1.17.0
-reference. Updating it requires a new frozen corpus or reviewed engine
-baseline; a regression must not be hidden by lowering the thresholds.
+The checked-in x86_64 and aarch64 baselines are release floors, not targets to
+train against. They require complete case counts, bounded mean/P95/maximum
+latency and peak memory, exact per-case failure signatures, and the reviewed
+v1.18.0 neural-completion signature. Updating either file requires a new
+frozen corpus, reviewed engine baseline, or documented runtime change; a
+regression must not be hidden by lowering the thresholds.
 
 ## Interpretation
 
