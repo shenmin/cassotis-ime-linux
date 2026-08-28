@@ -12,6 +12,9 @@
   libraries, deployed models, runtime index, and third-party notices.
 - Extended source, dictionary, quality, staged-payload, and release-artifact
   validation to cover the new neural runtime and model assets.
+- Made character-LM span scoring independent of unrelated query-cache history
+  and re-froze the audited per-architecture long-sentence signatures without
+  lowering aggregate quality floors.
 - Hardened rootless IBus upgrades with exact executable-path shutdown,
   persistent component-cache refresh, stale bus-address cleanup, and explicit
   rejection of mixed system-wide and per-user Cassotis installations.

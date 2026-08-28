@@ -96,12 +96,12 @@ pass with the deployed 30 ms neural-result budget:
 
 | Architecture | Track | Top1 | Top2 | Top5 | Top9 | Mean | P50 | P95 | Max |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| x86_64 | Long sentence | 10,685/16,300 | 12,096/16,300 | 12,096 | 12,096 | 147.365 ms | 133 ms | 298 ms | 1,087 ms |
-| x86_64 | Short word, context off | 60,346/65,000 | 63,163/65,000 | 64,498 | 64,619 | 9.270 ms | 7 ms | 24 ms | 87 ms |
-| x86_64 | Short word, context on | 61,827/65,000 | 63,517/65,000 | 64,540 | 64,619 | 10.396 ms | 8 ms | 26 ms | 119 ms |
-| aarch64 | Long sentence | 10,703/16,300 | 12,104/16,300 | 12,104 | 12,104 | 94.443 ms | 79 ms | 207 ms | 657 ms |
-| aarch64 | Short word, context off | 60,346/65,000 | 63,163/65,000 | 64,498 | 64,619 | 5.984 ms | 5 ms | 15 ms | 49 ms |
-| aarch64 | Short word, context on | 61,827/65,000 | 63,517/65,000 | 64,540 | 64,619 | 6.646 ms | 5 ms | 16 ms | 48 ms |
+| x86_64 | Long sentence | 10,687/16,300 | 12,104/16,300 | 12,104 | 12,104 | 149.270 ms | 134 ms | 305 ms | 1,024 ms |
+| x86_64 | Short word, context off | 60,346/65,000 | 63,163/65,000 | 64,498 | 64,619 | 9.038 ms | 7 ms | 23 ms | 67 ms |
+| x86_64 | Short word, context on | 61,827/65,000 | 63,517/65,000 | 64,540 | 64,619 | 10.120 ms | 8 ms | 25 ms | 87 ms |
+| aarch64 | Long sentence | 10,704/16,300 | 12,107/16,300 | 12,107 | 12,107 | 86.083 ms | 72 ms | 188 ms | 566 ms |
+| aarch64 | Short word, context off | 60,346/65,000 | 63,163/65,000 | 64,498 | 64,619 | 5.394 ms | 4 ms | 13 ms | 42 ms |
+| aarch64 | Short word, context on | 61,827/65,000 | 63,517/65,000 | 64,540 | 64,619 | 5.986 ms | 5 ms | 14 ms | 41 ms |
 
 The 11,728 short-word rows marked as genuine competing-candidate cases score
 8,737/10,528 Top1/Top2 without context and 9,596/10,775 with context on both
@@ -115,9 +115,17 @@ for each architecture; there is no architecture-specific ranking branch.
 Latency is host-specific and must not be compared across different hardware as
 an implementation-speed ratio.
 
-The x86_64 and aarch64 benchmark processes reached 836,948 KiB and 882,712 KiB
+The v0.2.0 release makes character-LM span scoring independent of n-grams
+cached by earlier, unrelated queries. This reviewed runtime change required a
+new long-sentence signature. Against the provisional signatures, the x86_64
+transition corrected 23 Top1 cases and regressed 21, for a net gain of two;
+the aarch64 transition corrected three and regressed two, for a net gain of
+one. Aggregate quality floors were not lowered, and the short-word signatures
+did not change.
+
+The x86_64 and aarch64 benchmark processes reached 763,640 KiB and 866,268 KiB
 maximum RSS/high-water mark respectively, below the 960 MiB release ceiling.
-Each clean-build gate also passed all 128 FPCUnit tests, 22/22 simplified and
+Each clean-build gate also passed all 129 FPCUnit tests, 22/22 simplified and
 9/9 traditional frozen candidates, and the deterministic 500-case neural
 completion exercise. The eight-context, 8,300-key transport run measured
 21,274.350 microseconds mean and 101,198 microseconds maximum IPC key latency
