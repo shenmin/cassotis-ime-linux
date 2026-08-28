@@ -128,9 +128,9 @@ maximum RSS/high-water mark respectively, below the 960 MiB release ceiling.
 Each clean-build gate also passed all 129 FPCUnit tests, 22/22 simplified and
 9/9 traditional frozen candidates, and the deterministic 500-case neural
 completion exercise. The eight-context, 8,300-key transport run measured
-21,274.350 microseconds mean and 101,198 microseconds maximum IPC key latency
-on x86_64, with 8 KiB post-warmup RSS growth. On aarch64 it measured 12,847.534
-microseconds mean and 50,152 microseconds maximum, with zero post-warmup RSS
+19,472.237 microseconds mean and 129,987 microseconds maximum IPC key latency
+on x86_64, with 8 KiB post-warmup RSS growth. On aarch64 it measured 11,604.921
+microseconds mean and 41,059 microseconds maximum, with zero post-warmup RSS
 growth. Both runs passed engine-restart recovery.
 
 ## Complete Release Gate
