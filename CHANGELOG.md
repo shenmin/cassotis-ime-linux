@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Advanced the development baseline to Cassotis IME and Cassotis Lexicon
+  v1.19.0 with the matching schema-24 dictionaries.
+- Ported the Pinyin-conditioned 16-candidate Transformer scorer and its learned
+  runtime gate and fusion decision to the Linux host on x86_64 and aarch64.
+- Expanded constrained one-key completion with the v2 multi-level suffix index
+  and native recall selector.
+- Preserved strong four-syllable compound prefixes under controlled suffixes
+  and rejected divergent completion prefixes that only share a trailing
+  anchor.
+- Bound cleanly rebuilt schema-24 dictionaries by hash and by lexical,
+  completion-competition, pair-audit, and long-completion row counts so stale
+  importer output cannot pass the release gate.
+- Added a full 16,300-case static-plus-neural completion benchmark and
+  architecture-specific quality/latency gates alongside the deterministic
+  neural lifecycle smoke test.
+- Made deterministic completion validation disable both neural wall-clock
+  cutoffs, and retained aggregate gates for neural long-sentence decisions
+  whose exact boundary cases can vary across equivalent ONNX evaluations.
+
 ## 0.2.0 - 2026-08-28
 
 - Ported the Cassotis IME and Cassotis Lexicon v1.18.0 behavior/data baseline,

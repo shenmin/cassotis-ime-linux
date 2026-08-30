@@ -21,12 +21,19 @@ corresponding model-training data.
 
 The current Linux engine is reviewed against:
 
-- Cassotis IME v1.18.0 (`48b8bc21bc408faa32a756764b39cf109e4be0fc`)
-- Cassotis Lexicon v1.18.0 (`51f41d211aa062cf70e96a017ee6e5b9d79474a7`)
+- Cassotis IME v1.19.0 (`089f63859eb73ac3d7355d8c5623c3ab70287266`)
+- Cassotis Lexicon v1.19.0 (`e66619094effccf5d4265ce4e716a50e9897d75c`)
 - Simplified dictionary schema 24, SHA-256
-  `db8a59c61fe8d306b33dd08a8932a17007fdab8ac0480f49389cc9430493cc07`
+  `e7f02bff9a334ff2289b7cdc0e32a2cc83abd5d2416d9ed4d5885e4c3cf9f77c`
 - Traditional dictionary schema 24, SHA-256
-  `06b2cba302e61bd016e4a7f8e47ba2c317d18cdda32457ac8ad232585ce4c829`
+  `d54dbe54f314e6da350e9d7a4bddb269c0b268cfcd56fb48c9025b22dcde86ae`
+- Simplified/traditional base entries: 213,028 / 216,180
+- Simplified/traditional completion competition rows: 42,453 / 42,448
+- Simplified/traditional completion pair-audit rows: 4,379 / 4,379
+- Simplified long-completion tables: 35,423 visible paths and 97,589 total
+  text-recall rows
+- Traditional long-completion tables: 32,481 visible paths and 92,457 total
+  text-recall rows
 
 ## Full Linux Benchmark
 
@@ -50,6 +57,71 @@ latency, and Linux process RSS/high-water marks. Memory events contain only
 the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
+
+## Frozen v1.19.0 Port Results
+
+The v1.19.0 validation reuses the same separately supplied frozen corpus files
+as v1.18.0. They are not redistributed by this repository and remain bound by
+size and SHA-256:
+
+| Input | Cases | Bytes | SHA-256 |
+| --- | ---: | ---: | --- |
+| Long sentence | 16,300 | 2,673,936 | `3f50a9323ad798e691f86ea70c6dffa13b4a9f55b624fc3499a138258190ff0f` |
+| Short word with frozen context | 65,000 | 9,200,779 | `cd02fc1a24e89a106c200f4864d5ad2c11afd4c8d784059a4b6e9a10c51fbab8` |
+
+Ubuntu 26.04.1 x86_64 and Ubuntu 26.04.1 aarch64 produced the following native
+results with the reviewed v1.19.0 engine, schema-24 dictionary, conditional
+Transformer, learned gate/fusion parameters, and completion index v2. As in
+the previous gate, accuracy is deterministic and latency uses the deployed
+30 ms neural-result budget:
+
+| Architecture | Track | Top1 | Top2 | Top5 | Top9 | Mean | P50 | P95 | Max |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | Long sentence | 10,941/16,300 | 12,260/16,300 | 12,260 | 12,260 | 183.438 ms | 175 ms | 364 ms | 1,023 ms |
+| x86_64 | Short word, context off | 60,346/65,000 | 63,163/65,000 | 64,498 | 64,619 | 9.248 ms | 7 ms | 24 ms | 89 ms |
+| x86_64 | Short word, context on | 61,827/65,000 | 63,517/65,000 | 64,540 | 64,619 | 10.365 ms | 8 ms | 26 ms | 81 ms |
+| aarch64 | Long sentence | 10,916/16,300 | 12,252/16,300 | 12,252 | 12,252 | 103.540 ms | 89 ms | 219 ms | 664 ms |
+| aarch64 | Short word, context off | 60,346/65,000 | 63,163/65,000 | 64,498 | 64,619 | 5.933 ms | 5 ms | 14 ms | 47 ms |
+| aarch64 | Short word, context on | 61,827/65,000 | 63,517/65,000 | 64,540 | 64,619 | 6.592 ms | 5 ms | 16 ms | 47 ms |
+
+The published Windows v1.19.0 reference is 10,917 Top1 and 12,248 Top2. Linux
+x86_64 is 24/12 cases higher and aarch64 is one case lower/four cases higher.
+Both architectures therefore satisfy the Windows aggregate quality target.
+Their small per-case difference remains an ONNX Runtime and floating-point
+decision boundary, not an architecture-specific ranking policy. The
+65,000-case short-word counts and exact failure signature are identical on
+Windows, x86_64, and aarch64.
+
+Relative to the frozen Linux v1.18.0 results, v1.19.0 gains 254 Top1 and 156
+Top2 long-sentence cases on x86_64, and 212 Top1 and 145 Top2 cases on
+aarch64. Peak RSS/high-water marks were 850,120 KiB and 869,564 KiB
+respectively, both below the 960 MiB release ceiling. Both clean native builds
+passed all 132 FPCUnit tests. Host-specific latency must not be interpreted as
+a direct implementation-speed comparison between different machines.
+
+The complete one-key-completion measurement uses the same omitted-four-
+syllable protocol as Windows and includes both static and neural completion:
+
+
+
+The fourth argument applies the same 40 ms local-result acceptance limit as the
+production host and the Windows benchmark; the fifth prints progress every 500
+cases. The runner performs the same post-sample, read-only oracle pass as the
+Windows benchmark so its cache-warming order is comparable without changing
+the timed production result.
+
+| Architecture | Local completion hit | Prompt coverage | Total keys saved | P95 |
+| --- | ---: | ---: | ---: | ---: |
+| x86_64 | 194/16,300 (1.19%) | 3,719/16,300 (22.82%) | 556 | 140 ms |
+| aarch64 | 191/16,300 (1.17%) | 3,726/16,300 (22.86%) | 548 | 95 ms |
+
+The Windows v1.19.0 publication records 202 hits, 3,834 prompts, 571 saved
+keys, and 38.452 ms P95 under the same 40 ms protocol. Linux produces the same
+deterministic completion decision signature when wall-clock cutoffs are
+disabled, while its production track accepts fewer background results because
+inference crosses the 40 ms boundary more often. The gate therefore preserves
+the production timeout and records the measured difference instead of raising
+the timeout to manufacture equal counts.
 
 ## Frozen v1.18.0 Port Results
 
@@ -124,10 +196,12 @@ files, package checksums, and packages form one auditable release record.
 
 The checked-in x86_64 and aarch64 baselines are release floors, not targets to
 train against. They require complete case counts, bounded mean/P95/maximum
-latency and peak memory, exact per-case failure signatures, and the reviewed
-v1.18.0 neural-completion signature. Updating either file requires a new
-frozen corpus, reviewed engine baseline, or documented runtime change; a
-regression must not be hidden by lowering the thresholds.
+latency and peak memory, an exact short-word failure signature, the exact
+deterministic 500-case neural-completion signature, aggregate neural
+long-sentence rank floors, and bounded full-corpus completion quality and
+latency. Updating a baseline requires a new frozen corpus, reviewed engine
+baseline, or documented runtime change; a regression must not be hidden by
+lowering the thresholds.
 
 ## Interpretation
 

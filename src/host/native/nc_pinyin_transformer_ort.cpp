@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <cerrno>
@@ -15,6 +16,7 @@
 #include <string_view>
 #include <tuple>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 #include <fcntl.h>
@@ -31,6 +33,7 @@
 namespace {
 
 constexpr int64_t kCandidateCount = 12;
+constexpr int64_t kConditionalCandidateCount = 16;
 constexpr int64_t kSequenceLength = 41;
 constexpr int64_t kNumericFeatureCount = 88;
 
@@ -220,6 +223,80 @@ extern "C" CASSOTIS_EXPORT int nc_pt_run(
     return 0;
 }
 
+extern "C" CASSOTIS_EXPORT int nc_pt_run_conditional(
+    void* opaque_handle,
+    const int64_t* char_ids,
+    const int64_t* pinyin_ids,
+    const uint8_t* candidate_mask,
+    float* output_scores,
+    int output_score_count,
+    char* error_text,
+    int error_capacity) {
+    SetError(error_text, error_capacity, "");
+    if (opaque_handle == nullptr || char_ids == nullptr || pinyin_ids == nullptr ||
+        candidate_mask == nullptr || output_scores == nullptr ||
+        output_score_count < kConditionalCandidateCount) {
+        SetError(error_text, error_capacity, "invalid conditional inference arguments");
+        return 0;
+    }
+    try {
+        FloatingPointMaskGuard floating_point_guard;
+        auto* handle = static_cast<SessionHandle*>(opaque_handle);
+        if (!handle->session) {
+            SetError(error_text, error_capacity, "model session is unavailable");
+            return 0;
+        }
+
+        static_assert(sizeof(bool) == sizeof(uint8_t),
+            "ONNX bool tensor requires one-byte bool");
+        std::array<uint8_t, kConditionalCandidateCount> mask_storage{};
+        std::copy_n(candidate_mask, kConditionalCandidateCount, mask_storage.begin());
+
+        const std::array<int64_t, 3> candidate_shape{
+            1, kConditionalCandidateCount, kSequenceLength};
+        const std::array<int64_t, 2> pinyin_shape{1, kSequenceLength};
+        const std::array<int64_t, 2> mask_shape{1, kConditionalCandidateCount};
+        auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+
+        std::array<Ort::Value, 3> inputs{
+            Ort::Value::CreateTensor<int64_t>(memory, const_cast<int64_t*>(char_ids),
+                kConditionalCandidateCount * kSequenceLength,
+                candidate_shape.data(), candidate_shape.size()),
+            Ort::Value::CreateTensor<int64_t>(memory, const_cast<int64_t*>(pinyin_ids),
+                kSequenceLength, pinyin_shape.data(), pinyin_shape.size()),
+            Ort::Value::CreateTensor<bool>(memory,
+                reinterpret_cast<bool*>(mask_storage.data()),
+                kConditionalCandidateCount, mask_shape.data(), mask_shape.size())};
+
+        constexpr std::array<const char*, 3> input_names{
+            "char_ids", "pinyin_ids", "candidate_mask"};
+        constexpr std::array<const char*, 1> output_names{"scores"};
+        auto outputs = handle->session->Run(Ort::RunOptions{nullptr}, input_names.data(),
+            inputs.data(), inputs.size(), output_names.data(), output_names.size());
+        if (outputs.size() != 1 || !outputs[0].IsTensor()) {
+            SetError(error_text, error_capacity,
+                "conditional model returned an invalid output tensor");
+            return 0;
+        }
+        const auto info = outputs[0].GetTensorTypeAndShapeInfo();
+        if (info.GetElementCount() < kConditionalCandidateCount) {
+            SetError(error_text, error_capacity,
+                "conditional model output tensor is too small");
+            return 0;
+        }
+        const float* scores = outputs[0].GetTensorData<float>();
+        std::copy_n(scores, kConditionalCandidateCount, output_scores);
+        return 1;
+    } catch (const Ort::Exception& error) {
+        SetError(error_text, error_capacity, ErrorText(error.what()));
+    } catch (const std::exception& error) {
+        SetError(error_text, error_capacity, ErrorText(error.what()));
+    } catch (...) {
+        SetError(error_text, error_capacity, "unknown conditional inference failure");
+    }
+    return 0;
+}
+
 extern "C" CASSOTIS_EXPORT void nc_pt_destroy(void* opaque_handle) {
     delete static_cast<SessionHandle*>(opaque_handle);
 }
@@ -228,12 +305,16 @@ namespace {
 
 constexpr std::array<char, 8> kLocalCompletionMagic{
     'C', 'A', 'S', 'L', 'C', 'I', '0', '1'};
-constexpr uint32_t kLocalCompletionIndexVersion = 1;
+constexpr uint32_t kLocalCompletionLegacyIndexVersion = 1;
+constexpr uint32_t kLocalCompletionIndexVersion = 2;
 constexpr size_t kLocalCompletionInputLength = 105;
 constexpr size_t kLocalCompletionCandidateCount = 32;
+constexpr size_t kLocalCompletionRecallPool = 384;
 constexpr size_t kLocalCompletionPathWords = 3;
 constexpr size_t kLocalCompletionFeatureCount = 8;
 constexpr size_t kLocalCompletionOutputCount = kLocalCompletionCandidateCount + 1;
+
+#include "nc_local_completion_recall_selector.inc"
 
 #pragma pack(push, 1)
 struct LocalCompletionIndexHeader {
@@ -294,7 +375,7 @@ struct LocalCompletionAnchorRecord {
     uint32_t candidate_start;
 };
 
-struct LocalCompletionCandidateRecord {
+struct LocalCompletionCandidateRecordV1 {
     uint16_t word_ids[kLocalCompletionPathWords];
     uint16_t reserved;
     int32_t score;
@@ -302,12 +383,33 @@ struct LocalCompletionCandidateRecord {
     int32_t source_count;
     int32_t domain_count;
 };
+
+struct LocalCompletionCandidateRecordV2 {
+    uint16_t word_ids[kLocalCompletionPathWords];
+    uint16_t reserved;
+    int32_t score;
+    int32_t count;
+    int32_t source_count;
+    int32_t domain_count;
+    int32_t anchor_total;
+};
 #pragma pack(pop)
 
 static_assert(sizeof(LocalCompletionIndexHeader) == 136,
     "local-completion header layout changed");
-static_assert(sizeof(LocalCompletionCandidateRecord) == 24,
+static_assert(sizeof(LocalCompletionCandidateRecordV1) == 24,
+    "legacy local-completion candidate layout changed");
+static_assert(sizeof(LocalCompletionCandidateRecordV2) == 28,
     "local-completion candidate layout changed");
+
+struct LocalCompletionCandidateData {
+    std::array<uint16_t, kLocalCompletionPathWords> word_ids{};
+    int32_t score{};
+    int32_t count{};
+    int32_t source_count{};
+    int32_t domain_count{};
+    int32_t anchor_total{1};
+};
 
 class ReadOnlyMappedFile {
 public:
@@ -476,12 +578,20 @@ public:
         }
         header_ = reinterpret_cast<const LocalCompletionIndexHeader*>(file_.data());
         if (!std::equal(kLocalCompletionMagic.begin(), kLocalCompletionMagic.end(),
-                header_->magic) || header_->version != kLocalCompletionIndexVersion) {
+                header_->magic) ||
+            (header_->version != kLocalCompletionLegacyIndexVersion &&
+                header_->version != kLocalCompletionIndexVersion)) {
             error = "local-completion index format is unsupported";
             return false;
         }
+        candidate_record_size_ = header_->version == kLocalCompletionIndexVersion
+            ? sizeof(LocalCompletionCandidateRecordV2)
+            : sizeof(LocalCompletionCandidateRecordV1);
         if (header_->max_input_length != kLocalCompletionInputLength ||
-            header_->candidate_limit != kLocalCompletionCandidateCount ||
+            header_->candidate_limit < kLocalCompletionCandidateCount ||
+            header_->candidate_limit > 128 ||
+            (header_->version == kLocalCompletionLegacyIndexVersion &&
+                header_->candidate_limit != kLocalCompletionCandidateCount) ||
             header_->path_words != kLocalCompletionPathWords ||
             header_->feature_count != kLocalCompletionFeatureCount ||
             header_->word_count != header_->word_vocab_size ||
@@ -496,7 +606,7 @@ public:
             !CheckedSection(header_->anchor_offset, header_->anchor_count,
                 sizeof(LocalCompletionAnchorRecord), header_->file_size) ||
             !CheckedSection(header_->candidate_offset, header_->candidate_count,
-                sizeof(LocalCompletionCandidateRecord), header_->file_size)) {
+                candidate_record_size_, header_->file_size)) {
             error = "local-completion index metadata is invalid";
             return false;
         }
@@ -508,8 +618,7 @@ public:
             file_.data() + header_->word_offset);
         anchors_ = reinterpret_cast<const LocalCompletionAnchorRecord*>(
             file_.data() + header_->anchor_offset);
-        candidates_ = reinterpret_cast<const LocalCompletionCandidateRecord*>(
-            file_.data() + header_->candidate_offset);
+        candidates_ = file_.data() + header_->candidate_offset;
         strings_ = reinterpret_cast<const char*>(file_.data() + header_->string_offset);
         strings_size_ = header_->file_size - header_->string_offset;
         return ValidateSorted(error);
@@ -571,8 +680,29 @@ public:
         return Text(row.text_offset, row.text_length) == anchor ? &row : nullptr;
     }
 
-    const LocalCompletionCandidateRecord& Candidate(uint32_t index) const {
-        return candidates_[index];
+    LocalCompletionCandidateData Candidate(uint32_t index) const {
+        LocalCompletionCandidateData result{};
+        if (header_->version == kLocalCompletionIndexVersion) {
+            const auto& row = reinterpret_cast<
+                const LocalCompletionCandidateRecordV2*>(candidates_)[index];
+            std::copy(std::begin(row.word_ids), std::end(row.word_ids),
+                result.word_ids.begin());
+            result.score = row.score;
+            result.count = row.count;
+            result.source_count = row.source_count;
+            result.domain_count = row.domain_count;
+            result.anchor_total = std::max(1, row.anchor_total);
+        } else {
+            const auto& row = reinterpret_cast<
+                const LocalCompletionCandidateRecordV1*>(candidates_)[index];
+            std::copy(std::begin(row.word_ids), std::end(row.word_ids),
+                result.word_ids.begin());
+            result.score = row.score;
+            result.count = row.count;
+            result.source_count = row.source_count;
+            result.domain_count = row.domain_count;
+        }
+        return result;
     }
 
     const LocalCompletionWordRecord& Word(uint16_t id) const {
@@ -630,7 +760,7 @@ private:
             }
         }
         for (uint32_t index = 0; index < header_->candidate_count; ++index) {
-            for (uint16_t word_id : candidates_[index].word_ids) {
+            for (uint16_t word_id : Candidate(index).word_ids) {
                 if (word_id >= header_->word_count) {
                     error = "local-completion candidate word ID is invalid";
                     return false;
@@ -646,18 +776,33 @@ private:
     const LocalCompletionTextIdRecord* pinyins_{};
     const LocalCompletionWordRecord* words_{};
     const LocalCompletionAnchorRecord* anchors_{};
-    const LocalCompletionCandidateRecord* candidates_{};
+    const uint8_t* candidates_{};
+    size_t candidate_record_size_{};
     const char* strings_{};
     size_t strings_size_{};
 };
 
 struct LocalRuntimeCandidate {
-    const LocalCompletionCandidateRecord* source{};
+    LocalCompletionCandidateData source{};
     std::array<uint16_t, kLocalCompletionPathWords> word_ids{};
     int base_rank{};
     int anchor_width{};
+    bool word_anchor{};
     int rank_score{};
     int text_units{};
+    int pinyin_units{};
+    int path_words{};
+    int support_count{};
+    int word_support_count{};
+    int char_support_count{};
+    int support_score_sum{};
+    int best_anchor_rank{};
+    int max_word_anchor_width{};
+    int max_char_anchor_width{};
+    int specific_support_count{};
+    int baseline_rank{};
+    double selector_score{};
+    std::string text;
 };
 
 struct LocalCompletionHandle {
@@ -667,11 +812,115 @@ struct LocalCompletionHandle {
 
 bool SameRuntimeCandidate(const LocalRuntimeCandidate& left,
     const LocalRuntimeCandidate& right) {
-    return left.base_rank == right.base_rank && left.word_ids == right.word_ids;
+    return left.word_ids == right.word_ids;
 }
 
-void AppendBaseCandidates(const LocalCompletionIndex& index, int base_rank,
-    const char* encoded_path, std::vector<LocalRuntimeCandidate>& output) {
+uint64_t RuntimeCandidateKey(
+    const std::array<uint16_t, kLocalCompletionPathWords>& word_ids) {
+    return static_cast<uint64_t>(word_ids[0]) |
+        (static_cast<uint64_t>(word_ids[1]) << 16) |
+        (static_cast<uint64_t>(word_ids[2]) << 32);
+}
+
+void AppendUtf8Codepoint(std::string& output, uint32_t codepoint) {
+    if (codepoint <= 0x7f) {
+        output.push_back(static_cast<char>(codepoint));
+    } else if (codepoint <= 0x7ff) {
+        output.push_back(static_cast<char>(0xc0 | (codepoint >> 6)));
+        output.push_back(static_cast<char>(0x80 | (codepoint & 0x3f)));
+    } else if (codepoint <= 0xffff) {
+        output.push_back(static_cast<char>(0xe0 | (codepoint >> 12)));
+        output.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f)));
+        output.push_back(static_cast<char>(0x80 | (codepoint & 0x3f)));
+    } else {
+        output.push_back(static_cast<char>(0xf0 | (codepoint >> 18)));
+        output.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3f)));
+        output.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f)));
+        output.push_back(static_cast<char>(0x80 | (codepoint & 0x3f)));
+    }
+}
+
+std::string Utf8Suffix(const char* text, size_t width) {
+    const auto codepoints = Utf8Codepoints(text);
+    const size_t start = codepoints.size() > width ? codepoints.size() - width : 0;
+    std::string result;
+    for (size_t position = start; position < codepoints.size(); ++position) {
+        AppendUtf8Codepoint(result, codepoints[position]);
+    }
+    return result;
+}
+
+void MergeAnchorCandidates(const LocalCompletionIndex& index,
+    const LocalCompletionAnchorRecord& anchor, int base_rank, int anchor_width,
+    bool word_anchor, int backoff_bonus,
+    std::vector<LocalRuntimeCandidate>& output,
+    std::unordered_map<uint64_t, size_t>& positions) {
+    for (uint32_t item = 0; item < anchor.candidate_count; ++item) {
+        const auto source = index.Candidate(anchor.candidate_start + item);
+        const uint64_t key = RuntimeCandidateKey(source.word_ids);
+        const int rank_score = source.score + backoff_bonus;
+        auto found = positions.find(key);
+        if (found == positions.end()) {
+            LocalRuntimeCandidate value{};
+            value.source = source;
+            value.word_ids = source.word_ids;
+            value.base_rank = base_rank;
+            value.anchor_width = anchor_width;
+            value.word_anchor = word_anchor;
+            value.rank_score = rank_score;
+            value.support_count = 1;
+            value.word_support_count = word_anchor ? 1 : 0;
+            value.char_support_count = word_anchor ? 0 : 1;
+            value.support_score_sum = rank_score;
+            value.best_anchor_rank = static_cast<int>(item) + 1;
+            value.max_word_anchor_width = word_anchor ? anchor_width : 0;
+            value.max_char_anchor_width = word_anchor ? 0 : anchor_width;
+            value.specific_support_count =
+                (word_anchor && anchor_width >= 2) ||
+                (!word_anchor && anchor_width >= 4) ? 1 : 0;
+            for (uint16_t word_id : value.word_ids) {
+                if (word_id == 0) {
+                    continue;
+                }
+                const auto& word = index.Word(word_id);
+                value.text_units += word.text_units;
+                value.pinyin_units += word.syllable_count;
+                ++value.path_words;
+                value.text.append(index.WordText(word_id));
+            }
+            positions.emplace(key, output.size());
+            output.push_back(std::move(value));
+            continue;
+        }
+
+        auto& previous = output[found->second];
+        ++previous.support_count;
+        previous.word_support_count += word_anchor ? 1 : 0;
+        previous.char_support_count += word_anchor ? 0 : 1;
+        previous.support_score_sum += rank_score;
+        previous.best_anchor_rank = std::min(
+            previous.best_anchor_rank, static_cast<int>(item) + 1);
+        previous.max_word_anchor_width = std::max(
+            previous.max_word_anchor_width, word_anchor ? anchor_width : 0);
+        previous.max_char_anchor_width = std::max(
+            previous.max_char_anchor_width, word_anchor ? 0 : anchor_width);
+        previous.specific_support_count +=
+            (word_anchor && anchor_width >= 2) ||
+            (!word_anchor && anchor_width >= 4) ? 1 : 0;
+        if (rank_score > previous.rank_score) {
+            previous.source = source;
+            previous.anchor_width = anchor_width;
+            previous.word_anchor = word_anchor;
+            previous.rank_score = rank_score;
+        }
+    }
+}
+
+std::vector<LocalRuntimeCandidate> BuildBaseCandidates(
+    const LocalCompletionIndex& index, int base_rank,
+    const char* base_text, const char* encoded_path) {
+    std::vector<LocalRuntimeCandidate> result;
+    std::unordered_map<uint64_t, size_t> positions;
     const auto words = SplitPath(encoded_path);
     for (int width = std::min<int>(3, static_cast<int>(words.size()));
          width >= 1; --width) {
@@ -682,34 +931,106 @@ void AppendBaseCandidates(const LocalCompletionIndex& index, int base_rank,
             }
             anchor.append(words[position]);
         }
-        const auto* row = index.FindAnchor(anchor);
-        if (row == nullptr) {
-            continue;
+        std::string encoded_anchor = anchor;
+        const int bonus = index.header().version == kLocalCompletionIndexVersion
+            ? 256 + width * 48
+            : (width - 1) * 32;
+        if (index.header().version == kLocalCompletionIndexVersion) {
+            encoded_anchor.insert(0, "w:");
         }
-        for (uint32_t item = 0; item < row->candidate_count; ++item) {
-            const auto& candidate = index.Candidate(row->candidate_start + item);
-            LocalRuntimeCandidate value{};
-            value.source = &candidate;
-            std::copy(std::begin(candidate.word_ids), std::end(candidate.word_ids),
-                value.word_ids.begin());
-            value.base_rank = base_rank;
-            value.anchor_width = width;
-            value.rank_score = candidate.score + (width - 1) * 32 -
-                (base_rank - 1) * 12;
-            for (uint16_t word_id : value.word_ids) {
-                if (word_id != 0) {
-                    value.text_units += index.Word(word_id).text_units;
-                }
+        if (const auto* row = index.FindAnchor(encoded_anchor)) {
+            MergeAnchorCandidates(index, *row, base_rank, width, true, bonus,
+                result, positions);
+        }
+    }
+    if (index.header().version == kLocalCompletionIndexVersion) {
+        const auto codepoints = Utf8Codepoints(base_text);
+        for (int width = std::min<int>(6, static_cast<int>(codepoints.size()));
+             width >= 1; --width) {
+            const std::string anchor = "c:" + Utf8Suffix(base_text, width);
+            if (const auto* row = index.FindAnchor(anchor)) {
+                MergeAnchorCandidates(index, *row, base_rank, width, false,
+                    width * 20, result, positions);
             }
-            auto previous = std::find_if(output.begin(), output.end(),
-                [&value](const LocalRuntimeCandidate& item_value) {
-                    return SameRuntimeCandidate(item_value, value);
-                });
-            if (previous == output.end()) {
-                output.push_back(value);
-            } else if (value.rank_score > previous->rank_score) {
-                *previous = value;
+        }
+    }
+    std::sort(result.begin(), result.end(),
+        [](const LocalRuntimeCandidate& left, const LocalRuntimeCandidate& right) {
+            if (left.rank_score != right.rank_score) {
+                return left.rank_score > right.rank_score;
             }
+            if (left.source.source_count != right.source.source_count) {
+                return left.source.source_count > right.source.source_count;
+            }
+            if (left.source.count != right.source.count) {
+                return left.source.count > right.source.count;
+            }
+            if (left.text != right.text) {
+                return left.text < right.text;
+            }
+            return left.word_ids < right.word_ids;
+        });
+    if (result.size() > kLocalCompletionRecallPool) {
+        result.resize(kLocalCompletionRecallPool);
+    }
+    for (auto& item : result) {
+        item.rank_score -= (base_rank - 1) * 12;
+    }
+    return result;
+}
+
+std::array<double, kLocalRecallFeatureCount> LocalRecallFeatures(
+    const LocalRuntimeCandidate& item, int best_rank_score, int retrieval_rank) {
+    const double count = static_cast<double>(std::max(0, item.source.count));
+    const double source_count =
+        static_cast<double>(std::max(0, item.source.source_count));
+    const double anchor_total =
+        static_cast<double>(std::max(1, item.source.anchor_total));
+    const double support_count = static_cast<double>(std::max(1, item.support_count));
+    return {
+        item.source.score / 512.0,
+        item.rank_score / 512.0,
+        (item.rank_score - best_rank_score) / 512.0,
+        std::log1p(count),
+        source_count,
+        static_cast<double>(item.source.domain_count),
+        std::log1p(anchor_total),
+        std::log((count + 0.5) / (anchor_total + 1.0)),
+        source_count / std::max(1.0, count),
+        item.word_anchor ? 1.0 : 0.0,
+        static_cast<double>(item.anchor_width),
+        static_cast<double>(item.base_rank),
+        std::log1p(static_cast<double>(retrieval_rank)),
+        static_cast<double>(item.path_words),
+        static_cast<double>(item.text_units),
+        static_cast<double>(item.pinyin_units),
+        item.path_words == 1 ? 1.0 : 0.0,
+        (item.word_anchor && item.anchor_width >= 2) ||
+            (!item.word_anchor && item.anchor_width >= 4) ? 1.0 : 0.0,
+        support_count,
+        static_cast<double>(item.word_support_count),
+        static_cast<double>(item.char_support_count),
+        item.support_score_sum / support_count / 512.0,
+        std::log1p(static_cast<double>(std::max(0, item.best_anchor_rank))),
+        static_cast<double>(item.max_word_anchor_width),
+        static_cast<double>(item.max_char_anchor_width),
+        static_cast<double>(item.specific_support_count),
+    };
+}
+
+void AppendBaseCandidates(const LocalCompletionIndex& index, int base_rank,
+    const char* base_text, const char* encoded_path,
+    std::vector<LocalRuntimeCandidate>& output) {
+    auto values = BuildBaseCandidates(index, base_rank, base_text, encoded_path);
+    for (auto& value : values) {
+        auto previous = std::find_if(output.begin(), output.end(),
+            [&value](const LocalRuntimeCandidate& item) {
+                return SameRuntimeCandidate(item, value);
+            });
+        if (previous == output.end()) {
+            output.push_back(std::move(value));
+        } else if (value.rank_score > previous->rank_score) {
+            *previous = std::move(value);
         }
     }
 }
@@ -726,6 +1047,54 @@ void AppendTextInput(const LocalCompletionIndex& index,
     types.push_back(0);
 }
 
+bool BuildLocalRecallPool(const LocalCompletionIndex& index,
+    const char* top1_text, const char* top1_path,
+    const char* top2_text, const char* top2_path,
+    std::vector<LocalRuntimeCandidate>& candidates) {
+    candidates.clear();
+    if (top1_text == nullptr || *top1_text == '\0' ||
+        top1_path == nullptr || *top1_path == '\0') {
+        return false;
+    }
+    AppendBaseCandidates(index, 1, top1_text, top1_path, candidates);
+    if (top2_text != nullptr && *top2_text != '\0' &&
+        top2_path != nullptr && *top2_path != '\0') {
+        AppendBaseCandidates(index, 2, top2_text, top2_path, candidates);
+    }
+    std::sort(candidates.begin(), candidates.end(),
+        [](const LocalRuntimeCandidate& left, const LocalRuntimeCandidate& right) {
+            if (left.rank_score != right.rank_score) {
+                return left.rank_score > right.rank_score;
+            }
+            if (left.source.source_count != right.source.source_count) {
+                return left.source.source_count > right.source.source_count;
+            }
+            if (left.source.count != right.source.count) {
+                return left.source.count > right.source.count;
+            }
+            if (left.text != right.text) {
+                return left.text < right.text;
+            }
+            return left.word_ids < right.word_ids;
+        });
+    if (candidates.size() > kLocalCompletionRecallPool) {
+        candidates.resize(kLocalCompletionRecallPool);
+    }
+    if (candidates.empty()) {
+        return false;
+    }
+    if (index.header().version == kLocalCompletionIndexVersion) {
+        const int best_rank_score = candidates.front().rank_score;
+        for (size_t position = 0; position < candidates.size(); ++position) {
+            auto& item = candidates[position];
+            item.baseline_rank = static_cast<int>(position) + 1;
+            item.selector_score = ScoreLocalRecallSelector(
+                LocalRecallFeatures(item, best_rank_score, item.baseline_rank));
+        }
+    }
+    return true;
+}
+
 bool BuildLocalInputs(const LocalCompletionIndex& index, const char* context,
     const char* query_syllables, const char* top1_text,
     const char* top1_path, const char* top2_text, const char* top2_path,
@@ -734,31 +1103,22 @@ bool BuildLocalInputs(const LocalCompletionIndex& index, const char* context,
     std::array<int64_t, kLocalCompletionCandidateCount * kLocalCompletionPathWords>& candidate_ids,
     std::array<float, kLocalCompletionCandidateCount * kLocalCompletionFeatureCount>& candidate_features,
     std::vector<LocalRuntimeCandidate>& candidates) {
-    candidates.clear();
-    if (top1_text == nullptr || *top1_text == '\0' ||
-        top1_path == nullptr || *top1_path == '\0') {
+    if (!BuildLocalRecallPool(index, top1_text, top1_path,
+            top2_text, top2_path, candidates)) {
         return false;
     }
-    AppendBaseCandidates(index, 1, top1_path, candidates);
-    if (top2_text != nullptr && *top2_text != '\0' &&
-        top2_path != nullptr && *top2_path != '\0') {
-        AppendBaseCandidates(index, 2, top2_path, candidates);
+    if (index.header().version == kLocalCompletionIndexVersion) {
+        std::stable_sort(candidates.begin(), candidates.end(),
+            [](const LocalRuntimeCandidate& left,
+               const LocalRuntimeCandidate& right) {
+                if (left.selector_score != right.selector_score) {
+                    return left.selector_score > right.selector_score;
+                }
+                return left.baseline_rank < right.baseline_rank;
+            });
     }
-    std::sort(candidates.begin(), candidates.end(),
-        [](const LocalRuntimeCandidate& left, const LocalRuntimeCandidate& right) {
-            if (left.rank_score != right.rank_score) {
-                return left.rank_score > right.rank_score;
-            }
-            if (left.base_rank != right.base_rank) {
-                return left.base_rank < right.base_rank;
-            }
-            return left.word_ids < right.word_ids;
-        });
     if (candidates.size() > kLocalCompletionCandidateCount) {
         candidates.resize(kLocalCompletionCandidateCount);
-    }
-    if (candidates.empty()) {
-        return false;
     }
 
     std::vector<int64_t> ids{static_cast<int64_t>(index.header().cls_id)};
@@ -792,10 +1152,10 @@ bool BuildLocalInputs(const LocalCompletionIndex& index, const char* context,
             candidate_ids[id_offset + word] = item.word_ids[word];
             path_words += item.word_ids[word] != 0 ? 1 : 0;
         }
-        candidate_features[feature_offset + 0] = static_cast<float>(item.source->score);
-        candidate_features[feature_offset + 1] = static_cast<float>(item.source->count);
-        candidate_features[feature_offset + 2] = static_cast<float>(item.source->source_count);
-        candidate_features[feature_offset + 3] = static_cast<float>(item.source->domain_count);
+        candidate_features[feature_offset + 0] = static_cast<float>(item.source.score);
+        candidate_features[feature_offset + 1] = static_cast<float>(item.source.count);
+        candidate_features[feature_offset + 2] = static_cast<float>(item.source.source_count);
+        candidate_features[feature_offset + 3] = static_cast<float>(item.source.domain_count);
         candidate_features[feature_offset + 4] = static_cast<float>(item.anchor_width);
         candidate_features[feature_offset + 5] = static_cast<float>(item.base_rank);
         candidate_features[feature_offset + 6] = static_cast<float>(path_words);
@@ -939,6 +1299,68 @@ extern "C" CASSOTIS_EXPORT int nc_lc_build_inputs_for_test(
         std::copy(candidate_ids.begin(), candidate_ids.end(), output_candidate_ids);
         std::copy(candidate_features.begin(), candidate_features.end(),
             output_candidate_features);
+        *output_candidate_count = static_cast<int>(candidates.size());
+        return 1;
+    } catch (...) {
+        return 0;
+    }
+}
+
+extern "C" CASSOTIS_EXPORT int nc_lc_score_recall_selector_for_test(
+    const double* features,
+    int row_count,
+    double* output_scores) {
+    if (features == nullptr || output_scores == nullptr || row_count < 0) {
+        return 0;
+    }
+    try {
+        for (int row = 0; row < row_count; ++row) {
+            std::array<double, kLocalRecallFeatureCount> values{};
+            std::copy_n(features + row * kLocalRecallFeatureCount,
+                kLocalRecallFeatureCount, values.begin());
+            output_scores[row] = ScoreLocalRecallSelector(values);
+        }
+        return 1;
+    } catch (...) {
+        return 0;
+    }
+}
+
+extern "C" CASSOTIS_EXPORT int nc_lc_build_recall_pool_for_test(
+    void* opaque_handle,
+    const char* top1_text,
+    const char* top1_path,
+    const char* top2_text,
+    const char* top2_path,
+    int64_t* output_candidate_ids,
+    double* output_features,
+    double* output_scores,
+    int* output_candidate_count) {
+    if (opaque_handle == nullptr || output_candidate_ids == nullptr ||
+        output_features == nullptr || output_scores == nullptr ||
+        output_candidate_count == nullptr) {
+        return 0;
+    }
+    try {
+        auto* handle = static_cast<LocalCompletionHandle*>(opaque_handle);
+        std::vector<LocalRuntimeCandidate> candidates;
+        if (!BuildLocalRecallPool(handle->index, top1_text, top1_path,
+                top2_text, top2_path, candidates)) {
+            return 0;
+        }
+        const int best_rank_score = candidates.front().rank_score;
+        for (size_t position = 0; position < candidates.size(); ++position) {
+            const auto& item = candidates[position];
+            for (size_t word = 0; word < kLocalCompletionPathWords; ++word) {
+                output_candidate_ids[
+                    position * kLocalCompletionPathWords + word] = item.word_ids[word];
+            }
+            const auto features = LocalRecallFeatures(
+                item, best_rank_score, static_cast<int>(position) + 1);
+            std::copy(features.begin(), features.end(),
+                output_features + position * kLocalRecallFeatureCount);
+            output_scores[position] = item.selector_score;
+        }
         *output_candidate_count = static_cast<int>(candidates.size());
         return 1;
     } catch (...) {

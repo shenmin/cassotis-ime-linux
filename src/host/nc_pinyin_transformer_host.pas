@@ -20,6 +20,31 @@ const
 type
     TncPinyinTransformerHostReranker = class;
 
+    TncPinyinTransformerCandidateAudit = record
+        text: string;
+        raw_score: Single;
+        fusion_score: Double;
+        fusion_features: TArray<Double>;
+    end;
+
+    TncPinyinTransformerCandidateAuditArray =
+        TArray<TncPinyinTransformerCandidateAudit>;
+
+    TncPinyinTransformerAudit = record
+        valid: Boolean;
+        query_text: string;
+        gate_score: Double;
+        gate_passed: Boolean;
+        cache_hit: Boolean;
+        inference_ok: Boolean;
+        timed_out: Boolean;
+        elapsed_ms: UInt64;
+        selected_index: Integer;
+        decision_applied: Boolean;
+        gate_features: TArray<Double>;
+        candidates: TncPinyinTransformerCandidateAuditArray;
+    end;
+
     TncPinyinTransformerLoadThread = class(TThread)
     private
         m_owner: TncPinyinTransformerHostReranker;
@@ -38,7 +63,6 @@ type
             const error_capacity: Integer): Pointer; cdecl;
         TncPtRun = function(const handle: Pointer;
             const char_ids: PInt64; const pinyin_ids: PInt64;
-            const boundary_ids: PInt64; const numeric_features: PSingle;
             const candidate_mask: PByte; const output_scores: PSingle;
             const output_score_count: Integer; const error_text: PAnsiChar;
             const error_capacity: Integer): Integer; cdecl;
@@ -76,6 +100,8 @@ type
         m_cache_numeric_features: TArray<Single>;
         m_cache_candidate_mask: TArray<Byte>;
         m_cache_gate_features: TArray<Double>;
+        m_audit_enabled: Boolean;
+        m_last_audit: TncPinyinTransformerAudit;
         procedure load_model;
         procedure disable_after_inference_error(const error_text: string);
         function load_vocab(const vocab_path: string): Boolean;
@@ -86,7 +112,8 @@ type
             out numeric_features: TArray<Single>;
             out candidate_mask: TArray<Byte>;
             out gate_features: TArray<Double>): Boolean;
-        function should_invoke(const gate_features: TArray<Double>): Boolean;
+        function should_invoke(const gate_features: TArray<Double>;
+            out score: Double): Boolean;
         function try_cached_decision(const char_ids: TArray<Int64>;
             const pinyin_ids: TArray<Int64>;
             const boundary_ids: TArray<Int64>;
@@ -117,6 +144,8 @@ type
         function ready: Boolean;
         function wait_until_ready(const timeout_ms: Cardinal): Boolean;
         function last_error: string;
+        procedure set_audit_enabled(const value: Boolean);
+        function get_last_audit(out audit: TncPinyinTransformerAudit): Boolean;
     end;
 
 implementation
@@ -126,18 +155,17 @@ uses
     fpjson,
     jsonparser,
     nc_pinyin_parser,
-    nc_pinyin_transformer_ambiguity_gate_model;
+    nc_pinyin_conditional_fusion_model,
+    nc_pinyin_conditional_runtime_gate_model;
 
 const
-    c_model_candidate_count = 12;
+    c_model_candidate_count = 16;
     c_gate_candidate_count = 16;
     c_sequence_length = 41;
     c_numeric_feature_count = 88;
     c_unknown_id = 1;
     c_cls_id = 3;
     c_boundary_cls_id = 4;
-    c_model_score_threshold = 0.6640625;
-    c_model_margin_threshold = 0.0615234375;
     c_model_threads = 8;
 
 type
@@ -195,6 +223,11 @@ function profile_counter: Int64;
 begin
     Result := GetTickCount64;
 end;
+
+const
+    c_conditional_fusion_numeric_indices: array[0..21] of Integer = (
+        0, 2, 5, 6, 7, 24, 25, 26, 29, 30, 40,
+        41, 45, 47, 51, 67, 71, 81, 84, 85, 86, 87);
 
 function signed_log_value(const value: Double): Double;
 begin
@@ -419,6 +452,55 @@ begin
     end;
 end;
 
+procedure build_conditional_fusion_features(
+    const numeric_features: TArray<Single>; const candidate_index: Integer;
+    const raw_score: Single; const baseline_raw_score: Single;
+    const best_raw_score: Single; const syllable_count: Integer;
+    out features: TncPinyinConditionalFusionFeatures);
+var
+    cursor: Integer;
+    source_index: Integer;
+    numeric_index: Integer;
+    baseline_value: Double;
+begin
+    FillChar(features, SizeOf(features), 0);
+    cursor := 0;
+    features[cursor] := raw_score / Max(1, syllable_count);
+    Inc(cursor);
+    features[cursor] := raw_score - baseline_raw_score;
+    Inc(cursor);
+    features[cursor] := raw_score - best_raw_score;
+    Inc(cursor);
+    features[cursor] := 1.0 / (candidate_index + 1);
+    Inc(cursor);
+    features[cursor] := Ln(1.0 + candidate_index);
+    Inc(cursor);
+
+    for source_index := Low(c_conditional_fusion_numeric_indices) to
+        High(c_conditional_fusion_numeric_indices) do
+    begin
+        numeric_index := c_conditional_fusion_numeric_indices[source_index];
+        features[cursor] := numeric_features[
+            candidate_index * c_numeric_feature_count + numeric_index];
+        Inc(cursor);
+    end;
+    for source_index := Low(c_conditional_fusion_numeric_indices) to
+        High(c_conditional_fusion_numeric_indices) do
+    begin
+        numeric_index := c_conditional_fusion_numeric_indices[source_index];
+        baseline_value := numeric_features[numeric_index];
+        features[cursor] := numeric_features[
+            candidate_index * c_numeric_feature_count + numeric_index] -
+            baseline_value;
+        Inc(cursor);
+    end;
+    if cursor <> c_nc_pinyin_conditional_fusion_feature_count then
+    begin
+        raise EInvalidOp.CreateFmt('Conditional fusion width %d <> %d',
+            [cursor, c_nc_pinyin_conditional_fusion_feature_count]);
+    end;
+end;
+
 function common_prefix_units(const first_ids: TArray<Int64>;
     const first_offset: Integer; const second_ids: TArray<Int64>;
     const second_offset: Integer): Integer;
@@ -526,6 +608,7 @@ begin
     m_cache_valid := False;
     m_cache_result := False;
     m_cache_selected_index := 0;
+    m_audit_enabled := False;
     if m_profile_enabled then
     begin
         m_profile_frequency := 1000;
@@ -659,7 +742,7 @@ begin
         wrapper_path := join_path(m_base_directory,
             'libcassotis_pinyin_transformer_ort.so');
         model_path := join_path(join_path(m_base_directory,
-            'pinyin_transformer'), 'pinyin_difference_reranker_int8.onnx');
+            'pinyin_transformer'), 'pinyin_conditional_scorer_int8.onnx');
         vocab_path := join_path(join_path(m_base_directory,
             'pinyin_transformer'), 'vocab.json');
         if not FileExists(wrapper_path) then
@@ -688,7 +771,7 @@ begin
         create_local := TncPtCreate(GetProcedureAddress(module_local,
             'nc_pt_create'));
         run_local := TncPtRun(GetProcedureAddress(module_local,
-            'nc_pt_run'));
+            'nc_pt_run_conditional'));
         destroy_local := TncPtDestroy(GetProcedureAddress(module_local,
             'nc_pt_destroy'));
         if (not Assigned(create_local)) or (not Assigned(run_local)) or
@@ -726,9 +809,8 @@ begin
         begin
             FillChar(error_buffer, SizeOf(error_buffer), 0);
             if run_local(session_local, @char_ids[0], @pinyin_ids[0],
-                @boundary_ids[0], @numeric_features[0], @candidate_mask[0],
-                @scores[0], Length(scores), @error_buffer[0],
-                Length(error_buffer)) = 0 then
+                @candidate_mask[0], @scores[0], Length(scores),
+                @error_buffer[0], Length(error_buffer)) = 0 then
             begin
                 raise EInvalidOp.Create(ansi_error_text(error_buffer));
             end;
@@ -860,7 +942,7 @@ begin
         c_model_candidate_count * c_numeric_feature_count);
     SetLength(candidate_mask, c_model_candidate_count);
     SetLength(gate_features,
-        c_nc_pinyin_transformer_gate_feature_count);
+        c_nc_pinyin_conditional_gate_feature_count);
 
     pinyin_ids[0] := c_cls_id;
     for position := 0 to High(syllables) do
@@ -1076,27 +1158,28 @@ begin
         end;
     end;
 
-    if gate_cursor <> c_nc_pinyin_transformer_gate_feature_count then
+    if gate_cursor <> c_nc_pinyin_conditional_gate_feature_count then
     begin
         raise EInvalidOp.CreateFmt('Gate feature width %d <> %d',
-            [gate_cursor, c_nc_pinyin_transformer_gate_feature_count]);
+            [gate_cursor, c_nc_pinyin_conditional_gate_feature_count]);
     end;
     Result := True;
 end;
 
 function TncPinyinTransformerHostReranker.should_invoke(
-    const gate_features: TArray<Double>): Boolean;
+    const gate_features: TArray<Double>; out score: Double): Boolean;
 var
-    fixed_features: TncPinyinTransformerGateFeatures;
+    fixed_features: TncPinyinConditionalGateFeatures;
 begin
     Result := False;
+    score := -MaxDouble;
     if Length(gate_features) <> Length(fixed_features) then
     begin
         Exit;
     end;
     Move(gate_features[0], fixed_features[0], SizeOf(fixed_features));
-    Result := nc_pinyin_transformer_gate_score(fixed_features) >=
-        c_nc_pinyin_transformer_gate_threshold;
+    score := nc_pinyin_conditional_gate_score(fixed_features);
+    Result := score >= c_nc_pinyin_conditional_gate_threshold;
 end;
 
 function TncPinyinTransformerHostReranker.try_cached_decision(
@@ -1170,9 +1253,12 @@ var
     session_local: Pointer;
     candidate_index: Integer;
     best_index: Integer;
-    second_index: Integer;
-    best_score: Single;
-    second_score: Single;
+    best_raw_score: Single;
+    best_fusion_score: Double;
+    fusion_score: Double;
+    fusion_features: TncPinyinConditionalFusionFeatures;
+    feature_index: Integer;
+    syllable_count: Integer;
     started_tick: UInt64;
     elapsed_ms: UInt64;
     inference_ok: Boolean;
@@ -1180,9 +1266,29 @@ var
     profile_end_tick: Int64;
     cached_result: Boolean;
     cached_selected_index: Integer;
+    gate_score: Double;
+    invoke_model: Boolean;
+    audit: TncPinyinTransformerAudit;
 begin
     Result := False;
     selected_index := 0;
+    audit := Default(TncPinyinTransformerAudit);
+    if m_audit_enabled then
+    begin
+        audit.valid := True;
+        audit.query_text := query_text;
+        audit.selected_index := 0;
+        SetLength(audit.candidates, Min(Length(candidates),
+            c_model_candidate_count));
+        for candidate_index := 0 to High(audit.candidates) do
+        begin
+            audit.candidates[candidate_index].text :=
+                candidates[candidate_index].text;
+            audit.candidates[candidate_index].raw_score := -MaxSingle;
+            audit.candidates[candidate_index].fusion_score := -MaxDouble;
+        end;
+    end;
+    try
     m_state_lock.Acquire;
     try
         if not m_ready then
@@ -1207,6 +1313,10 @@ begin
     begin
         Exit;
     end;
+    if m_audit_enabled then
+    begin
+        audit.gate_features := Copy(gate_features);
+    end;
     if m_profile_enabled then
     begin
         profile_end_tick := profile_counter;
@@ -1222,11 +1332,18 @@ begin
         begin
             Inc(m_profile_cache_hits);
         end;
+        audit.cache_hit := True;
+        audit.gate_passed := cached_result;
+        audit.selected_index := cached_selected_index;
+        audit.decision_applied := cached_result;
         selected_index := cached_selected_index;
         Result := cached_result;
         Exit;
     end;
-    if not should_invoke(gate_features) then
+    invoke_model := should_invoke(gate_features, gate_score);
+    audit.gate_score := gate_score;
+    audit.gate_passed := invoke_model;
+    if not invoke_model then
     begin
         if m_profile_enabled then
         begin
@@ -1254,8 +1371,7 @@ begin
             profile_tick := profile_counter;
         end;
         inference_ok := run_function_local(session_local, @char_ids[0],
-            @pinyin_ids[0], @boundary_ids[0], @numeric_features[0],
-            @candidate_mask[0], @scores[0], Length(scores),
+            @pinyin_ids[0], @candidate_mask[0], @scores[0], Length(scores),
             @error_buffer[0], Length(error_buffer)) <> 0;
         if m_profile_enabled then
         begin
@@ -1266,6 +1382,8 @@ begin
         m_run_lock.Release;
     end;
     elapsed_ms := GetTickCount64 - started_tick;
+    audit.elapsed_ms := elapsed_ms;
+    audit.inference_ok := inference_ok;
     if not inference_ok then
     begin
         disable_after_inference_error(ansi_error_text(error_buffer));
@@ -1274,13 +1392,14 @@ begin
     if (m_result_timeout_ms > 0) and
         (elapsed_ms > m_result_timeout_ms) then
     begin
-        Exit;
+        audit.timed_out := True;
+        if not m_audit_enabled then
+        begin
+            Exit;
+        end;
     end;
 
-    best_index := -1;
-    second_index := -1;
-    best_score := -MaxSingle;
-    second_score := -MaxSingle;
+    best_raw_score := -MaxSingle;
     for candidate_index := 0 to Min(Length(candidates),
         c_model_candidate_count) - 1 do
     begin
@@ -1288,22 +1407,57 @@ begin
         begin
             Continue;
         end;
-        if scores[candidate_index] > best_score then
+        if scores[candidate_index] > best_raw_score then
         begin
-            second_score := best_score;
-            second_index := best_index;
-            best_score := scores[candidate_index];
-            best_index := candidate_index;
-        end
-        else if scores[candidate_index] > second_score then
-        begin
-            second_score := scores[candidate_index];
-            second_index := candidate_index;
+            best_raw_score := scores[candidate_index];
         end;
     end;
-    if (best_index <= 0) or (second_index < 0) or
-        ((best_score - scores[0]) < c_model_score_threshold) or
-        ((best_score - second_score) < c_model_margin_threshold) then
+    syllable_count := 0;
+    for candidate_index := 1 to c_sequence_length - 1 do
+    begin
+        if pinyin_ids[candidate_index] = 0 then
+        begin
+            Break;
+        end;
+        Inc(syllable_count);
+    end;
+    best_index := 0;
+    best_fusion_score := -MaxDouble;
+    for candidate_index := 0 to Min(Length(candidates),
+        c_model_candidate_count) - 1 do
+    begin
+        if candidate_mask[candidate_index] = 0 then
+        begin
+            Continue;
+        end;
+        if m_audit_enabled then
+        begin
+            audit.candidates[candidate_index].raw_score :=
+                scores[candidate_index];
+        end;
+        build_conditional_fusion_features(numeric_features, candidate_index,
+            scores[candidate_index], scores[0], best_raw_score,
+            syllable_count, fusion_features);
+        fusion_score := nc_pinyin_conditional_fusion_score(fusion_features);
+        if m_audit_enabled then
+        begin
+            audit.candidates[candidate_index].fusion_score := fusion_score;
+            SetLength(audit.candidates[candidate_index].fusion_features,
+                Length(fusion_features));
+            for feature_index := Low(fusion_features) to
+                High(fusion_features) do
+            begin
+                audit.candidates[candidate_index].fusion_features[
+                    feature_index] := fusion_features[feature_index];
+            end;
+        end;
+        if fusion_score > best_fusion_score then
+        begin
+            best_fusion_score := fusion_score;
+            best_index := candidate_index;
+        end;
+    end;
+    if audit.timed_out or (best_index <= 0) then
     begin
         cache_decision(char_ids, pinyin_ids, boundary_ids,
             numeric_features, candidate_mask, gate_features, False, 0);
@@ -1311,9 +1465,49 @@ begin
     end;
     selected_index := best_index;
     Result := True;
+    audit.selected_index := selected_index;
+    audit.decision_applied := True;
     cache_decision(char_ids, pinyin_ids, boundary_ids,
         numeric_features, candidate_mask, gate_features, True,
         selected_index);
+    finally
+        if m_audit_enabled then
+        begin
+            m_state_lock.Acquire;
+            try
+                m_last_audit := audit;
+            finally
+                m_state_lock.Release;
+            end;
+        end;
+    end;
+end;
+
+procedure TncPinyinTransformerHostReranker.set_audit_enabled(
+    const value: Boolean);
+begin
+    m_state_lock.Acquire;
+    try
+        m_audit_enabled := value;
+        if not value then
+        begin
+            m_last_audit := Default(TncPinyinTransformerAudit);
+        end;
+    finally
+        m_state_lock.Release;
+    end;
+end;
+
+function TncPinyinTransformerHostReranker.get_last_audit(
+    out audit: TncPinyinTransformerAudit): Boolean;
+begin
+    m_state_lock.Acquire;
+    try
+        audit := m_last_audit;
+        Result := audit.valid;
+    finally
+        m_state_lock.Release;
+    end;
 end;
 
 function TncPinyinTransformerHostReranker.ready: Boolean;
