@@ -47,7 +47,7 @@ def main() -> int:
     normalized_smoke_source = " ".join(smoke_source.split())
     if (
         "TncPinyinTransformerHostReranker.Create( runtime_directory, False, "
-        "transformer_timeout_ms)"
+        "transformer_timeout_ms, model_threads)"
         not in normalized_smoke_source
     ):
         raise AssertionError(
@@ -55,13 +55,23 @@ def main() -> int:
             "scorer timeout"
         )
     if (
-        "if result_timeout_ms = 0 then transformer_timeout_ms := 0 else "
-        "transformer_timeout_ms := c_nc_pinyin_transformer_result_timeout_ms"
+        "TncLocalCompletionHost.Create(runtime_directory, result_timeout_ms, "
+        "model_threads)"
         not in normalized_smoke_source
     ):
         raise AssertionError(
-            "production completion smoke does not retain the deployed "
-            "conditional scorer timeout"
+            "deterministic completion smoke does not control completion model "
+            "threads"
+        )
+    if (
+        "if result_timeout_ms = 0 then begin transformer_timeout_ms := 0; "
+        "model_threads := 1; end else begin transformer_timeout_ms := "
+        "c_nc_pinyin_transformer_result_timeout_ms; model_threads := 0; end"
+        not in normalized_smoke_source
+    ):
+        raise AssertionError(
+            "completion smoke does not isolate deterministic inference while "
+            "retaining production defaults"
         )
 
     baseline = {

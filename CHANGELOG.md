@@ -20,8 +20,9 @@
   architecture-specific quality/latency gates alongside the deterministic
   neural lifecycle smoke test.
 - Made deterministic completion validation disable both neural wall-clock
-  cutoffs, and retained aggregate gates for neural long-sentence decisions
-  whose exact boundary cases can vary across equivalent ONNX evaluations.
+  cutoffs and run both ONNX paths single-threaded, while retaining deployed
+  concurrency and aggregate gates for neural long-sentence decisions whose
+  exact boundary cases can vary across equivalent ONNX evaluations.
 
 ## 0.2.0 - 2026-08-28
 

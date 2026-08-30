@@ -233,6 +233,7 @@ var
     case_limit: Integer;
     result_timeout_ms: QWord;
     transformer_timeout_ms: QWord;
+    model_threads: Integer;
     dictionary: TncSqliteDictionary;
     engine: TncEngine;
     parser: TncPinyinParser;
@@ -265,9 +266,15 @@ begin
     else
         result_timeout_ms := c_default_result_timeout_ms;
     if result_timeout_ms = 0 then
-        transformer_timeout_ms := 0
+    begin
+        transformer_timeout_ms := 0;
+        model_threads := 1;
+    end
     else
+    begin
         transformer_timeout_ms := c_nc_pinyin_transformer_result_timeout_ms;
+        model_threads := 0;
+    end;
     runtime_directory := ExtractFileDir(ParamStr(0));
 
     dictionary := nil;
@@ -287,10 +294,10 @@ begin
         // before the completion request is measured, making the supposedly
         // deterministic signature host-load dependent.
         reranker := TncPinyinTransformerHostReranker.Create(
-            runtime_directory, False, transformer_timeout_ms);
+            runtime_directory, False, transformer_timeout_ms, model_threads);
         reranker_reference := reranker;
         completion_host := TncLocalCompletionHost.Create(runtime_directory,
-            result_timeout_ms);
+            result_timeout_ms, model_threads);
         if not reranker.Ready then
             raise Exception.Create('pinyin Transformer unavailable: ' +
                 reranker.last_error());

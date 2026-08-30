@@ -83,6 +83,7 @@ type
         m_load_finished: Boolean;
         m_last_error: string;
         m_result_timeout_ms: QWord;
+        m_model_threads: Integer;
         m_profile_enabled: Boolean;
         m_profile_frequency: Int64;
         m_profile_calls: Int64;
@@ -136,7 +137,8 @@ type
         constructor create(const base_directory: string;
             const background_load: Boolean = True;
             const result_timeout_ms: QWord =
-            c_nc_pinyin_transformer_result_timeout_ms);
+            c_nc_pinyin_transformer_result_timeout_ms;
+            const model_threads: Integer = 0);
         destructor Destroy; override;
         function try_select(const query_text: string;
             const candidates: TncLongFinalCandidateDebugArray;
@@ -577,7 +579,8 @@ end;
 constructor TncPinyinTransformerHostReranker.create(
     const base_directory: string; const background_load: Boolean = True;
     const result_timeout_ms: QWord =
-    c_nc_pinyin_transformer_result_timeout_ms);
+    c_nc_pinyin_transformer_result_timeout_ms;
+    const model_threads: Integer = 0);
 begin
     inherited create;
     m_base_directory := ExcludeTrailingPathDelimiter(
@@ -596,6 +599,10 @@ begin
     m_load_finished := False;
     m_last_error := '';
     m_result_timeout_ms := result_timeout_ms;
+    if model_threads > 0 then
+        m_model_threads := model_threads
+    else
+        m_model_threads := c_model_threads;
     m_profile_enabled := SameText(GetEnvironmentVariable(
         'CASSOTIS_PINYIN_TRANSFORMER_PROFILE'), '1');
     m_profile_frequency := 0;
@@ -782,7 +789,7 @@ begin
         FillChar(error_buffer, SizeOf(error_buffer), 0);
         model_path_utf8 := UTF8Encode(model_path);
         session_local := create_local(PAnsiChar(model_path_utf8),
-            c_model_threads,
+            m_model_threads,
             @error_buffer[0], Length(error_buffer));
         if session_local = nil then
         begin

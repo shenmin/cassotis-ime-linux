@@ -73,6 +73,7 @@ type
         FDestroyFunction: TncLcDestroy;
         FMinimumConfidence: Single;
         FResultTimeoutMs: QWord;
+        FModelThreads: Integer;
         FReady: Boolean;
         FLoadFinished: Boolean;
         FLastError: string;
@@ -87,7 +88,8 @@ type
         procedure Disable(const error_text: string);
     public
         constructor Create(const base_directory: string;
-            const result_timeout_ms: QWord = 40);
+            const result_timeout_ms: QWord = 40;
+            const model_threads: Integer = 0);
         destructor Destroy; override;
         function Enqueue(const task: TncLocalCompletionTask): Boolean;
         function TryPopFinishedFor(const context_id: QWord;
@@ -159,7 +161,7 @@ begin
 end;
 
 constructor TncLocalCompletionHost.Create(const base_directory: string;
-    const result_timeout_ms: QWord);
+    const result_timeout_ms: QWord; const model_threads: Integer);
 begin
     inherited Create;
     FBaseDirectory := ExcludeTrailingPathDelimiter(
@@ -176,6 +178,10 @@ begin
     FDestroyFunction := nil;
     FMinimumConfidence := 0.0;
     FResultTimeoutMs := result_timeout_ms;
+    if model_threads > 0 then
+        FModelThreads := model_threads
+    else
+        FModelThreads := c_model_threads;
     FReady := False;
     FLoadFinished := False;
     FLastError := '';
@@ -323,7 +329,7 @@ begin
     model_path_utf8 := UTF8Encode(model_path);
     index_path_utf8 := UTF8Encode(index_path);
     FSession := create_function(PAnsiChar(model_path_utf8),
-        PAnsiChar(index_path_utf8), c_model_threads, @error_buffer[0],
+        PAnsiChar(index_path_utf8), FModelThreads, @error_buffer[0],
         Length(error_buffer));
     if FSession = nil then
         raise EInvalidOp.Create(ansi_buffer_text(error_buffer));
