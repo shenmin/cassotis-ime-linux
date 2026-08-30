@@ -49,12 +49,12 @@
     {
       "path": "src/host/nc_pinyin_transformer_host.pas",
       "windows_sha256": "8b9ac9d818f0df41deb9ab5c87b65bf199bd207482b08e67c4c93946f3034374",
-      "linux_sha256": "867fb65258a2f8d94e81713a0afcc167edf819d3ae2febd49b8341ca0118e33a"
+      "linux_sha256": "f53d442244b0a1273a6aebb74f74cf49d6f734e850342bc5b50d47b565ade544"
     },
     {
       "path": "src/host/nc_local_completion_host.pas",
       "windows_sha256": "9f0c10478a57665738095d3e9a79880e2ed79b4bcbc295022b5563bda9b02493",
-      "linux_sha256": "c3aa4bea51907100a79b261102033505edbe7e1f42cdf0694753e881b8994876"
+      "linux_sha256": "8b630d969d2b54feedaa1bce54a8638daa156c3cb38e441abac5d6ed0472309d"
     },
     {
       "path": "src/host/native/nc_pinyin_transformer_ort.cpp",
