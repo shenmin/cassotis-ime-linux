@@ -53,27 +53,27 @@ cloud service, network connection, or GPU.
 
 ## Supported Release
 
-Development source after v0.2.0 follows the Cassotis IME and Cassotis Lexicon
-v1.19.0 baselines. It adds the Pinyin-conditioned final long-sentence scorer,
-the expanded completion suffix index and native recall selector, and the
-v1.19.0 compound-prefix and completion-consistency fixes. Native x86_64 and
-aarch64 validation results are recorded in [BENCHMARK.md](BENCHMARK.md): the
-16,300-case long-sentence Top1/Top2 counts are 10,941/12,260 and
-10,916/12,252 respectively, while the complete short-word result remains
-identical to Windows on both architectures.
+The v0.3.0 source and binary release follows the Cassotis IME and Cassotis
+Lexicon v1.19.0 baselines with matching schema-24 dictionaries. Compared with
+v0.2.0, it adds the Pinyin-conditioned 16-candidate final long-sentence
+scorer with learned gate and fusion decisions, a larger multi-level completion
+suffix index with a native recall selector, and compound-prefix and
+completion-consistency fixes. These changes improve ambiguous long-sentence
+ranking and broaden controlled exact-lexicon one-key completion without
+changing the deterministic short-word ranking path.
 
-The v0.2.0 source and binary release follows the Cassotis IME and Cassotis
-Lexicon v1.18.0 baselines and schema-24 dictionaries. The complete automated
-release gate described in [BENCHMARK.md](BENCHMARK.md) and
-[RELEASE.md](RELEASE.md) has passed natively on both x86_64 and aarch64.
+The complete automated release gate described in
+[BENCHMARK.md](BENCHMARK.md) and [RELEASE.md](RELEASE.md) has passed natively
+on x86_64 and aarch64. Across 16,300 long-sentence cases, Top1/Top2 counts are
+10,941/12,260 and 10,916/12,252 respectively; the complete short-word result
+remains identical to Windows on both architectures. Both targets also passed
+clean native builds, core and dictionary tests, frozen quality gates, artifact
+and package checks, and the automated IBus/Fcitx desktop matrix. Manual
+application-level GUI checks remain part of each release checklist.
 
-The v0.2.0 release provides `.deb` packages and portable binary archives for
-both amd64 and arm64. The v1.18.0-based source was validated on Ubuntu
-26.04 GNOME Wayland x86_64 and Ubuntu 26.04.1 GNOME Wayland aarch64. Both
-architectures passed clean native builds, core and dictionary tests, frozen
-quality gates, artifact and package installation checks, and the complete
-automated IBus/Fcitx desktop matrix. Manual application-level GUI checks
-remain part of each release checklist.
+The v0.3.0 release provides `.deb` packages and portable binary archives for
+both amd64 and arm64. It was validated on Ubuntu 26.04.1 GNOME Wayland on both
+architectures.
 
 Both architecture packages include the IBus and Fcitx 5 adapters; enable
 either framework after installation.
@@ -96,7 +96,7 @@ metadata, and install it with APT:
 
 ```bash
 arch="$(dpkg --print-architecture)"  # amd64 or arm64
-package="cassotis-ime_0.2.0_${arch}.deb"
+package="cassotis-ime_0.3.0_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -122,10 +122,10 @@ system architecture:
 
 ```bash
 arch="$(uname -m)"  # x86_64 or aarch64
-archive="cassotis-ime-linux-0.2.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-0.3.0-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-0.2.0-${arch}"
+cd "cassotis-ime-linux-0.3.0-${arch}"
 sudo ./install.sh
 ```
 

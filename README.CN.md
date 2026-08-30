@@ -43,22 +43,23 @@
 
 ## 已验证发行环境
 
-v0.2.0 之后的开发源码已跟进言泉输入法与 Cassotis Lexicon v1.19.0 基线，
-包含拼音条件长句终排模型、扩展补全后缀索引与原生召回选择器，以及 v1.19.0
-对复合词前缀和补全一致性的修复。x86_64 与 aarch64 的原生验收结果记录在
-[BENCHMARK.CN.md](BENCHMARK.CN.md) 中：16,300 条长句的 Top1/Top2 分别为
-10,941/12,260 和 10,916/12,252；两个架构的完整短词结果均与 Windows 完全一致。
+v0.3.0 源码和二进制版本以言泉输入法与 Cassotis Lexicon v1.19.0 为行为和
+数据基线，并使用匹配的 schema 24 词库。相比 v0.2.0，新版加入拼音条件的
+16 候选长句终排模型及学习式门控、融合决策，扩大多级补全后缀索引并加入
+原生召回选择器，同时修复复合词前缀保留和补全一致性问题。这些改进提升了
+歧义长句排序与受控 exact 词库一键补全的召回范围，不改变独立、确定性的
+短词排序路径。
 
-v0.2.0 源码和二进制版本以言泉输入法和 Cassotis Lexicon v1.18.0、
-schema 24 词库为基线，并已在 x86_64 与 aarch64 上原生通过
+v0.3.0 已在 x86_64 与 aarch64 上原生通过
 [BENCHMARK.CN.md](BENCHMARK.CN.md) 与 [RELEASE.md](RELEASE.md) 中定义的
-完整自动化发行门禁。
+完整自动化发行门禁。16,300 条长句的 Top1/Top2 分别为 10,941/12,260 和
+10,916/12,252；两个架构的完整短词结果均与 Windows 完全一致。两个目标还
+通过了干净原生构建、核心与词库测试、冻结质量门禁、产物与安装包检查，
+以及自动化 IBus/Fcitx 桌面矩阵。每次发行前仍需执行面向实际应用的人工
+界面检查。
 
-v0.2.0 同时提供 amd64 与 arm64 的 `.deb` 安装包和便携二进制包。基于
-v1.18.0 的源码已分别在 Ubuntu 26.04 GNOME Wayland x86_64 与 Ubuntu
-26.04.1 GNOME Wayland aarch64 上完成验证。两个架构均通过干净原生构建、
-核心与词库测试、冻结质量门禁、产物与安装包检查，以及完整的 IBus/Fcitx
-自动化桌面矩阵。每次发行前仍需执行面向实际应用的人工界面检查。
+v0.3.0 同时提供 amd64 与 arm64 的 `.deb` 安装包和便携二进制包，已在两个
+架构的 Ubuntu 26.04.1 GNOME Wayland 环境完成验证。
 
 两种架构的安装包均包含 IBus 与 Fcitx 5 适配层，安装后选择其中一个框架
 启用即可。
@@ -77,7 +78,7 @@ v1.18.0 的源码已分别在 Ubuntu 26.04 GNOME Wayland x86_64 与 Ubuntu
 
 ```bash
 arch="$(dpkg --print-architecture)"  # 输出 amd64 或 arm64
-package="cassotis-ime_0.2.0_${arch}.deb"
+package="cassotis-ime_0.3.0_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -100,10 +101,10 @@ sudo apt install "./${package}"
 
 ```bash
 arch="$(uname -m)"  # 输出 x86_64 或 aarch64
-archive="cassotis-ime-linux-0.2.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-0.3.0-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-0.2.0-${arch}"
+cd "cassotis-ime-linux-0.3.0-${arch}"
 sudo ./install.sh
 ```
 
