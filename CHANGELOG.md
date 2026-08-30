@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-08-30
+
 - Advanced the development baseline to Cassotis IME and Cassotis Lexicon
   v1.19.0 with the matching schema-24 dictionaries.
 - Ported the Pinyin-conditioned 16-candidate Transformer scorer and its learned
