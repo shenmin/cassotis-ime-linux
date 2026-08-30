@@ -52,7 +52,7 @@ verify_asset() {
 }
 
 verify_asset \
-    'data/models/pinyin_transformer/pinyin_difference_reranker_int8.onnx' \
+    'data/models/pinyin_transformer/pinyin_conditional_scorer_int8.onnx' \
     "$(baseline_value pinyin_transformer_model_sha256)"
 verify_asset 'data/models/pinyin_transformer/vocab.json' \
     "$(baseline_value pinyin_transformer_vocab_sha256)"

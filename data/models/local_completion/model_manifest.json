@@ -2,12 +2,12 @@
   "format": 1,
   "parameters": 13819907,
   "provenance": {
-    "checkpoint_sha256": "d261ae64973eece93a85b337245c144d4b4e3cf98d66a0998b73a714e83dadc2",
-    "dataset_manifest_sha256": "e2325f79bfc0359db7a8a84ccc0f027d2c820e3e92c62c8905c9a7af0fbae2ce",
-    "evaluation_sha256": "d5c5e8b4ecbebbc45b067b7642b2b88d6ccb4eaaee9eb113101faa7847214daa"
+    "checkpoint_sha256": "92baaa5788e5cf85095f2c43e2c84034fb9188403298adfd706ac21f0a34def6",
+    "dataset_manifest_sha256": "e7eed5295bc9fcbc334d2f87771c5ac4a3071d355439afcd14253f3b1d96b221",
+    "evaluation_sha256": "064392126e2195fd96d61109bff9a6d4497aaae4afb51fd8896732abf25a57d2"
   },
   "model": "local_completion_path_ranker_int8.onnx",
-  "model_sha256": "0c3b9b71fa4ee0adb89a8b93297c069e6e83ddbb5c90510bae431bbe3a6a8f95",
+  "model_sha256": "6edc062a96efd0ee74bd36e155749bd44fcdd1bd9df09e5985dfa3ba335b7584",
   "float_model_bytes": 55473635,
   "int8_model_bytes": 24088747,
   "quantization": {
@@ -34,61 +34,91 @@
     "heads": 8,
     "layers": 4,
     "feedforward": 768,
-    "dropout": 0.1
+    "dropout": 0.1,
+    "feature_schema": "static_v1",
+    "candidate_layers": 0,
+    "candidate_feedforward": 512
   },
   "gate": {
     "target_precision": "0.2",
     "dev": {
-      "threshold": 0.9985251426696777,
-      "prompts": 60,
-      "hits": 12,
-      "precision": 0.2,
-      "rows": 2562,
-      "oracle": 151,
-      "ungated_prompts": 187,
-      "ungated_hits": 23
+      "threshold": 0.1498357057571411,
+      "prompts": 297,
+      "hits": 60,
+      "precision": 0.20202020202020202,
+      "rows": 2606,
+      "oracle": 355,
+      "ungated_prompts": 332,
+      "ungated_hits": 60
     },
     "float_reference": {
       "dev": {
-        "threshold": 1.0078125,
-        "prompts": 60,
-        "hits": 12,
-        "precision": 0.2,
-        "rows": 2562,
-        "oracle": 151,
-        "ungated_prompts": 185,
-        "ungated_hits": 22
+        "threshold": 0.11279296875,
+        "prompts": 303,
+        "hits": 61,
+        "precision": 0.20132013201320131,
+        "rows": 2606,
+        "oracle": 355,
+        "ungated_prompts": 329,
+        "ungated_hits": 61
       },
       "test": {
-        "rows": 2566,
-        "oracle": 172,
-        "ungated_prompts": 206,
-        "ungated_hits": 28,
-        "prompts": 59,
-        "hits": 13,
-        "precision": 0.22033898305084745
+        "rows": 2628,
+        "oracle": 381,
+        "ungated_prompts": 361,
+        "ungated_hits": 51,
+        "prompts": 323,
+        "hits": 49,
+        "precision": 0.15170278637770898
       }
     }
   },
   "validation": {
     "rows": 512,
-    "top1_agreement": 0.998046875,
-    "deployment_decision_agreement": 1.0,
-    "score_mae": 0.03919125348329544
+    "top1_agreement": 0.9921875,
+    "deployment_decision_agreement": 0.9921875,
+    "score_mae": 0.08231750130653381
   },
   "latency_ms": {
     "iterations": 300,
-    "mean": 4.2533646648128824,
-    "p50": 4.345200024545193,
-    "p95": 4.821100039407611,
-    "max": 5.329699954017997
+    "mean": 3.7937343399971724,
+    "p50": 3.833299968391657,
+    "p95": 4.636100027710199,
+    "max": 9.044799953699112
   },
   "runtime_index": {
     "file": "local_completion_index.bin",
-    "sha256": "a40395a1d7a46800af02567fa2934e85aebfd0cb748b0713a04fae270fd3f83a",
-    "bytes": 12129650,
+    "sha256": "eaf199d6098dbb682d103455421415948e3a6e20b2d98909063d26fc541f7f01",
+    "bytes": 40097298,
     "vocab_sha256": "118d4395e4a929a34bf537ab640439c7f4705837fe238c51d31f77fc2ce94936",
-    "anchors": 119632,
-    "candidates": 360928
+    "format": 2,
+    "anchors": 126633,
+    "candidates": 1289122,
+    "candidate_limit": 128
+  },
+  "recall_selector": {
+    "type": "native_lightgbm",
+    "features": 26,
+    "trees": 55,
+    "model_sha256": "56fb4bf8fd474d2e05ae27e5e612f22a3def553fa6e733d9ba2f26f6090b0fd9",
+    "independent_test": {
+      "baseline_at_32": 440,
+      "model_at_32": 598,
+      "oracle_any": 740,
+      "rescued": 179,
+      "damaged": 21
+    }
+  },
+  "runtime_benchmark": {
+    "cases": 16300,
+    "local_completion_hits": 202,
+    "coverage": 3833,
+    "wrong_prompts": 3631,
+    "latency_ms": {
+      "mean": 16.999,
+      "p50": 13.491,
+      "p95": 39.401,
+      "max": 341.913
+    }
   }
 }

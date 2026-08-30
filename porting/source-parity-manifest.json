@@ -19,17 +19,17 @@
     {
       "path": "src/engine/nc_dictionary_intf.pas",
       "windows_sha256": "df26e4763b12a79425f3357b06d9a0e82670177acd83cb345252db881639b14a",
-      "linux_sha256": "c9f8638804c39aa749ba18b0220076a65d8992c4d2bdcfef20e858e7976463a2"
+      "linux_sha256": "5e9636c047a428a3c2d837f0bf15160ca58326e0145841294e59ac20eb3e8b78"
     },
     {
       "path": "src/engine/nc_dictionary_sqlite.pas",
       "windows_sha256": "93b65c6ee5961979c8c02e1620b41c8c4746ac7ea6d1eff75aaabdad29251c32",
-      "linux_sha256": "99066f9aa6e5cd18f63cb80911b6be0914a7dd5af96abb28f15cfc0d1b45f3af"
+      "linux_sha256": "4468b4fa146cfb8db5d7d7f1ca97a1ed59e914e2e6dc08c8c5e5e9519d0ab47b"
     },
     {
       "path": "src/engine/nc_engine_intf.pas",
-      "windows_sha256": "d7f75be807508a1722985891054128615de5b593ae4f0f05cee0e6fe9aa0bf3d",
-      "linux_sha256": "13393d8af877a8dbe83b649ee21f74b9eb3497d40d25ed896fb8a7b3f921127a"
+      "windows_sha256": "435085bd6473c11b106495fa26080750feba0df4d8bd8efecd1eec89f8ab8b96",
+      "linux_sha256": "c25387dbc22adbf2bd40e15cac075c52099bfd98ae981b48edf27ff801fff5bb"
     },
     {
       "path": "src/engine/nc_fuzzy_pinyin.pas",
@@ -48,8 +48,8 @@
     },
     {
       "path": "src/host/nc_pinyin_transformer_host.pas",
-      "windows_sha256": "613437de2ae90886f5fb93f58ab9be9a4e4e7103c8563490cee5c33b8fb0f639",
-      "linux_sha256": "de7e1fb5c0c2810a1ef6bb17a74132fd5d4b3eb1df0553303a1b4a5c8668aa18"
+      "windows_sha256": "8b9ac9d818f0df41deb9ab5c87b65bf199bd207482b08e67c4c93946f3034374",
+      "linux_sha256": "867fb65258a2f8d94e81713a0afcc167edf819d3ae2febd49b8341ca0118e33a"
     },
     {
       "path": "src/host/nc_local_completion_host.pas",
@@ -58,8 +58,8 @@
     },
     {
       "path": "src/host/native/nc_pinyin_transformer_ort.cpp",
-      "windows_sha256": "a8b8c556b1cc16a38eb9017e056f4c994dbbb652ec2479ac4d34c3546531af0a",
-      "linux_sha256": "2f5713340de8a62573d50e368aa562c258ed31c9f0cdc96acc5aff1cbff1b057"
+      "windows_sha256": "d64d80e22058d87a35af1b2914ce97342d7c01502d76de580f5543bf254e0a6b",
+      "linux_sha256": "1b7029638783067fd1f903254063d17788b619ec1bcb36410d11818988acb084"
     }
   ]
 }

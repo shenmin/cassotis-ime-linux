@@ -5,7 +5,7 @@ machine-readable validation record. Run it as the graphical desktop user on
 the Ubuntu release machine; use `sudo` only when manually installing a final
 package.
 
-The full automated release-gated targets are Ubuntu 26.04 x86_64 and Ubuntu
+The full automated release-gated targets are Ubuntu 26.04.1 x86_64 and Ubuntu
 26.04.1 aarch64 on GNOME Wayland. Do not publish a binary for another
 architecture/session merely because it compiles. At minimum, run the native
 test suite, simplified/traditional regressions, quality and memory gates,
@@ -18,10 +18,14 @@ manual application checks remain required for both current architectures.
 Update `VERSION`, `src/common/nc_version.pas`,
 `porting/windows-baseline.txt`, and `porting/windows-map.yml` together. Build
 the final simplified and traditional databases from the tagged Cassotis
-Lexicon release. The v1.18 gate also freezes the Transformer model,
-local-completion model/index/manifest, architecture-specific ONNX Runtime
-libraries, and native runtime bridge. Do not substitute any database, model,
-or runtime artifact after validation.
+Lexicon release into empty target files with the current importer. Do not
+enrich or reuse a database created by an older importer: source parity checks
+the base, completion-competition, pair-audit, and long-completion row counts
+in addition to the complete file hashes. The v1.19 gate also freezes the
+conditional Transformer model, generated gate and fusion models,
+local-completion model/index/manifest, native recall selector,
+architecture-specific ONNX Runtime libraries, and native runtime bridge. Do
+not substitute any database, model, or runtime artifact after validation.
 
 ## 2. Source And Dictionary Parity
 
@@ -67,18 +71,22 @@ source. The command is successful only after all of these pass:
 4. Multi-client IBus transport, malformed-frame, restart, latency, and
    bounded-memory stress tests against an isolated socket and user database.
 5. Complete 16,300 + 65,000 x 2 quality, latency, and peak-memory benchmark.
-6. Portable and Debian payload extraction, exact simplified/traditional
+6. Complete 16,300-case static-plus-neural one-key-completion benchmark with
+   the deployed 40 ms result budget and architecture-specific quality/latency
+   floors.
+7. Portable and Debian payload extraction, exact simplified/traditional
    dictionary hashes, checksums, dependencies, desktop-entry metadata,
    install/uninstall round-trip, and isolated adapter execution.
-7. IBus and Fcitx 5 desktop platform matrix with state restoration.
+8. IBus and Fcitx 5 desktop platform matrix with state restoration.
 
 `release-validation/STATUS` must contain `passed` and
 `release-validation.json` must contain `"ok": true`.
 
 If a long benchmark must be resumed, `--skip-benchmark` is accepted only when
-the saved benchmark manifest exactly matches the current benchmark binary,
-dictionary, long cases, short cases, native bridge, ONNX Runtime libraries,
-Transformer model, and Transformer vocabulary by SHA-256.
+both saved benchmark reports exist and the saved benchmark manifest exactly
+matches the current quality and completion benchmark binaries, dictionary,
+long cases, short cases, native bridge, ONNX Runtime libraries, Transformer
+model, and Transformer vocabulary by SHA-256.
 
 ## 4. Manual Desktop Check
 

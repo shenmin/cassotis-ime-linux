@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import hashlib
 import json
 from pathlib import Path
@@ -19,7 +20,7 @@ SOURCE_MANIFEST_PATH = ROOT / "porting" / "source-parity-manifest.json"
 DIRECTIVE_RE = re.compile(r"^\{\$(?:codepage|mode|H\+).*$", re.IGNORECASE)
 DEPLOYED_MODEL_ASSETS = (
     (
-        "data/models/pinyin_transformer/pinyin_difference_reranker_int8.onnx",
+        "data/models/pinyin_transformer/pinyin_conditional_scorer_int8.onnx",
         "pinyin_transformer_model_sha256",
     ),
     (
@@ -201,15 +202,30 @@ def validate_models(windows_root: Path) -> tuple[int, list[str]]:
     ):
         failures.append(f"expanded evidence differs: {evidence_name}")
 
-    gate_name = "nc_pinyin_transformer_ambiguity_gate_model.pas"
-    windows_gate = windows_root / "src" / "host" / gate_name
-    linux_gate = ROOT / "src" / "host" / gate_name
-    if not windows_gate.is_file() or not linux_gate.is_file():
-        failures.append(f"missing Transformer ambiguity gate: {gate_name}")
-    elif normalize_generated_pascal(windows_gate) != normalize_generated_pascal(
-        linux_gate
-    ):
-        failures.append(f"Transformer ambiguity gate differs: {gate_name}")
+    host_models = (
+        "nc_pinyin_transformer_ambiguity_gate_model.pas",
+        "nc_pinyin_conditional_fusion_model.pas",
+        "nc_pinyin_conditional_runtime_gate_model.pas",
+    )
+    for model_name in host_models:
+        windows_model = windows_root / "src" / "host" / model_name
+        linux_model = ROOT / "src" / "host" / model_name
+        if not windows_model.is_file() or not linux_model.is_file():
+            failures.append(f"missing Transformer host model: {model_name}")
+        elif normalize_generated_pascal(
+            windows_model
+        ) != normalize_generated_pascal(linux_model):
+            failures.append(f"Transformer host model differs: {model_name}")
+
+    selector_name = "nc_local_completion_recall_selector.inc"
+    windows_selector = windows_root / "src" / "host" / "native" / selector_name
+    linux_selector = ROOT / "src" / "host" / "native" / selector_name
+    if not windows_selector.is_file() or not linux_selector.is_file():
+        failures.append(f"missing local-completion recall selector: {selector_name}")
+    elif normalized_source_sha256(
+        windows_selector.read_bytes()
+    ) != normalized_source_sha256(linux_selector.read_bytes()):
+        failures.append(f"local-completion recall selector differs: {selector_name}")
     return len(names), failures
 
 
@@ -274,14 +290,38 @@ def validate_deployed_assets(
 
 
 def validate_dictionary(
-    path: Path, expected_hash: str, expected_schema: int
+    path: Path,
+    expected_hash: str,
+    expected_schema: int,
+    expected_base_rows: int,
+    expected_completion_competition_rows: int,
+    expected_completion_pair_audit_rows: int,
+    expected_long_completion_visible_rows: int,
+    expected_long_completion_recall_rows: int,
 ) -> dict[str, object]:
     expected_hash = expected_hash.lower()
     actual_hash = sha256_file(path)
-    with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(
+        f"file:{path.as_posix()}?mode=ro", uri=True
+    )) as connection:
         row = connection.execute(
             "SELECT value FROM meta WHERE key = 'schema_version'"
         ).fetchone()
+        base_rows = connection.execute(
+            "SELECT COUNT(*) FROM dict_base"
+        ).fetchone()[0]
+        completion_competition_rows = connection.execute(
+            "SELECT COUNT(*) FROM dict_base_completion_competition"
+        ).fetchone()[0]
+        completion_pair_audit_rows = connection.execute(
+            "SELECT COUNT(*) FROM dict_base_completion_pair_audit"
+        ).fetchone()[0]
+        long_completion_visible_rows = connection.execute(
+            "SELECT COUNT(*) FROM dict_base_long_completion"
+        ).fetchone()[0]
+        long_completion_recall_rows = connection.execute(
+            "SELECT COUNT(*) FROM dict_base_long_completion_text"
+        ).fetchone()[0]
     schema = int(row[0]) if row else -1
     return {
         "file": path.name,
@@ -289,8 +329,33 @@ def validate_dictionary(
         "expected_sha256": expected_hash,
         "schema": schema,
         "expected_schema": expected_schema,
-        "ok": actual_hash == expected_hash
-        and schema == expected_schema,
+        "base_rows": base_rows,
+        "expected_base_rows": expected_base_rows,
+        "completion_competition_rows": completion_competition_rows,
+        "expected_completion_competition_rows":
+            expected_completion_competition_rows,
+        "completion_pair_audit_rows": completion_pair_audit_rows,
+        "expected_completion_pair_audit_rows":
+            expected_completion_pair_audit_rows,
+        "long_completion_visible_rows": long_completion_visible_rows,
+        "expected_long_completion_visible_rows":
+            expected_long_completion_visible_rows,
+        "long_completion_recall_rows": long_completion_recall_rows,
+        "expected_long_completion_recall_rows":
+            expected_long_completion_recall_rows,
+        "ok": (
+            actual_hash == expected_hash
+            and schema == expected_schema
+            and base_rows == expected_base_rows
+            and completion_competition_rows
+            == expected_completion_competition_rows
+            and completion_pair_audit_rows
+            == expected_completion_pair_audit_rows
+            and long_completion_visible_rows
+            == expected_long_completion_visible_rows
+            and long_completion_recall_rows
+            == expected_long_completion_recall_rows
+        ),
     }
 
 
@@ -336,7 +401,14 @@ def main() -> int:
     failures.extend(reviewed_source_failures)
     expected_schema = int(baseline["dictionary_schema"])
     dictionary = validate_dictionary(
-        args.dictionary, baseline["dictionary_sha256"], expected_schema
+        args.dictionary,
+        baseline["dictionary_sha256"],
+        expected_schema,
+        int(baseline["dictionary_base_rows"]),
+        int(baseline["dictionary_completion_competition_rows"]),
+        int(baseline["dictionary_completion_pair_audit_rows"]),
+        int(baseline["dictionary_long_completion_visible_rows"]),
+        int(baseline["dictionary_long_completion_recall_rows"]),
     )
     if not dictionary["ok"]:
         failures.append("simplified dictionary differs from frozen baseline")
@@ -344,6 +416,11 @@ def main() -> int:
         args.dictionary_traditional,
         baseline["dictionary_tc_sha256"],
         expected_schema,
+        int(baseline["dictionary_tc_base_rows"]),
+        int(baseline["dictionary_tc_completion_competition_rows"]),
+        int(baseline["dictionary_tc_completion_pair_audit_rows"]),
+        int(baseline["dictionary_tc_long_completion_visible_rows"]),
+        int(baseline["dictionary_tc_long_completion_recall_rows"]),
     )
     if not traditional_dictionary["ok"]:
         failures.append("traditional dictionary differs from frozen baseline")

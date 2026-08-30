@@ -23,6 +23,7 @@ uses
     test_nc_fuzzy_pinyin,
     test_nc_sqlite,
     test_nc_v118_regressions,
+    test_nc_v119_regressions,
     test_nc_dictionary_reader,
     test_nc_user_dictionary;
 

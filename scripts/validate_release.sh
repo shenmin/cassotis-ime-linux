@@ -10,6 +10,7 @@ long_cases=''
 short_cases=''
 source_parity_report=''
 quality_baseline=''
+completion_baseline=''
 report_dir="$cassotis_root/release-validation"
 skip_build=0
 skip_benchmark=0
@@ -24,8 +25,9 @@ Options:
   --dictionary-traditional DB  Required traditional release dictionary.
   --report-dir DIR              Validation output directory.
   --quality-baseline FILE       Quality/latency release thresholds.
+  --completion-baseline FILE    Full completion release thresholds.
   --skip-build                  Reuse build/bin.
-  --skip-benchmark              Reuse REPORT_DIR/benchmarks/quality-summary.txt.
+  --skip-benchmark              Reuse saved quality and completion reports.
   --skip-desktop                Skip Fcitx desktop discovery/reload.
 EOF
 }
@@ -55,6 +57,10 @@ while [[ $# -gt 0 ]]; do
         --quality-baseline)
             [[ $# -ge 2 ]] || cassotis_die '--quality-baseline requires a path'
             quality_baseline="$2"; shift ;;
+        --completion-baseline)
+            [[ $# -ge 2 ]] ||
+                cassotis_die '--completion-baseline requires a path'
+            completion_baseline="$2"; shift ;;
         --skip-build) skip_build=1 ;;
         --skip-benchmark) skip_benchmark=1 ;;
         --skip-desktop) skip_desktop=1 ;;
@@ -73,10 +79,14 @@ cassotis_require_command desktop-file-validate
 cassotis_require_command python3
 cassotis_require_command realpath
 if [[ -z "$quality_baseline" ]]; then
-    quality_baseline="$cassotis_root/tests/baselines/quality-v1.18.0-linux-$(uname -m).txt"
+    quality_baseline="$cassotis_root/tests/baselines/quality-v1.19.0-linux-$(uname -m).txt"
+fi
+if [[ -z "$completion_baseline" ]]; then
+    completion_baseline="$cassotis_root/tests/baselines/completion-quality-v1.19.0-linux-$(uname -m).txt"
 fi
 for required in dictionary_path traditional_dictionary_path long_cases \
-                short_cases source_parity_report quality_baseline; do
+                short_cases source_parity_report quality_baseline \
+                completion_baseline; do
     [[ -n "${!required}" && -r "${!required}" ]] ||
         cassotis_die "required input is missing: $required=${!required}"
 done
@@ -164,7 +174,8 @@ benchmark_inputs="$report_dir/benchmarks/benchmark-inputs.json"
 python3 - "$dictionary_path" "$long_cases" "$short_cases" \
     "$cassotis_root/build/bin/cassotis-quality-benchmark" \
     "$cassotis_root/build/bin" "$cassotis_root/VERSION" \
-    "$benchmark_inputs" "$skip_benchmark" <<'PY'
+    "$benchmark_inputs" "$skip_benchmark" \
+    "$cassotis_root/build/bin/cassotis-completion-benchmark" <<'PY'
 import hashlib
 import json
 from pathlib import Path
@@ -194,13 +205,14 @@ current = {
     "long_cases": file_record(sys.argv[2]),
     "short_cases": file_record(sys.argv[3]),
     "benchmark_binary": file_record(sys.argv[4]),
+    "completion_benchmark_binary": file_record(sys.argv[9]),
     "neural_runtime": {
         name: file_record(runtime / name)
         for name in (
             "libcassotis_pinyin_transformer_ort.so",
             "libonnxruntime.so.1.20.1",
             "libonnxruntime_providers_shared.so",
-            "pinyin_transformer/pinyin_difference_reranker_int8.onnx",
+            "pinyin_transformer/pinyin_conditional_scorer_int8.onnx",
             "pinyin_transformer/vocab.json",
         )
     },
@@ -234,6 +246,19 @@ python3 "$cassotis_root/tools/parity/validate_quality_report.py" \
     --report "$report_dir/quality-validation.json" \
     >"$report_dir/logs/quality-validation.log"
 
+completion_log="$report_dir/benchmarks/completion-quality.txt"
+if [[ $skip_benchmark -eq 0 ]]; then
+    "$cassotis_root/build/bin/cassotis-completion-benchmark" \
+        "$dictionary_path" "$long_cases" 16300 40 500 \
+        >"$completion_log" \
+        2>"$report_dir/logs/completion-quality-progress.log"
+fi
+python3 "$cassotis_root/tools/parity/validate_completion_quality_report.py" \
+    --log "$completion_log" --baseline "$completion_baseline" \
+    --dictionary "$dictionary_path" --cases "$long_cases" \
+    --report "$report_dir/completion-quality-validation.json" \
+    >"$report_dir/logs/completion-quality-validation.log"
+
 release_args=(--dictionary "$dictionary_path" \
     --output "$report_dir/artifacts" --skip-build)
 matrix_args=(--dictionary "$dictionary_path" \
@@ -265,6 +290,9 @@ from datetime import datetime, timezone
 root = Path(sys.argv[1])
 version = Path(sys.argv[2]).read_text(encoding="utf-8").strip()
 quality = json.loads((root / "quality-validation.json").read_text(encoding="utf-8"))
+completion_quality = json.loads(
+    (root / "completion-quality-validation.json").read_text(encoding="utf-8")
+)
 completion_deterministic = json.loads(
     (root / "neural-engine-smoke-deterministic-validation.json").read_text(
         encoding="utf-8"
@@ -310,6 +338,7 @@ summary = {
         "dictionary_traditional": source["dictionary_traditional"],
     },
     "quality": quality["metrics"],
+    "completion_quality": completion_quality["metrics"],
     "neural_engine_smoke": completion_deterministic["metrics"],
     "neural_engine_smoke_production": completion_production["metrics"],
     "quality_inputs": quality_inputs,
@@ -317,6 +346,7 @@ summary = {
     "platform_matrix_results": matrix,
     "core_tests": "passed",
     "neural_engine_smoke_validation": "passed",
+    "completion_quality_validation": "passed",
     "neural_engine_smoke_deterministic_validation": "passed",
     "neural_engine_smoke_production_validation": "passed",
     "candidate_parity_simplified": "passed",

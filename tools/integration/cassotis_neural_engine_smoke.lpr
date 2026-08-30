@@ -232,6 +232,7 @@ var
     runtime_directory: string;
     case_limit: Integer;
     result_timeout_ms: QWord;
+    transformer_timeout_ms: QWord;
     dictionary: TncSqliteDictionary;
     engine: TncEngine;
     parser: TncPinyinParser;
@@ -263,6 +264,10 @@ begin
             c_default_result_timeout_ms)
     else
         result_timeout_ms := c_default_result_timeout_ms;
+    if result_timeout_ms = 0 then
+        transformer_timeout_ms := 0
+    else
+        transformer_timeout_ms := c_nc_pinyin_transformer_result_timeout_ms;
     runtime_directory := ExtractFileDir(ParamStr(0));
 
     dictionary := nil;
@@ -277,8 +282,12 @@ begin
             raise Exception.Create('dictionary open failed: ' + dictionary_path);
         engine := TncEngine.Create(create_engine_config);
         parser := TncPinyinParser.Create;
+        // A zero-timeout smoke must disable both neural wall-clock gates.
+        // Otherwise the conditional scorer can change the candidate pool
+        // before the completion request is measured, making the supposedly
+        // deterministic signature host-load dependent.
         reranker := TncPinyinTransformerHostReranker.Create(
-            runtime_directory, False);
+            runtime_directory, False, transformer_timeout_ms);
         reranker_reference := reranker;
         completion_host := TncLocalCompletionHost.Create(runtime_directory,
             result_timeout_ms);

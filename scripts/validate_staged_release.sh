@@ -67,7 +67,7 @@ required_files=(
     "$runtime_provider"
     "$libexec/libonnxruntime.so.1"
     "$libexec/libonnxruntime.so"
-    "$libexec/pinyin_transformer/pinyin_difference_reranker_int8.onnx"
+    "$libexec/pinyin_transformer/pinyin_conditional_scorer_int8.onnx"
     "$libexec/pinyin_transformer/vocab.json"
     "$libexec/local_completion/local_completion_path_ranker_int8.onnx"
     "$libexec/local_completion/local_completion_index.bin"
@@ -104,6 +104,11 @@ for path in "${required_files[@]}"; do
     [[ -n "$path" && -r "$path" ]] ||
         cassotis_die "required release file is missing: $path"
 done
+
+stale_transformer_model="$libexec/pinyin_transformer/"\
+"pinyin_difference_reranker_int8.onnx"
+[[ ! -e "$stale_transformer_model" ]] ||
+    cassotis_die "staged release contains the retired v1.18 Transformer model"
 
 ibus_component="$release_root/usr/share/ibus/component/cassotis.xml"
 installed_ibus_adapter="${ibus_adapter#"$release_root"}"

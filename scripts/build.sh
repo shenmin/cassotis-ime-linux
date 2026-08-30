@@ -79,9 +79,11 @@ ln -sfn libonnxruntime.so.1 "$bin_dir/libonnxruntime.so"
 install -d -m 0755 "$bin_dir/pinyin_transformer" \
     "$bin_dir/local_completion"
 install -m 0644 \
-    "$cassotis_root/data/models/pinyin_transformer/pinyin_difference_reranker_int8.onnx" \
+    "$cassotis_root/data/models/pinyin_transformer/pinyin_conditional_scorer_int8.onnx" \
     "$cassotis_root/data/models/pinyin_transformer/vocab.json" \
     "$bin_dir/pinyin_transformer/"
+rm -f -- \
+    "$bin_dir/pinyin_transformer/pinyin_difference_reranker_int8.onnx"
 install -m 0644 \
     "$cassotis_root/data/models/local_completion/local_completion_path_ranker_int8.onnx" \
     "$cassotis_root/data/models/local_completion/local_completion_index.bin" \
@@ -143,6 +145,8 @@ compile_target "$cassotis_root/tools/integration/cassotis_neural_runtime_smoke.l
     cassotis-neural-runtime-smoke
 compile_target "$cassotis_root/tools/integration/cassotis_neural_engine_smoke.lpr" \
     cassotis-neural-engine-smoke
+compile_target "$cassotis_root/tools/benchmark/cassotis_completion_benchmark.lpr" \
+    cassotis-completion-benchmark
 
 cassotis_require_command cc
 cassotis_require_command pkg-config

@@ -1,8 +1,8 @@
 schema_version: 2
-windows_tag: v1.18.0
-windows_baseline: 48b8bc21bc408faa32a756764b39cf109e4be0fc
-lexicon_tag: v1.18.0
-lexicon_baseline: 51f41d211aa062cf70e96a017ee6e5b9d79474a7
+windows_tag: v1.19.0
+windows_baseline: 089f63859eb73ac3d7355d8c5623c3ab70287266
+lexicon_tag: v1.19.0
+lexicon_baseline: e66619094effccf5d4265ce4e716a50e9897d75c
 dictionary_schema: 24
 units:
   - windows: src/common/nc_types.pas
@@ -32,7 +32,7 @@ units:
   - windows: src/engine/nc_engine_intf.pas
     linux: src/engine/nc_engine_intf.pas
     status: ported-production-engine
-    notes: Candidate recall, short/long ranking, distilled Transformer reranking, constrained asynchronous local completion, context, user learning, deletion, completion, all seven pinyin schemes, fuzzy recall, and input-state behavior follow the Windows v1.18.0 source; anonymous comparer calls use stable explicit FPC sorts, and the Linux service supplies context, worker, and IPC lifecycle around TncEngine.
+    notes: Candidate recall, short/long ranking, Pinyin-conditioned Transformer reranking, constrained asynchronous local completion, context, user learning, deletion, completion, all seven pinyin schemes, fuzzy recall, and input-state behavior follow the Windows v1.19.0 source; anonymous comparer calls use stable explicit FPC sorts, and the Linux service supplies context, worker, and IPC lifecycle around TncEngine.
   - windows: src/engine/nc_*_model.pas and src/engine/nc_short_context_expanded_evidence.pas
     linux: src/engine/nc_*_model.pas and src/engine/nc_short_context_expanded_evidence.pas
     status: ported-generated-models
@@ -40,7 +40,7 @@ units:
   - windows: src/host/nc_pinyin_transformer_host.pas, src/host/nc_local_completion_host.pas, src/host/native/nc_pinyin_transformer_ort.cpp
     linux: src/host/nc_pinyin_transformer_host.pas, src/host/nc_local_completion_host.pas, src/host/native/nc_pinyin_transformer_ort.cpp
     status: ported-platform-adaptation
-    notes: Windows DLL loading, UTF-16 paths, file mapping, and main-thread callbacks were replaced by ELF loading, UTF-8 paths, mmap, and a bounded Linux worker queue. ONNX inputs, model gates, confidence checks, timeout semantics, and fail-closed behavior are retained for x86_64 and aarch64.
+    notes: Windows DLL loading, UTF-16 paths, file mapping, and main-thread callbacks were replaced by ELF loading, UTF-8 paths, mmap, and a bounded Linux worker queue. The v1.19.0 conditional sequence scorer, learned runtime gate and fusion model, multi-level completion index, native recall selector, confidence checks, timeout semantics, and fail-closed behavior are retained for x86_64 and aarch64.
   - windows: src/tsf
     linux: adapters/fcitx5 and adapters/ibus
     status: redesigned-native-thin-adapters
