@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-08-31
+
 - Advanced the reviewed engine and dictionary baseline to Cassotis IME and
   Cassotis Lexicon v1.20.0 with matching schema-24 dictionaries.
 - Added bounded document-local term and transition adaptation from framework

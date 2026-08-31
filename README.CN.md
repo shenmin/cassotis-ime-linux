@@ -46,14 +46,14 @@
 
 ## 已验证发行环境
 
-v0.3.0 源码和二进制版本以言泉输入法与 Cassotis Lexicon v1.19.0 为行为和
-数据基线，并使用匹配的 schema 24 词库。相比 v0.2.0，新版加入拼音条件的
-16 候选长句终排模型及学习式门控、融合决策，扩大多级补全后缀索引并加入
-原生召回选择器，同时修复复合词前缀保留和补全一致性问题。这些改进提升了
-歧义长句排序与受控 exact 词库一键补全的召回范围，不改变独立、确定性的
-短词排序路径。
+v0.4.0 源码和二进制版本以言泉输入法与 Cassotis Lexicon v1.20.0 为行为和
+数据基线，并使用匹配的 schema 24 词库。相比 v0.3.0，新版加入有界的文档
+局部词语与转移自适应、带学习式调用和融合门控的受约束拼音对齐长候选生成，
+以及受约束的一键补全生成式后备层。新增路径全部在本地运行，只有置信度满足
+要求时才会采用，并与确定性的短词排序路径隔离；生成模型会话在支持的 glibc
+系统上也采用有界的运行时内存策略。
 
-v0.3.0 同时提供 amd64 与 arm64 的 `.deb` 安装包和便携二进制包，已在两个
+v0.4.0 同时提供 amd64 与 arm64 的 `.deb` 安装包和便携二进制包，已在两个
 架构的 Ubuntu 26.04.1 GNOME Wayland 环境完成验证。
 
 两种架构的安装包均包含 IBus 与 Fcitx 5 适配层，安装后选择其中一个框架
@@ -73,7 +73,7 @@ v0.3.0 同时提供 amd64 与 arm64 的 `.deb` 安装包和便携二进制包，
 
 ```bash
 arch="$(dpkg --print-architecture)"  # 输出 amd64 或 arm64
-package="cassotis-ime_0.3.0_${arch}.deb"
+package="cassotis-ime_0.4.0_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -96,10 +96,10 @@ sudo apt install "./${package}"
 
 ```bash
 arch="$(uname -m)"  # 输出 x86_64 或 aarch64
-archive="cassotis-ime-linux-0.3.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-0.4.0-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-0.3.0-${arch}"
+cd "cassotis-ime-linux-0.4.0-${arch}"
 sudo ./install.sh
 ```
 
