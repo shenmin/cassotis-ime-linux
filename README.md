@@ -59,25 +59,25 @@ cloud service, network connection, or GPU.
 
 ## Supported Release
 
-The v0.3.0 source and binary release follows the Cassotis IME and Cassotis
-Lexicon v1.19.0 baselines with matching schema-24 dictionaries. Compared with
-v0.2.0, it adds the Pinyin-conditioned 16-candidate final long-sentence
-scorer with learned gate and fusion decisions, a larger multi-level completion
-suffix index with a native recall selector, and compound-prefix and
-completion-consistency fixes. These changes improve ambiguous long-sentence
-ranking and broaden controlled exact-lexicon one-key completion without
-changing the deterministic short-word ranking path.
+The v0.4.0 source and binary release follows the Cassotis IME and Cassotis
+Lexicon v1.20.0 baselines with matching schema-24 dictionaries. Compared with
+v0.3.0, it adds bounded document-local term and transition adaptation,
+constrained Pinyin-aligned long-candidate generation with learned invocation
+and fusion gates, and a constrained local-completion generator fallback. The
+new paths remain locally executed, confidence-gated, and isolated from the
+deterministic short-word ranking path. Generator sessions also use bounded
+runtime memory behavior on supported glibc systems.
 
 The complete automated release gate described in
 [BENCHMARK.md](BENCHMARK.md) and [RELEASE.md](RELEASE.md) has passed natively
 on x86_64 and aarch64. Across 16,300 long-sentence cases, Top1/Top2 counts are
-10,941/12,260 and 10,916/12,252 respectively; the complete short-word result
+11,088/12,402 and 11,068/12,393 respectively; the complete short-word result
 remains identical to Windows on both architectures. Both targets also passed
 clean native builds, core and dictionary tests, frozen quality gates, artifact
 and package checks, and the automated IBus/Fcitx desktop matrix. Manual
 application-level GUI checks remain part of each release checklist.
 
-The v0.3.0 release provides `.deb` packages and portable binary archives for
+The v0.4.0 release provides `.deb` packages and portable binary archives for
 both amd64 and arm64. It was validated on Ubuntu 26.04.1 GNOME Wayland on both
 architectures.
 
@@ -102,7 +102,7 @@ metadata, and install it with APT:
 
 ```bash
 arch="$(dpkg --print-architecture)"  # amd64 or arm64
-package="cassotis-ime_0.3.0_${arch}.deb"
+package="cassotis-ime_0.4.0_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -128,10 +128,10 @@ system architecture:
 
 ```bash
 arch="$(uname -m)"  # x86_64 or aarch64
-archive="cassotis-ime-linux-0.3.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-0.4.0-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-0.3.0-${arch}"
+cd "cassotis-ime-linux-0.4.0-${arch}"
 sudo ./install.sh
 ```
 
