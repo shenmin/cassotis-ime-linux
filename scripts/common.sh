@@ -435,13 +435,16 @@ cassotis_stage_neural_runtime() {
     ln -sfn libonnxruntime.so.1.20.1 \
         "$destination_dir/libonnxruntime.so.1"
     ln -sfn libonnxruntime.so.1 "$destination_dir/libonnxruntime.so"
-    for file_name in pinyin_conditional_scorer_int8.onnx vocab.json; do
+    for file_name in pinyin_conditional_scorer_int8.onnx \
+                     pinyin_parallel_generator_int8.onnx \
+                     pinyin_parallel_allowed.bin vocab.json; do
         install -m 0644 "$source_dir/pinyin_transformer/$file_name" \
             "$destination_dir/pinyin_transformer/$file_name"
     done
     rm -f -- \
         "$destination_dir/pinyin_transformer/pinyin_difference_reranker_int8.onnx"
     for file_name in local_completion_path_ranker_int8.onnx \
+                     local_completion_generator_int8.onnx \
                      local_completion_index.bin model_manifest.json; do
         install -m 0644 "$source_dir/local_completion/$file_name" \
             "$destination_dir/local_completion/$file_name"
@@ -465,7 +468,9 @@ cassotis_atomic_install_neural_runtime() {
     ln -sfn libonnxruntime.so.1.20.1 \
         "$destination_dir/libonnxruntime.so.1"
     ln -sfn libonnxruntime.so.1 "$destination_dir/libonnxruntime.so"
-    for file_name in pinyin_conditional_scorer_int8.onnx vocab.json; do
+    for file_name in pinyin_conditional_scorer_int8.onnx \
+                     pinyin_parallel_generator_int8.onnx \
+                     pinyin_parallel_allowed.bin vocab.json; do
         cassotis_atomic_install \
             "$source_dir/pinyin_transformer/$file_name" \
             "$destination_dir/pinyin_transformer/$file_name" 0644
@@ -473,6 +478,7 @@ cassotis_atomic_install_neural_runtime() {
     rm -f -- \
         "$destination_dir/pinyin_transformer/pinyin_difference_reranker_int8.onnx"
     for file_name in local_completion_path_ranker_int8.onnx \
+                     local_completion_generator_int8.onnx \
                      local_completion_index.bin model_manifest.json; do
         cassotis_atomic_install "$source_dir/local_completion/$file_name" \
             "$destination_dir/local_completion/$file_name" 0644
@@ -491,8 +497,11 @@ cassotis_remove_neural_runtime() {
         "$destination_dir/libonnxruntime_providers_shared.so" \
         "$destination_dir/pinyin_transformer/pinyin_difference_reranker_int8.onnx" \
         "$destination_dir/pinyin_transformer/pinyin_conditional_scorer_int8.onnx" \
+        "$destination_dir/pinyin_transformer/pinyin_parallel_generator_int8.onnx" \
+        "$destination_dir/pinyin_transformer/pinyin_parallel_allowed.bin" \
         "$destination_dir/pinyin_transformer/vocab.json" \
         "$destination_dir/local_completion/local_completion_path_ranker_int8.onnx" \
+        "$destination_dir/local_completion/local_completion_generator_int8.onnx" \
         "$destination_dir/local_completion/local_completion_index.bin" \
         "$destination_dir/local_completion/model_manifest.json"
     rmdir -- "$destination_dir/pinyin_transformer" \

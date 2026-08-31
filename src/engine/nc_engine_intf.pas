@@ -18,6 +18,7 @@ uses
     nc_shortcut,
     nc_dictionary_intf,
     nc_dictionary_sqlite,
+    nc_document_context_model,
     nc_pinyin_parser,
     nc_shuangpin_decoder,
     nc_config;
@@ -256,6 +257,11 @@ type
         source_redup: Boolean;
         source_local_rerank: Boolean;
         source_rule_fallback: Boolean;
+        source_direct_generation: Boolean;
+        direct_generation_rank: Integer;
+        direct_generation_score: Single;
+        direct_generation_score_delta: Single;
+        direct_generation_existing_rank: Integer;
         chain_first_stage_score: Integer;
         chain_second_stage_score: Int64;
         chain_score_gap: Int64;
@@ -415,8 +421,20 @@ type
         confidence: Single;
     end;
 
+    TncLongGeneratedCandidate = record
+        text: string;
+        normalized_score: Single;
+        rank: Integer;
+    end;
+
+    TncLongGeneratedCandidateArray = TArray<TncLongGeneratedCandidate>;
+
     IncLongNeuralReranker = interface
-        ['{B4FC23F4-4F65-4F8B-A3E8-A69442BA57A1}']
+        ['{E3B83F1A-8746-4E9D-8130-79E0EB9840D8}']
+        function should_generate(const query_text: string;
+            const candidates: TncLongFinalCandidateDebugArray): Boolean;
+        function try_generate(const query_text: string;
+            out candidates: TncLongGeneratedCandidateArray): Boolean;
         function try_select(const query_text: string;
             const candidates: TncLongFinalCandidateDebugArray;
             out selected_index: Integer): Boolean;
@@ -594,6 +612,7 @@ type
         m_last_dictionary_reload_check_tick: UInt64;
         m_left_context: string;
         m_external_left_context: string;
+        m_document_context_model: TncDocumentContextModel;
         m_segment_left_context: string;
         m_context_pairs: TDictionary<string, Integer>;
         m_context_order: TQueue<string>;
@@ -1031,7 +1050,9 @@ type
         function rebuild_candidates_after_dictionary_upgrade: Boolean;
         procedure reload_dictionary_if_needed;
         procedure prewarm_dictionary_caches;
-        procedure set_external_left_context(const left_context: string);
+        procedure set_external_left_context(const left_context: string;
+            const document_key: string = '';
+            const document_snapshot: string = '');
         function debug_query_one_key_completion(const query_text: string;
             const left_context: string): TncOneKeyCompletion;
         function debug_query_one_key_completion_candidates(
@@ -1614,7 +1635,9 @@ begin
     m_user_dictionary_write_time := 0;
     m_last_dictionary_reload_check_tick := 0;
     m_left_context := '';
+    m_external_left_context := '';
     m_segment_left_context := '';
+    m_document_context_model := TncDocumentContextModel.create;
     m_confirmed_segments := TList<TncConfirmedSegment>.Create;
     m_context_pairs := TDictionary<string, Integer>.Create;
     m_context_order := TQueue<string>.Create;
@@ -1723,6 +1746,11 @@ end;
 destructor TncEngine.Destroy;
 begin
     m_long_neural_reranker := nil;
+    if m_document_context_model <> nil then
+    begin
+        m_document_context_model.Free;
+        m_document_context_model := nil;
+    end;
     if m_dictionary <> nil then
     begin
         m_dictionary.Free;
@@ -3514,7 +3542,7 @@ type
         path_text: string;
     end;
     const
-        c_infer_segment_max_syllables = 24;
+        c_infer_segment_max_syllables = 40;
         c_infer_segment_word_max_syllables = 5;
         c_infer_segment_lookup_probe_limit = 48;
         c_infer_segment_rank_step = 240;
@@ -4213,6 +4241,10 @@ begin
     m_confirmed_explicit_choice := False;
     m_recent_partial_prefix_text := '';
     m_external_left_context := '';
+    if m_document_context_model <> nil then
+    begin
+        m_document_context_model.clear;
+    end;
     m_segment_left_context := '';
     m_context_db_bonus_cache_key := '';
     SetLength(m_candidates, 0);
@@ -5340,10 +5372,22 @@ begin
     Result := trim_left_context_to_sentence(value, c_context_model_max_len);
 end;
 
-procedure TncEngine.set_external_left_context(const left_context: string);
+procedure TncEngine.set_external_left_context(const left_context: string;
+    const document_key: string; const document_snapshot: string);
 var
     next_context: string;
+    next_document_snapshot: string;
 begin
+    if m_document_context_model <> nil then
+    begin
+        next_document_snapshot := document_snapshot;
+        if (document_key <> '') and (next_document_snapshot = '') then
+        begin
+            next_document_snapshot := left_context;
+        end;
+        m_document_context_model.set_snapshot(document_key,
+            next_document_snapshot);
+    end;
     next_context := trim_left_context_to_sentence(left_context,
         c_left_context_max_len);
     if m_external_left_context <> next_context then
@@ -5357,6 +5401,14 @@ begin
         begin
             m_lookup_context_query_latest_bonus_cache.Clear;
         end;
+    end;
+    if m_lookup_context_bonus_cache <> nil then
+    begin
+        m_lookup_context_bonus_cache.Clear;
+    end;
+    if m_lookup_segment_path_context_bonus_cache <> nil then
+    begin
+        m_lookup_segment_path_context_bonus_cache.Clear;
     end;
 end;
 
@@ -5633,6 +5685,7 @@ var
     char_lm_scores: TArray<Integer>;
     anchor_lm_texts: TArray<string>;
     anchor_lm_scores: TArray<Integer>;
+    document_context_bonus: Integer;
     context_value: string;
     top1_uncontested: Boolean;
     context_lm_ok: Boolean;
@@ -6348,6 +6401,14 @@ begin
             Inc(items[item_idx].score,
                 char_lm_scores[item_idx] div c_char_lm_divisor);
         end;
+        if (m_document_context_model <> nil) and
+            m_document_context_model.has_context then
+        begin
+            document_context_bonus := m_document_context_model.score_text(
+                items[item_idx].anchor.text +
+                items[item_idx].value.suffix_text);
+            Inc(items[item_idx].score, document_context_bonus div 8);
+        end;
         if (previous_completion.source = okcs_long_transition) and
             SameText(previous_completion.anchor_path,
             items[item_idx].anchor.path_text) and
@@ -6510,6 +6571,7 @@ var
     remaining_units: Integer;
     feedback_bonus: Integer;
     reject_penalty: Integer;
+    document_context_bonus: Integer;
     transition_bonus: Integer;
     transition_penalty: Integer;
     anchor_bonus: Integer;
@@ -7217,6 +7279,13 @@ begin
         begin
             Inc(scores[idx], (char_lm_scores[idx] div units) div
                 c_completion_char_lm_divisor);
+        end;
+        if (m_document_context_model <> nil) and
+            m_document_context_model.has_context then
+        begin
+            document_context_bonus :=
+                m_document_context_model.score_text(completions[idx].text);
+            Inc(scores[idx], document_context_bonus div 8);
         end;
 
         if completions[idx].feedback_count > 0 then
@@ -138224,19 +138293,236 @@ var
     procedure apply_host_neural_reranker;
     const
         c_neural_candidate_limit = 16;
+        c_direct_generation_limit = 4;
+        c_direct_generation_word_max_syllables = 5;
     var
         ordered_position_local: Integer;
         candidate_index_local: Integer;
         neural_index_local: Integer;
         duplicate_index_local: Integer;
+        generated_index_local: Integer;
+        generated_existing_neural_local: Integer;
+        generated_existing_candidate_local: Integer;
+        generated_count_local: Integer;
+        replacement_candidate_index_local: Integer;
+        path_score_local: Integer;
+        path_segment_count_local: Integer;
         selected_candidate_index_local: Integer;
         candidate_text_local: string;
+        generated_path_local: string;
+        generator_query_local: string;
+        generated_top_score_local: Single;
         duplicate_local: Boolean;
+        generator_syllables_local: TncPinyinParseResult;
+        generated_candidates_local: TncLongGeneratedCandidateArray;
+        generated_candidate_local: TncLongFinalCandidateDebug;
+        replacement_candidate_local: TncCandidate;
+        function is_allowed_generated_single_char_local(
+            const candidate_text: string): Boolean;
+        begin
+            Result := False;
+            if Length(candidate_text) <> 1 then
+            begin
+                Exit;
+            end;
+
+            case Ord(candidate_text[1]) of
+                $6211, $4F60, $4ED6, $5979, $5B83, $4EEC, $548C, $53BB, $6765,
+                $5728, $662F, $6709, $8981, $60F3, $4F1A, $80FD, $53EA, $628A, $88AB,
+                $8BA9, $7ED9, $5411, $5BF9, $8DDF, $540C, $4ECE, $4E0E, $4E8E, $5C31,
+                $4E5F, $90FD, $8FD8, $53C8, $518D, $4E0D, $5F88, $592A, $6700, $5DF2,
+                $5C06, $5230, $7684, $4E86, $7740, $8FC7, $4F46, $867D, $800C, $5E76,
+                $5374, $4E14:
+                    Result := True;
+            end;
+        end;
+
+        function infer_generated_exact_path_local(const candidate_text: string;
+            out out_segment_count: Integer): string;
+        var
+            units_local: TArray<string>;
+            valid_local: TArray<Boolean>;
+            paths_local: TArray<string>;
+            segment_counts_local: TArray<Integer>;
+            position_local: Integer;
+            segment_length_local: Integer;
+            syllable_index_local: Integer;
+            signature_index_local: Integer;
+            segment_pinyin_local: string;
+            segment_text_local: string;
+
+            function try_signature_path_local(const signature_path: string;
+                out signature_segment_count: Integer): string;
+            var
+                signature_parts_local: TArray<string>;
+                signature_part_local: string;
+                signature_units_local: TArray<string>;
+                signature_cursor_local: Integer;
+                signature_length_local: Integer;
+                signature_syllable_local: Integer;
+                signature_pinyin_local: string;
+                signature_text_local: string;
+            begin
+                Result := '';
+                signature_segment_count := 0;
+                signature_parts_local :=
+                    signature_path.Split([c_segment_path_separator]);
+                signature_cursor_local := 0;
+                for signature_part_local in signature_parts_local do
+                begin
+                    signature_units_local :=
+                        split_text_units(Trim(signature_part_local));
+                    signature_length_local := Length(signature_units_local);
+                    if (signature_length_local <= 0) or
+                        (signature_cursor_local + signature_length_local >
+                        Length(units_local)) then
+                    begin
+                        Exit('');
+                    end;
+                    signature_pinyin_local := '';
+                    signature_text_local := '';
+                    for signature_syllable_local := signature_cursor_local to
+                        signature_cursor_local + signature_length_local - 1 do
+                    begin
+                        signature_pinyin_local := signature_pinyin_local +
+                            LowerCase(Trim(generator_syllables_local[
+                            signature_syllable_local].text));
+                        signature_text_local := signature_text_local +
+                            units_local[signature_syllable_local];
+                    end;
+                    if signature_length_local = 1 then
+                    begin
+                        if not is_allowed_generated_single_char_local(
+                            signature_text_local) then
+                        begin
+                            Exit('');
+                        end;
+                    end
+                    else if not m_dictionary.is_base_entry(
+                        signature_pinyin_local, signature_text_local) then
+                    begin
+                        Exit('');
+                    end;
+                    if Result <> '' then
+                    begin
+                        Result := Result + c_segment_path_separator;
+                    end;
+                    Result := Result + signature_text_local;
+                    Inc(signature_segment_count);
+                    Inc(signature_cursor_local, signature_length_local);
+                end;
+                if (signature_cursor_local <> Length(units_local)) or
+                    (signature_segment_count <= 1) then
+                begin
+                    Result := '';
+                    signature_segment_count := 0;
+                end;
+            end;
+        begin
+            Result := '';
+            out_segment_count := 0;
+            if (m_dictionary = nil) or
+                (Length(generator_syllables_local) < 2) then
+            begin
+                Exit;
+            end;
+            units_local := split_text_units(Trim(candidate_text));
+            if Length(units_local) <> Length(generator_syllables_local) then
+            begin
+                Exit;
+            end;
+
+            for signature_index_local := 0 to
+                Min(neural_index_local - 1, 3) do
+            begin
+                Result := try_signature_path_local(
+                    neural_candidates[signature_index_local].segment_path,
+                    out_segment_count);
+                if Result <> '' then
+                begin
+                    Exit;
+                end;
+            end;
+
+            SetLength(valid_local, Length(units_local) + 1);
+            SetLength(paths_local, Length(units_local) + 1);
+            SetLength(segment_counts_local, Length(units_local) + 1);
+            valid_local[Length(units_local)] := True;
+            for position_local := High(units_local) downto 0 do
+            begin
+                for segment_length_local :=
+                    Min(c_direct_generation_word_max_syllables,
+                    Length(units_local) - position_local) downto 2 do
+                begin
+                    if not valid_local[position_local + segment_length_local] then
+                    begin
+                        Continue;
+                    end;
+                    segment_pinyin_local := '';
+                    segment_text_local := '';
+                    for syllable_index_local := position_local to
+                        position_local + segment_length_local - 1 do
+                    begin
+                        segment_pinyin_local := segment_pinyin_local +
+                            LowerCase(Trim(generator_syllables_local[
+                            syllable_index_local].text));
+                        segment_text_local := segment_text_local +
+                            units_local[syllable_index_local];
+                    end;
+                    if not m_dictionary.is_base_entry(segment_pinyin_local,
+                        segment_text_local) then
+                    begin
+                        Continue;
+                    end;
+                    valid_local[position_local] := True;
+                    segment_counts_local[position_local] :=
+                        segment_counts_local[position_local +
+                        segment_length_local] + 1;
+                    paths_local[position_local] := segment_text_local;
+                    if paths_local[position_local + segment_length_local] <> '' then
+                    begin
+                        paths_local[position_local] :=
+                            paths_local[position_local] +
+                            c_segment_path_separator +
+                            paths_local[position_local + segment_length_local];
+                    end;
+                    Break;
+                end;
+                if valid_local[position_local] then
+                begin
+                    Continue;
+                end;
+                if valid_local[position_local + 1] and
+                    is_allowed_generated_single_char_local(
+                    units_local[position_local]) then
+                begin
+                    valid_local[position_local] := True;
+                    segment_counts_local[position_local] :=
+                        segment_counts_local[position_local + 1] + 1;
+                    paths_local[position_local] := units_local[position_local];
+                    if paths_local[position_local + 1] <> '' then
+                    begin
+                        paths_local[position_local] :=
+                            paths_local[position_local] +
+                            c_segment_path_separator +
+                            paths_local[position_local + 1];
+                    end;
+                end;
+            end;
+            if valid_local[0] and (segment_counts_local[0] > 1) then
+            begin
+                Result := paths_local[0];
+                out_segment_count := segment_counts_local[0];
+            end;
+        end;
     begin
         if (not run_host_neural_reranker) or
             (m_long_neural_reranker = nil) or (not unified_pool_final) or
             (candidate_count < 2) or (m_last_lookup_syllable_count < 6) or
-            (m_last_lookup_syllable_count > 40) then
+            (m_last_lookup_syllable_count > 40) or
+            (m_config.pinyin_input_scheme <> pis_full_pinyin) or
+            is_fuzzy_pinyin_active or (not is_full_pinyin_key(
+            normalized_query)) then
         begin
             Exit;
         end;
@@ -138339,12 +138625,188 @@ var
             Exit;
         end;
 
+        generator_syllables_local :=
+            get_effective_compact_pinyin_syllables(normalized_query);
+        generator_query_local := '';
+        if Length(generator_syllables_local) =
+            m_last_lookup_syllable_count then
+        begin
+            for generated_index_local := 0 to
+                High(generator_syllables_local) do
+            begin
+                if generator_query_local <> '' then
+                begin
+                    generator_query_local := generator_query_local + '''';
+                end;
+                generator_query_local := generator_query_local +
+                    LowerCase(Trim(
+                    generator_syllables_local[generated_index_local].text));
+            end;
+        end;
+        SetLength(generated_candidates_local, 0);
+        if generator_query_local <> '' then
+        begin
+            try
+                if m_long_neural_reranker.should_generate(
+                    generator_query_local, neural_candidates) then
+                begin
+                    m_long_neural_reranker.try_generate(generator_query_local,
+                        generated_candidates_local);
+                end;
+            except
+                SetLength(generated_candidates_local, 0);
+            end;
+        end;
+        if Length(generated_candidates_local) >
+            c_direct_generation_limit then
+        begin
+            SetLength(generated_candidates_local,
+                c_direct_generation_limit);
+        end;
+        generated_count_local := 0;
+        generated_top_score_local := 0.0;
+        if Length(generated_candidates_local) > 0 then
+        begin
+            generated_top_score_local :=
+                generated_candidates_local[0].normalized_score;
+        end;
+        for generated_index_local := 0 to
+            High(generated_candidates_local) do
+        begin
+            candidate_text_local := Trim(
+                generated_candidates_local[generated_index_local].text);
+            if (candidate_text_local = '') or
+                (get_candidate_text_unit_count(candidate_text_local) <>
+                m_last_lookup_syllable_count) then
+            begin
+                Continue;
+            end;
+            generated_existing_neural_local := -1;
+            for duplicate_index_local := 0 to neural_index_local - 1 do
+            begin
+                if SameText(Trim(
+                    neural_candidates[duplicate_index_local].text),
+                    candidate_text_local) then
+                begin
+                    generated_existing_neural_local :=
+                        duplicate_index_local;
+                    Break;
+                end;
+            end;
+            if generated_existing_neural_local = 0 then
+            begin
+                { The generator agreeing with the settled Top1 is not a
+                  challenge and does not need a duplicate model row. }
+                Continue;
+            end;
+            duplicate_local := False;
+            for duplicate_index_local := neural_index_local to
+                neural_index_local + generated_count_local - 1 do
+            begin
+                if SameText(Trim(
+                    neural_candidates[duplicate_index_local].text),
+                    candidate_text_local) then
+                begin
+                    duplicate_local := True;
+                    Break;
+                end;
+            end;
+            if duplicate_local then
+            begin
+                Continue;
+            end;
+
+            path_score_local := 0;
+            path_segment_count_local := 0;
+            if generated_existing_neural_local > 0 then
+            begin
+                generated_path_local := Trim(
+                    neural_candidates[generated_existing_neural_local].segment_path);
+                path_score_local := neural_candidates[
+                    generated_existing_neural_local].path_confidence_score;
+                path_segment_count_local := neural_candidates[
+                    generated_existing_neural_local].path_segments;
+            end
+            else
+            begin
+                generated_path_local := infer_generated_exact_path_local(
+                    candidate_text_local, path_segment_count_local);
+            end;
+            if generated_path_local = '' then
+            begin
+                Continue;
+            end;
+
+            generated_existing_candidate_local := -1;
+            for candidate_index_local := 0 to candidate_count - 1 do
+            begin
+                if SameText(Trim(
+                    legacy_candidates[candidate_index_local].text),
+                    candidate_text_local) and
+                    (Trim(legacy_candidates[candidate_index_local].comment) = '') then
+                begin
+                    generated_existing_candidate_local :=
+                        candidate_index_local;
+                    Break;
+                end;
+            end;
+            if generated_existing_neural_local > 0 then
+            begin
+                generated_candidate_local :=
+                    neural_candidates[generated_existing_neural_local];
+            end
+            else
+            begin
+                generated_candidate_local :=
+                    Default(TncLongFinalCandidateDebug);
+                generated_candidate_local.input_syllable_count :=
+                    m_last_lookup_syllable_count;
+                generated_candidate_local.text_units :=
+                    m_last_lookup_syllable_count;
+                generated_candidate_local.complete_match := True;
+                generated_candidate_local.path_available := True;
+                generated_candidate_local.path_segments :=
+                    path_segment_count_local;
+                generated_candidate_local.path_confidence_score :=
+                    path_score_local;
+                generated_candidate_local.segment_path :=
+                    generated_path_local;
+                generated_candidate_local.text := candidate_text_local;
+            end;
+            generated_candidate_local.source_direct_generation := True;
+            generated_candidate_local.direct_generation_rank :=
+                generated_index_local + 1;
+            generated_candidate_local.direct_generation_score :=
+                generated_candidates_local[
+                generated_index_local].normalized_score;
+            generated_candidate_local.direct_generation_score_delta :=
+                generated_candidate_local.direct_generation_score -
+                generated_top_score_local;
+            generated_candidate_local.direct_generation_existing_rank := 0;
+            if generated_existing_neural_local > 0 then
+            begin
+                generated_candidate_local.direct_generation_existing_rank :=
+                    generated_existing_neural_local + 1;
+            end;
+            generated_candidate_local.text := candidate_text_local;
+            generated_candidate_local.comment := '';
+            generated_candidate_local.segment_path := generated_path_local;
+            SetLength(neural_candidates, Length(neural_candidates) + 1);
+            SetLength(neural_candidate_indices,
+                Length(neural_candidate_indices) + 1);
+            neural_candidates[High(neural_candidates)] :=
+                generated_candidate_local;
+            neural_candidate_indices[High(neural_candidate_indices)] :=
+                generated_existing_candidate_local;
+            Inc(generated_count_local);
+        end;
+
         neural_selected_index := 0;
         try
             if (not m_long_neural_reranker.try_select(normalized_query,
                 neural_candidates, neural_selected_index)) or
                 (neural_selected_index <= 0) or
-                (neural_selected_index >= neural_index_local) then
+                (neural_selected_index >= Length(neural_candidates)) then
             begin
                 Exit;
             end;
@@ -138355,6 +138817,45 @@ var
 
         selected_candidate_index_local :=
             neural_candidate_indices[neural_selected_index];
+        if selected_candidate_index_local < 0 then
+        begin
+            replacement_candidate_index_local :=
+                ordered_indices[candidate_count - 1];
+            replacement_candidate_local := Default(TncCandidate);
+            replacement_candidate_local.text :=
+                neural_candidates[neural_selected_index].text;
+            replacement_candidate_local.comment := '';
+            replacement_candidate_local.score :=
+                legacy_candidates[ordered_indices[0]].score;
+            replacement_candidate_local.source := cs_rule;
+            replacement_candidate_local.has_dict_weight := False;
+            replacement_candidate_local.dict_weight := 0;
+            replacement_candidate_local.display_kind := cdk_default;
+            legacy_candidates[replacement_candidate_index_local] :=
+                replacement_candidate_local;
+            legacy_paths[replacement_candidate_index_local] :=
+                neural_candidates[neural_selected_index].segment_path;
+            legacy_source_indices[replacement_candidate_index_local] := -1;
+            FillChar(rank_features[replacement_candidate_index_local],
+                SizeOf(rank_features[replacement_candidate_index_local]), 0);
+            rank_features[replacement_candidate_index_local].complete_match :=
+                True;
+            rank_features[replacement_candidate_index_local].text_units :=
+                m_last_lookup_syllable_count;
+            rank_features[replacement_candidate_index_local].path_available :=
+                True;
+            rank_features[replacement_candidate_index_local].path_segments :=
+                neural_candidates[neural_selected_index].path_segments;
+            rank_features[replacement_candidate_index_local].
+                path_confidence_score :=
+                neural_candidates[neural_selected_index].
+                path_confidence_score;
+            remember_segment_path_for_candidate(
+                replacement_candidate_local.text, '',
+                legacy_paths[replacement_candidate_index_local]);
+            selected_candidate_index_local :=
+                replacement_candidate_index_local;
+        end;
         for ordered_position_local := 0 to candidate_count - 1 do
         begin
             if ordered_indices[ordered_position_local] =
@@ -142498,11 +142999,13 @@ end;
 function TncEngine.get_context_bonus(const candidate_text: string): Integer;
 const
     c_context_total_cap = 760;
+    c_context_with_document_total_cap = 1480;
 var
     text_context_bonus: Integer;
     phrase_context_bonus: Integer;
     context_query_bonus: Integer;
     context_query_latest_bonus: Integer;
+    document_context_bonus: Integer;
     text_units: Integer;
 begin
     if (candidate_text <> '') and (m_lookup_context_bonus_cache <> nil) and
@@ -142515,6 +143018,13 @@ begin
     phrase_context_bonus := get_phrase_context_bonus(candidate_text);
     context_query_bonus := get_context_query_bonus(candidate_text);
     context_query_latest_bonus := get_context_query_latest_bonus(candidate_text);
+    document_context_bonus := 0;
+    if (m_document_context_model <> nil) and
+        m_document_context_model.has_context then
+    begin
+        document_context_bonus := m_document_context_model.score_text(
+            candidate_text);
+    end;
 
     if text_context_bonus >= phrase_context_bonus then
     begin
@@ -142550,8 +143060,20 @@ begin
             Inc(Result, Min(96, context_query_latest_bonus div 4));
         end;
     end;
+    if document_context_bonus > 0 then
+    begin
+        Inc(Result, document_context_bonus);
+    end;
 
-    if Result > c_context_total_cap then
+    if (m_document_context_model <> nil) and
+        m_document_context_model.has_context then
+    begin
+        if Result > c_context_with_document_total_cap then
+        begin
+            Result := c_context_with_document_total_cap;
+        end;
+    end
+    else if Result > c_context_total_cap then
     begin
         Result := c_context_total_cap;
     end;
@@ -142785,6 +143307,7 @@ var
     prefix_support: Integer;
     session_prefix_support: Integer;
     session_prefix_penalty: Integer;
+    document_path_bonus: Integer;
 
     function get_exact_context_pair_bonus(const left_text: string; const candidate_text: string): Integer;
     const
@@ -143153,6 +143676,18 @@ begin
         begin
             Inc(Result, prefix_support);
         end;
+
+    document_path_bonus := 0;
+    if (m_document_context_model <> nil) and
+        m_document_context_model.has_context then
+    begin
+        document_path_bonus := m_document_context_model.score_path(
+            encoded_path, c_segment_path_separator);
+    end;
+    if document_path_bonus > 0 then
+    begin
+        Inc(Result, document_path_bonus);
+    end;
 
     if candidate.comment <> '' then
     begin
@@ -161814,6 +162349,80 @@ var
             end;
         end;
 
+        function apply_document_context_exact_reranker_local: Boolean;
+        const
+            c_document_exact_min_score = 280;
+            c_document_exact_min_baseline_lead = 240;
+            c_document_exact_min_runner_up_lead = 96;
+            c_document_exact_max_candidates = 9;
+        var
+            candidate_idx_local: Integer;
+            candidate_limit_local: Integer;
+            candidate_score_local: Integer;
+            baseline_score_local: Integer;
+            best_idx_local: Integer;
+            best_score_local: Integer;
+            runner_up_score_local: Integer;
+            rank_item_local: TShortExactRankItem;
+        begin
+            Result := False;
+            if (m_document_context_model = nil) or
+                (not m_document_context_model.has_context) or
+                (list.Count < 2) or list[0].user_full_exact then
+            begin
+                Exit;
+            end;
+
+            baseline_score_local := m_document_context_model.score_text(
+                list[0].candidate.text);
+            best_idx_local := 0;
+            best_score_local := baseline_score_local;
+            runner_up_score_local := Low(Integer);
+            candidate_limit_local := Min(list.Count,
+                c_document_exact_max_candidates);
+            for candidate_idx_local := 1 to candidate_limit_local - 1 do
+            begin
+                rank_item_local := list[candidate_idx_local];
+                if (rank_item_local.category <> 1) or
+                    (not rank_item_local.actual_full_exact) or
+                    rank_item_local.user_full_exact or
+                    rank_item_local.low_frequency_medical_exact then
+                begin
+                    Continue;
+                end;
+                candidate_score_local :=
+                    m_document_context_model.score_text(
+                    rank_item_local.candidate.text);
+                if candidate_score_local > best_score_local then
+                begin
+                    runner_up_score_local := best_score_local;
+                    best_score_local := candidate_score_local;
+                    best_idx_local := candidate_idx_local;
+                end
+                else if candidate_score_local > runner_up_score_local then
+                begin
+                    runner_up_score_local := candidate_score_local;
+                end;
+            end;
+
+            if (best_idx_local <= 0) or
+                (best_score_local < c_document_exact_min_score) or
+                (best_score_local - baseline_score_local <
+                c_document_exact_min_baseline_lead) or
+                ((runner_up_score_local <> Low(Integer)) and
+                (best_score_local - runner_up_score_local <
+                c_document_exact_min_runner_up_lead)) then
+            begin
+                Exit;
+            end;
+
+            rank_item_local := list[best_idx_local];
+            rank_item_local.context_exact_priority := Max(
+                rank_item_local.context_exact_priority, 4);
+            list[best_idx_local] := rank_item_local;
+            Result := True;
+        end;
+
         procedure ensure_prefix_visible_on_first_page_local;
         var
             visible_limit_local: Integer;
@@ -162207,6 +162816,11 @@ var
                 sort_short_exact_rank_items_local;
             end;
             note_short_exact_phase_local('context');
+            if apply_document_context_exact_reranker_local then
+            begin
+                sort_short_exact_rank_items_local;
+            end;
+            note_short_exact_phase_local('document');
             ensure_prefix_visible_on_first_page_local;
             note_short_exact_phase_local('visible');
             if short_exact_predictive_prefix_only_mode then

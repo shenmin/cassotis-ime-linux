@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Advanced the reviewed engine and dictionary baseline to Cassotis IME and
+  Cassotis Lexicon v1.20.0 with matching schema-24 dictionaries.
+- Added bounded document-local term and transition adaptation from framework
+  surrounding-text snapshots without persisting document contents.
+- Added the constrained Pinyin-aligned long-candidate generator and its
+  learned invocation/fusion gates to the existing final ranking pipeline.
+- Added the constrained local-completion fallback generator while preserving
+  the existing asynchronous, generation-safe timeout and abstention behavior.
+- Extended source, model, staged-payload, and runtime smoke validation to bind
+  and execute every newly deployed v1.20 asset on x86_64 and aarch64.
+- Bounded generator-session memory on glibc hosts by avoiding retained
+  peak-shape ONNX arenas and returning freed session pages at runtime lifecycle
+  boundaries, without adding work to the key-processing path.
+
 ## 0.3.0 - 2026-08-30
 
 - Advanced the development baseline to Cassotis IME and Cassotis Lexicon

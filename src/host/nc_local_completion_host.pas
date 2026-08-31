@@ -58,6 +58,22 @@ type
             const error_text: PAnsiChar;
             const error_capacity: Integer): Integer; cdecl;
         TncLcDestroy = procedure(const handle: Pointer); cdecl;
+        TncLcgCreate = function(const model_path, index_path: PAnsiChar;
+            const intra_threads: Integer; const error_text: PAnsiChar;
+            const error_capacity: Integer): Pointer; cdecl;
+        TncLcgRun = function(const handle: Pointer;
+            const context, query_syllables, top1_text, top2_text: PAnsiChar;
+            const minimum_confidence: Single;
+            const output_suffix_text: PAnsiChar;
+            const output_suffix_text_capacity: Integer;
+            const output_suffix_pinyin: PAnsiChar;
+            const output_suffix_pinyin_capacity: Integer;
+            const output_suffix_path: PAnsiChar;
+            const output_suffix_path_capacity: Integer;
+            const output_confidence: PSingle;
+            const error_text: PAnsiChar;
+            const error_capacity: Integer): Integer; cdecl;
+        TncLcgDestroy = procedure(const handle: Pointer); cdecl;
     private
         FBaseDirectory: string;
         FLock: TCriticalSection;
@@ -69,8 +85,11 @@ type
         FHasFinished: Boolean;
         FModule: TLibHandle;
         FSession: Pointer;
+        FGeneratorSession: Pointer;
         FRunFunction: TncLcRun;
         FDestroyFunction: TncLcDestroy;
+        FGeneratorRunFunction: TncLcgRun;
+        FGeneratorDestroyFunction: TncLcgDestroy;
         FMinimumConfidence: Single;
         FResultTimeoutMs: QWord;
         FModelThreads: Integer;
@@ -95,6 +114,7 @@ type
         function TryPopFinishedFor(const context_id: QWord;
             out finished: TncLocalCompletionFinished): Boolean;
         function Ready: Boolean;
+        function GeneratorReady: Boolean;
         function LoadFinished: Boolean;
         function LastError: string;
     end;
@@ -108,6 +128,7 @@ uses
 
 const
     c_model_threads = 4;
+    c_generator_minimum_confidence: Single = -2.8333864;
 
 function join_path(const base_path, child_path: string): string;
 begin
@@ -174,8 +195,11 @@ begin
     FHasFinished := False;
     FModule := 0;
     FSession := nil;
+    FGeneratorSession := nil;
     FRunFunction := nil;
     FDestroyFunction := nil;
+    FGeneratorRunFunction := nil;
+    FGeneratorDestroyFunction := nil;
     FMinimumConfidence := 0.0;
     FResultTimeoutMs := result_timeout_ms;
     if model_threads > 0 then
@@ -204,6 +228,12 @@ begin
     begin
         FDestroyFunction(FSession);
         FSession := nil;
+    end;
+    if (FGeneratorSession <> nil) and
+        Assigned(FGeneratorDestroyFunction) then
+    begin
+        FGeneratorDestroyFunction(FGeneratorSession);
+        FGeneratorSession := nil;
     end;
     if FModule <> 0 then
     begin
@@ -241,6 +271,7 @@ var
     wrapper_path: string;
     model_directory: string;
     model_path: string;
+    generator_model_path: string;
     index_path: string;
     manifest_path: string;
     root_data: TJSONData;
@@ -248,15 +279,19 @@ var
     gate_object: TJSONObject;
     dev_object: TJSONObject;
     index_object: TJSONObject;
+    generator_object: TJSONObject;
     model_file: string;
     index_file: string;
     model_hash: string;
     vocab_hash: string;
     index_hash: string;
     index_vocab_hash: string;
+    generator_hash: string;
     create_function: TncLcCreate;
+    generator_create_function: TncLcgCreate;
     error_buffer: array[0..511] of AnsiChar;
     model_path_utf8: UTF8String;
+    generator_model_path_utf8: UTF8String;
     index_path_utf8: UTF8String;
 begin
     wrapper_path := join_path(FBaseDirectory,
@@ -264,6 +299,8 @@ begin
     model_directory := join_path(FBaseDirectory, 'local_completion');
     model_path := join_path(model_directory,
         'local_completion_path_ranker_int8.onnx');
+    generator_model_path := join_path(model_directory,
+        'local_completion_generator_int8.onnx');
     index_path := join_path(model_directory, 'local_completion_index.bin');
     manifest_path := join_path(model_directory, 'model_manifest.json');
     if not FileExists(wrapper_path) then
@@ -303,11 +340,21 @@ begin
         index_file := index_object.Get('file', '');
         index_hash := LowerCase(index_object.Get('sha256', ''));
         index_vocab_hash := LowerCase(index_object.Get('vocab_sha256', ''));
+        generator_object := root_object.Find(
+            'fallback_generator') as TJSONObject;
+        generator_hash := '';
+        if generator_object <> nil then
+            generator_hash := LowerCase(generator_object.Get(
+                'model_sha256', ''));
         if (not SameText(index_file, ExtractFileName(index_path))) or
             (Length(model_hash) <> 64) or (Length(vocab_hash) <> 64) or
             (Length(index_hash) <> 64) or
             (not SameText(vocab_hash, index_vocab_hash)) then
             raise EInvalidOp.Create('local-completion asset identity is invalid');
+        if FileExists(generator_model_path) and
+            (Length(generator_hash) <> 64) then
+            raise EInvalidOp.Create(
+                'local-completion generator identity is invalid');
     finally
         root_data.Free;
     end;
@@ -321,6 +368,12 @@ begin
     FRunFunction := TncLcRun(GetProcedureAddress(FModule, 'nc_lc_run'));
     FDestroyFunction := TncLcDestroy(GetProcedureAddress(FModule,
         'nc_lc_destroy'));
+    generator_create_function := TncLcgCreate(GetProcedureAddress(FModule,
+        'nc_lcg_create'));
+    FGeneratorRunFunction := TncLcgRun(GetProcedureAddress(FModule,
+        'nc_lcg_run'));
+    FGeneratorDestroyFunction := TncLcgDestroy(GetProcedureAddress(FModule,
+        'nc_lcg_destroy'));
     if (not Assigned(create_function)) or (not Assigned(FRunFunction)) or
         (not Assigned(FDestroyFunction)) then
         raise EInvalidOp.Create('invalid local-completion wrapper ABI');
@@ -333,6 +386,17 @@ begin
         Length(error_buffer));
     if FSession = nil then
         raise EInvalidOp.Create(ansi_buffer_text(error_buffer));
+    if FileExists(generator_model_path) and
+        Assigned(generator_create_function) and
+        Assigned(FGeneratorRunFunction) and
+        Assigned(FGeneratorDestroyFunction) then
+    begin
+        FillChar(error_buffer, SizeOf(error_buffer), 0);
+        generator_model_path_utf8 := UTF8Encode(generator_model_path);
+        FGeneratorSession := generator_create_function(
+            PAnsiChar(generator_model_path_utf8), PAnsiChar(index_path_utf8),
+            FModelThreads, @error_buffer[0], Length(error_buffer));
+    end;
     FLock.Acquire;
     try
         FReady := True;
@@ -402,6 +466,25 @@ begin
         @suffix_pinyin[0], Length(suffix_pinyin),
         @suffix_path[0], Length(suffix_path), @base_rank, @confidence,
         @error_buffer[0], Length(error_buffer)) <> 0;
+    if (not Result) and (error_buffer[0] = #0) and
+        (FGeneratorSession <> nil) and
+        Assigned(FGeneratorRunFunction) then
+    begin
+        FillChar(suffix_text, SizeOf(suffix_text), 0);
+        FillChar(suffix_pinyin, SizeOf(suffix_pinyin), 0);
+        FillChar(suffix_path, SizeOf(suffix_path), 0);
+        confidence := 0.0;
+        Result := FGeneratorRunFunction(FGeneratorSession,
+            PAnsiChar(context_utf8), PAnsiChar(query_utf8),
+            PAnsiChar(top1_text_utf8), PAnsiChar(top2_text_utf8),
+            c_generator_minimum_confidence,
+            @suffix_text[0], Length(suffix_text),
+            @suffix_pinyin[0], Length(suffix_pinyin),
+            @suffix_path[0], Length(suffix_path),
+            @confidence, @error_buffer[0], Length(error_buffer)) <> 0;
+        if Result then
+            base_rank := 1;
+    end;
     elapsed_ms := GetTickCount64 - started_at;
     if (not Result) and (error_buffer[0] <> #0) then
     begin
@@ -515,6 +598,16 @@ begin
     FLock.Acquire;
     try
         Result := FReady;
+    finally
+        FLock.Release;
+    end;
+end;
+
+function TncLocalCompletionHost.GeneratorReady: Boolean;
+begin
+    FLock.Acquire;
+    try
+        Result := FGeneratorSession <> nil;
     finally
         FLock.Release;
     end;
