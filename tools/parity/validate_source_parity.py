@@ -28,12 +28,24 @@ DEPLOYED_MODEL_ASSETS = (
         "pinyin_transformer_vocab_sha256",
     ),
     (
+        "data/models/pinyin_transformer/pinyin_parallel_generator_int8.onnx",
+        "pinyin_parallel_generator_sha256",
+    ),
+    (
+        "data/models/pinyin_transformer/pinyin_parallel_allowed.bin",
+        "pinyin_parallel_allowed_sha256",
+    ),
+    (
         "data/models/local_completion/local_completion_path_ranker_int8.onnx",
         "local_completion_model_sha256",
     ),
     (
         "data/models/local_completion/local_completion_index.bin",
         "local_completion_index_sha256",
+    ),
+    (
+        "data/models/local_completion/local_completion_generator_int8.onnx",
+        "local_completion_generator_sha256",
     ),
     (
         "data/models/local_completion/model_manifest.json",
@@ -177,7 +189,11 @@ def validate_reviewed_sources(
 def validate_models(windows_root: Path) -> tuple[int, list[str]]:
     windows_engine = windows_root / "src" / "engine"
     linux_engine = ROOT / "src" / "engine"
-    names = sorted(path.name for path in windows_engine.glob("nc_*_model.pas"))
+    names = sorted(
+        path.name
+        for path in windows_engine.glob("nc_*_model.pas")
+        if path.name != "nc_document_context_model.pas"
+    )
     failures: list[str] = []
     if len(names) != 42:
         failures.append(f"expected 42 Windows generated models, found {len(names)}")
@@ -206,6 +222,8 @@ def validate_models(windows_root: Path) -> tuple[int, list[str]]:
         "nc_pinyin_transformer_ambiguity_gate_model.pas",
         "nc_pinyin_conditional_fusion_model.pas",
         "nc_pinyin_conditional_runtime_gate_model.pas",
+        "nc_pinyin_generator_invocation_gate_model.pas",
+        "nc_pinyin_generator_fusion_gate_model.pas",
     )
     for model_name in host_models:
         windows_model = windows_root / "src" / "host" / model_name

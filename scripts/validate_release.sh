@@ -79,10 +79,10 @@ cassotis_require_command desktop-file-validate
 cassotis_require_command python3
 cassotis_require_command realpath
 if [[ -z "$quality_baseline" ]]; then
-    quality_baseline="$cassotis_root/tests/baselines/quality-v1.19.0-linux-$(uname -m).txt"
+    quality_baseline="$cassotis_root/tests/baselines/quality-v1.20.0-linux-$(uname -m).txt"
 fi
 if [[ -z "$completion_baseline" ]]; then
-    completion_baseline="$cassotis_root/tests/baselines/completion-quality-v1.19.0-linux-$(uname -m).txt"
+    completion_baseline="$cassotis_root/tests/baselines/completion-quality-v1.20.0-linux-$(uname -m).txt"
 fi
 for required in dictionary_path traditional_dictionary_path long_cases \
                 short_cases source_parity_report quality_baseline \
@@ -213,7 +213,13 @@ current = {
             "libonnxruntime.so.1.20.1",
             "libonnxruntime_providers_shared.so",
             "pinyin_transformer/pinyin_conditional_scorer_int8.onnx",
+            "pinyin_transformer/pinyin_parallel_generator_int8.onnx",
+            "pinyin_transformer/pinyin_parallel_allowed.bin",
             "pinyin_transformer/vocab.json",
+            "local_completion/local_completion_path_ranker_int8.onnx",
+            "local_completion/local_completion_generator_int8.onnx",
+            "local_completion/local_completion_index.bin",
+            "local_completion/model_manifest.json",
         )
     },
 }

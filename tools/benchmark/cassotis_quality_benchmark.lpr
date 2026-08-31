@@ -178,7 +178,7 @@ begin
     WriteLn('Usage: cassotis-quality-benchmark --dictionary DB [OPTIONS]');
     WriteLn('  --long-cases FILE    Windows long_sentence_16300.tsv');
     WriteLn('  --short-cases FILE   Windows word_input_yhwd_context.tsv');
-    WriteLn('  --neural-runtime DIR Enable the v1.19 conditional ONNX scorer');
+    WriteLn('  --neural-runtime DIR Enable the v1.20 ONNX scoring and generation runtime');
     WriteLn('  --report-dir DIR     Summary/failure output directory');
     WriteLn('  --long-limit N       Limit long cases (0 means all)');
     WriteLn('  --short-limit N      Limit short cases (0 means all)');

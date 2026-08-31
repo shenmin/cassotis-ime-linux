@@ -21,9 +21,9 @@ the final simplified and traditional databases from the tagged Cassotis
 Lexicon release into empty target files with the current importer. Do not
 enrich or reuse a database created by an older importer: source parity checks
 the base, completion-competition, pair-audit, and long-completion row counts
-in addition to the complete file hashes. The v1.19 gate also freezes the
-conditional Transformer model, generated gate and fusion models,
-local-completion model/index/manifest, native recall selector,
+in addition to the complete file hashes. The v1.20 gate also freezes the
+conditional Transformer model, constrained candidate generator, generated
+invocation/fusion gates, local-completion models/index/manifest, native recall selector,
 architecture-specific ONNX Runtime libraries, and native runtime bridge. Do
 not substitute any database, model, or runtime artifact after validation.
 

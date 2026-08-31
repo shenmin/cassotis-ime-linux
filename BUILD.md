@@ -21,8 +21,9 @@ are part of a full build, so their development headers are required even when
 only one adapter will be installed.
 
 The repository carries the reviewed ONNX Runtime 1.20.1 headers and native
-runtime libraries for x86_64 and aarch64, together with the deployed v1.19
-models. No system ONNX Runtime package, network download, CUDA toolkit, or GPU
+runtime libraries for x86_64 and aarch64, together with the deployed v1.20
+scoring and constrained-generation models. No system ONNX Runtime package,
+network download, CUDA toolkit, or GPU
 is required. `scripts/validate_runtime_assets.sh` selects the current native
 architecture and verifies every bundled model and runtime artifact by SHA-256
 before compilation.
@@ -168,7 +169,8 @@ Artifact names follow each packaging ecosystem's architecture convention:
 The `.tar.gz` files contain prebuilt, dynamically linked binaries for the
 named architecture. They are not source archives or distribution-independent
 packages. Each artifact also contains the matching ONNX Runtime libraries,
-the v1.19 Pinyin-conditioned long-sentence scorer and local-completion assets,
+the v1.20 Pinyin-conditioned scorer, constrained candidate generator, and
+local-completion assets,
 and the required third-party notices; end users do not install a separate
 inference runtime.
 

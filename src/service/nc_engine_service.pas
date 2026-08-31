@@ -325,7 +325,8 @@ begin
         Exit;
     left_context := Copy(context.SurroundingText, 1,
         context.CursorOffset);
-    FEngine.set_external_left_context(left_context);
+    FEngine.set_external_left_context(left_context,
+        IntToHex(context.Id, 16), left_context);
 end;
 
 function TncEngineService.KeyEventToVirtualKey(

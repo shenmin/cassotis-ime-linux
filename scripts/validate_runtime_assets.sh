@@ -57,8 +57,16 @@ verify_asset \
 verify_asset 'data/models/pinyin_transformer/vocab.json' \
     "$(baseline_value pinyin_transformer_vocab_sha256)"
 verify_asset \
+    'data/models/pinyin_transformer/pinyin_parallel_generator_int8.onnx' \
+    "$(baseline_value pinyin_parallel_generator_sha256)"
+verify_asset 'data/models/pinyin_transformer/pinyin_parallel_allowed.bin' \
+    "$(baseline_value pinyin_parallel_allowed_sha256)"
+verify_asset \
     'data/models/local_completion/local_completion_path_ranker_int8.onnx' \
     "$(baseline_value local_completion_model_sha256)"
+verify_asset \
+    'data/models/local_completion/local_completion_generator_int8.onnx' \
+    "$(baseline_value local_completion_generator_sha256)"
 verify_asset 'data/models/local_completion/local_completion_index.bin' \
     "$(baseline_value local_completion_index_sha256)"
 verify_asset 'data/models/local_completion/model_manifest.json' \

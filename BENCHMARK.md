@@ -21,13 +21,13 @@ corresponding model-training data.
 
 The current Linux engine is reviewed against:
 
-- Cassotis IME v1.19.0 (`089f63859eb73ac3d7355d8c5623c3ab70287266`)
-- Cassotis Lexicon v1.19.0 (`e66619094effccf5d4265ce4e716a50e9897d75c`)
+- Cassotis IME v1.20.0 (`318bf7fa89a238d4d6af4c024e8f41c9715e8d36`)
+- Cassotis Lexicon v1.20.0 (`ea78cdf430680847d0c5b88da5e116e505c8b6aa`)
 - Simplified dictionary schema 24, SHA-256
-  `e7f02bff9a334ff2289b7cdc0e32a2cc83abd5d2416d9ed4d5885e4c3cf9f77c`
+  `f4357388d78cc7557def22469ee631f766cf872c96e9330f47c7a196fcd192a8`
 - Traditional dictionary schema 24, SHA-256
-  `d54dbe54f314e6da350e9d7a4bddb269c0b268cfcd56fb48c9025b22dcde86ae`
-- Simplified/traditional base entries: 213,028 / 216,180
+  `faa35b6793da5e99e0f135a96b9986836b81568e38296456d999108a8c83bc5b`
+- Simplified/traditional base entries: 213,077 / 216,229
 - Simplified/traditional completion competition rows: 42,453 / 42,448
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379
 - Simplified long-completion tables: 35,423 visible paths and 97,589 total
@@ -39,8 +39,9 @@ The current Linux engine is reviewed against:
 manifest of the reviewed production engine, SQLite provider, pinyin parser,
 fuzzy-pinyin and shuangpin sources on both platforms, all 42 generated model
 units, expanded model evidence, and the frozen dictionary. It also binds the
-Transformer and local-completion models, their runtime index and manifest,
-the native inference bridge, the architecture-specific ONNX Runtime
+Transformer scorer, constrained Pinyin and completion generators, their
+runtime allow-list, index and manifest, the native inference bridge, the
+architecture-specific ONNX Runtime
 libraries, and the required lexical, completion-competition, pair-audit, and
 long-completion table populations. The manifest
 pins the reviewed Delphi and FPC adaptations
@@ -51,11 +52,16 @@ The small `tests/cases/candidate_quality.tsv` and
 traditional candidate behavior through the actual SQLite provider.
 The full quality gate also computes canonical failure signatures after
 excluding host-dependent latency. The deterministic short-word track requires
-an exact per-case signature. The v1.19 neural long-sentence track is guarded by
+an exact per-case signature. The v1.20 neural long-sentence track is guarded by
 aggregate rank floors instead: repeated equivalent ONNX Runtime evaluations
 can move a few samples across floating-point decision boundaries. Its failure
 TSV remains a complete local diagnostic, but an unstable hash is not presented
 as a reproducibility guarantee.
+
+The published corpus comparison disables persisted user learning and external
+document context, matching the Windows benchmark protocol. Document-local
+adaptation is validated separately by model and service tests so text from one
+application context cannot silently influence the frozen aggregate result.
 
 ## Full Linux Benchmark
 
@@ -82,7 +88,7 @@ python3 tools/parity/validate_quality_report.py \
   --dictionary /path/to/dict_sc.db \
   --long-cases /path/to/long_sentence_16300.tsv \
   --short-cases /path/to/word_input_yhwd_context.tsv \
-  --baseline tests/baselines/quality-v1.19.0-linux-x86_64.txt
+  --baseline tests/baselines/quality-v1.20.0-linux-x86_64.txt
 ```
 
 The long-sentence accuracy pass uses deterministic work limits and accepts a
@@ -97,6 +103,68 @@ latency, and Linux process RSS/high-water marks. Memory events contain only
 the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
+
+## Frozen v1.20.0 Port Results
+
+The v1.20.0 validation reuses the same separately supplied frozen corpus files
+as v1.19.0. They are not redistributed by this repository and remain bound by
+size and SHA-256:
+
+| Input | Cases | Bytes | SHA-256 |
+| --- | ---: | ---: | --- |
+| Long sentence | 16,300 | 2,673,936 | `3f50a9323ad798e691f86ea70c6dffa13b4a9f55b624fc3499a138258190ff0f` |
+| Short word with frozen context | 65,000 | 9,200,779 | `cd02fc1a24e89a106c200f4864d5ad2c11afd4c8d784059a4b6e9a10c51fbab8` |
+
+Ubuntu 26.04.1 x86_64 and Ubuntu 26.04.1 aarch64 produced the following native
+results with the reviewed v1.20.0 engine, schema-24 dictionary, document-local
+adaptation, conditional Transformer, and constrained candidate generators.
+External document context is disabled for this corpus comparison. Accuracy is
+deterministic and latency uses the deployed 30 ms neural-result budget:
+
+| Architecture | Track | Top1 | Top2 | Top5 | Top9 | Mean | P50 | P95 | Max |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | Long sentence | 11,088/16,300 | 12,402/16,300 | 12,402 | 12,402 | 184.969 ms | 180 ms | 363 ms | 936 ms |
+| x86_64 | Short word, context off | 60,346/65,000 | 63,163/65,000 | 64,498 | 64,619 | 8.967 ms | 7 ms | 23 ms | 68 ms |
+| x86_64 | Short word, context on | 61,827/65,000 | 63,517/65,000 | 64,540 | 64,619 | 10.059 ms | 8 ms | 25 ms | 66 ms |
+| aarch64 | Long sentence | 11,068/16,300 | 12,393/16,300 | 12,393 | 12,393 | 104.667 ms | 91 ms | 221 ms | 612 ms |
+| aarch64 | Short word, context off | 60,346/65,000 | 63,163/65,000 | 64,498 | 64,619 | 5.957 ms | 5 ms | 15 ms | 44 ms |
+| aarch64 | Short word, context on | 61,827/65,000 | 63,517/65,000 | 64,540 | 64,619 | 6.617 ms | 5 ms | 16 ms | 45 ms |
+
+The published Windows v1.20.0 reference is 11,065 Top1 and 12,376 Top2. Linux
+x86_64 is 23/26 cases higher and aarch64 is 3/17 cases higher. Relative to the
+frozen Linux v1.19.0 results, v1.20.0 gains 147 Top1 and 142 Top2 cases on
+x86_64, and 152 Top1 and 141 Top2 cases on aarch64. The 65,000-case short-word
+counts and exact failure signature remain identical on Windows, x86_64, and
+aarch64.
+
+Quality-run maximum RSS/high-water marks were 843,860/865,160 KiB on x86_64
+and 936,084/967,068 KiB on aarch64. The full completion processes peaked at
+976,620 KiB and 946,128 KiB respectively. Every value remains below the
+983,040 KiB release ceiling. Both clean native builds passed all 141 FPCUnit
+tests, the 22 simplified and 9 traditional candidate regressions, and the
+eight-context 8,300-key transport/restart stress test.
+
+The complete one-key-completion track continues to use the production 40 ms
+local-result acceptance limit:
+
+| Architecture | Local completion hit | Prompt coverage | Total keys saved | P95 |
+| --- | ---: | ---: | ---: | ---: |
+| x86_64 | 303/16,300 (1.86%) | 5,510/16,300 (33.80%) | 724 | 141 ms |
+| aarch64 | 349/16,300 (2.14%) | 6,283/16,300 (38.55%) | 829 | 99 ms |
+
+The Windows v1.20.0 publication records 357 hits, 6,475 prompts, 861 saved
+keys, and 42.672 ms P95. The slower x86_64 validation host crosses the fixed
+40 ms background-result boundary more often than aarch64, so its accepted
+prompt and hit counts are lower without changing the generator, confidence
+policy, or user-facing timeout. The range gate records this production
+behavior instead of increasing the timeout to manufacture parity.
+
+The separate deterministic 500-case neural smoke disables wall-clock cutoffs
+and freezes `A53F2BCDD29A210C` on x86_64 and `BB58A43A76877A5B` on aarch64.
+Unlike v1.19.0, v1.20.0 exercises a generative ONNX path whose beam decisions
+can cross floating-point boundaries between architectures. Each architecture
+therefore has its own exact smoke baseline while sharing the same model,
+allowed-output table, validation policy, and aggregate release floors.
 
 ## Frozen v1.19.0 Port Results
 

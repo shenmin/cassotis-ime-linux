@@ -6,7 +6,7 @@ Pascal engine, and renders preedit and lookup-table results through native IBus
 APIs. It does not contain dictionary, pinyin, learning, or ranking logic.
 
 The adapter uses the shared production candidate pipeline, including the full
-v1.19.0 exact, alias, prefix, jianpin, segmented-path, short-word, long-sentence,
+v1.20.0 exact, alias, prefix, jianpin, segmented-path, short-word, long-sentence,
 context-ranking, completion, and user-signal stages. It supports selection by
 space, number, mouse, and cursor movement; paging,
 backspace, Escape, and raw-pinyin commit with Enter; persistent cross-context
@@ -20,8 +20,9 @@ backtick key; an unmatched completion key remains an application key. This
 mapping keeps completion below ordinary candidates because GNOME Shell fixes
 IBus auxiliary text above the lookup table.
 
-Long-prefix static misses may enqueue the v1.19 constrained local-completion
-worker. The adapter polls the versioned engine result without blocking key
+Long-prefix static misses may enqueue the v1.20 constrained local-completion
+worker, including its gated fallback generator. The adapter polls the
+versioned engine result without blocking key
 delivery, applies only the matching context generation, and stops polling on
 focus loss, reset, disable, replacement by a newer request, or a bounded
 timeout. Neural inference and all acceptance rules remain in the shared engine

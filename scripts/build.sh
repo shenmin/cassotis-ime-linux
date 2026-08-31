@@ -80,12 +80,15 @@ install -d -m 0755 "$bin_dir/pinyin_transformer" \
     "$bin_dir/local_completion"
 install -m 0644 \
     "$cassotis_root/data/models/pinyin_transformer/pinyin_conditional_scorer_int8.onnx" \
+    "$cassotis_root/data/models/pinyin_transformer/pinyin_parallel_generator_int8.onnx" \
+    "$cassotis_root/data/models/pinyin_transformer/pinyin_parallel_allowed.bin" \
     "$cassotis_root/data/models/pinyin_transformer/vocab.json" \
     "$bin_dir/pinyin_transformer/"
 rm -f -- \
     "$bin_dir/pinyin_transformer/pinyin_difference_reranker_int8.onnx"
 install -m 0644 \
     "$cassotis_root/data/models/local_completion/local_completion_path_ranker_int8.onnx" \
+    "$cassotis_root/data/models/local_completion/local_completion_generator_int8.onnx" \
     "$cassotis_root/data/models/local_completion/local_completion_index.bin" \
     "$cassotis_root/data/models/local_completion/model_manifest.json" \
     "$bin_dir/local_completion/"

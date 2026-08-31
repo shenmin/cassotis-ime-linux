@@ -16,6 +16,7 @@ uses
     test_nc_ipc_payload,
     test_nc_ipc_dispatcher,
     test_nc_engine_context,
+    test_nc_document_context_model,
     test_nc_engine_service,
     test_nc_engine_pagination,
     test_nc_pinyin_parser,

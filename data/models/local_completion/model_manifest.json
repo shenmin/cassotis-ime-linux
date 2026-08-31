@@ -8,6 +8,17 @@
   },
   "model": "local_completion_path_ranker_int8.onnx",
   "model_sha256": "6edc062a96efd0ee74bd36e155749bd44fcdd1bd9df09e5985dfa3ba335b7584",
+  "fallback_generator": {
+    "model": "local_completion_generator_int8.onnx",
+    "model_sha256": "0e0ad90802ec148f228447017a1d7c7134e311408569c6240c347355cfae25e8",
+    "model_bytes": 57667734,
+    "parameters": 15795456,
+    "output_words": 1,
+    "minimum_confidence": -2.8333864,
+    "runtime_report_hits": 151,
+    "hybrid_runtime_report_hits": 353,
+    "latency_p95_ms": 4.698
+  },
   "float_model_bytes": 55473635,
   "int8_model_bytes": 24088747,
   "quantization": {
