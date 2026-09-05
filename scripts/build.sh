@@ -200,6 +200,7 @@ cassotis_require_executable "$bin_dir/cassotis-fcitx5-smoke"
 
 
 
+
 cassotis_require_command python3
 python3 -c 'import pathlib, sys; path = pathlib.Path(sys.argv[1]); compile(path.read_text(encoding="utf-8"), str(path), "exec")' \
     "$cassotis_root/adapters/ibus/cassotis_settings.py"

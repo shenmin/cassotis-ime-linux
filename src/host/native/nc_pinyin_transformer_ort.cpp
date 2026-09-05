@@ -58,6 +58,17 @@ int EffectiveThreadCount(int requested_threads) {
     return std::min(requested, static_cast<int>(available));
 }
 
+void ConfigureSessionOptions(Ort::SessionOptions& options, int intra_threads) {
+    options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
+    options.SetIntraOpNumThreads(EffectiveThreadCount(intra_threads));
+    options.SetInterOpNumThreads(1);
+    options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+    // Avoid saturating U8S8 intermediates on x86 CPUs without VNNI. ORT
+    // applies the exact U8U8 conversion only on affected CPUs; model files
+    // and their quantization scales remain unchanged.
+    options.AddConfigEntry("session.x64quantprecision", "1");
+}
+
 void ReleaseUnusedHeapPages() {
 #if defined(__GLIBC__)
     // ONNX Runtime sessions own large, shape-dependent buffers. Session
@@ -206,10 +217,7 @@ extern "C" CASSOTIS_EXPORT void* nc_pt_create(
             InitializationMutex());
         Ort::InitApi();
         Ort::SessionOptions options;
-        options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
-        options.SetIntraOpNumThreads(EffectiveThreadCount(intra_threads));
-        options.SetInterOpNumThreads(1);
-        options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+        ConfigureSessionOptions(options, intra_threads);
         auto handle = std::make_unique<SessionHandle>();
         handle->session = std::make_unique<Ort::Session>(Environment(), model_path, options);
         return handle.release();
@@ -401,10 +409,7 @@ extern "C" CASSOTIS_EXPORT void* nc_pg_create(
             InitializationMutex());
         Ort::InitApi();
         Ort::SessionOptions options;
-        options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
-        options.SetIntraOpNumThreads(EffectiveThreadCount(intra_threads));
-        options.SetInterOpNumThreads(1);
-        options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+        ConfigureSessionOptions(options, intra_threads);
         // Generators are sparse fallback paths. Avoid retaining a second ORT
         // arena at its worst-case shape beside the always-on scorer session.
         options.DisableMemPattern();
@@ -2390,10 +2395,7 @@ extern "C" CASSOTIS_EXPORT void* nc_lc_create(
             return nullptr;
         }
         Ort::SessionOptions options;
-        options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
-        options.SetIntraOpNumThreads(EffectiveThreadCount(intra_threads));
-        options.SetInterOpNumThreads(1);
-        options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+        ConfigureSessionOptions(options, intra_threads);
         handle->session = std::make_unique<Ort::Session>(
             Environment(), model_path, options);
         WarmLocalCompletionSession(*handle->session, handle->index);
@@ -2811,10 +2813,7 @@ extern "C" CASSOTIS_EXPORT void* nc_lcg_create(
             return nullptr;
         }
         Ort::SessionOptions options;
-        options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
-        options.SetIntraOpNumThreads(EffectiveThreadCount(intra_threads));
-        options.SetInterOpNumThreads(1);
-        options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+        ConfigureSessionOptions(options, intra_threads);
         // Keep the optional completion generator from retaining a separate
         // peak-shape arena for the lifetime of the engine service.
         options.DisableMemPattern();

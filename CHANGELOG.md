@@ -25,6 +25,13 @@
 - Made the long-sentence accuracy track use deterministic work limits and one
   ONNX inference thread to reduce concurrency-related variation; the separate
   latency track continues to exercise deployed inference concurrency.
+- Initialized shared long-search cache and expansion state before fast paths,
+  fixing candidate changes caused by undefined local values. Release validation
+  now compares recorded 500-case candidate/completion traces across fresh
+  process layouts.
+- Prevented saturating quantized inference on x86 CPUs without VNNI using the
+  runtime's precision mode, with an exact integer-arithmetic regression test.
+  Deployed models, dictionary weights, and candidate ranking policy are unchanged.
 - Hardened release validation so source-parity reports must match the current
   reviewed revisions and dictionary hashes, and artifact extraction uses a
   disk-backed, uniquely scoped temporary directory.
