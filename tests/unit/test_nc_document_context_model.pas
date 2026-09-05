@@ -22,6 +22,9 @@ type
         procedure RepeatedSnapshotRefreshIsIdempotent;
         procedure EmptyProtectedSnapshotClearsCachedTerms;
         procedure SlidingSnapshotsTrimStaleTerms;
+        procedure DocumentCompletionReturnsOnlySeenContinuations;
+        procedure DocumentCompletionDoesNotReadFutureText;
+        procedure DocumentCompletionFeedbackIsDocumentScoped;
     end;
 
 implementation
@@ -178,6 +181,74 @@ begin
             Inc(offset, 256);
         end;
         AssertEquals(0, model.score_text('uniquealpha'));
+    finally
+        model.Free;
+    end;
+end;
+
+procedure TncDocumentContextModelTests.DocumentCompletionReturnsOnlySeenContinuations;
+var
+    model: TncDocumentContextModel;
+    results: TncDocumentContinuationList;
+    idx: Integer;
+    found: Boolean;
+begin
+    model := TncDocumentContextModel.Create;
+    try
+        model.set_snapshot('doc-a',
+            'earlier sharedanchortargetphrase later');
+        AssertTrue(model.lookup_continuations('sharedanchor', 16, results));
+        found := False;
+        for idx := 0 to High(results) do
+            if results[idx].suffix_text = 'targetphrase' then
+            begin
+                found := True;
+                AssertTrue(results[idx].context_width >= 4);
+                Break;
+            end;
+        AssertTrue(found);
+    finally
+        model.Free;
+    end;
+end;
+
+procedure TncDocumentContextModelTests.DocumentCompletionDoesNotReadFutureText;
+var
+    model: TncDocumentContextModel;
+    results: TncDocumentContinuationList;
+begin
+    model := TncDocumentContextModel.Create;
+    try
+        model.set_snapshot('doc-a', 'sharedanchor');
+        AssertFalse(model.lookup_continuations('sharedanchor', 16, results));
+        AssertEquals(0, Length(results));
+    finally
+        model.Free;
+    end;
+end;
+
+procedure TncDocumentContextModelTests.DocumentCompletionFeedbackIsDocumentScoped;
+var
+    model: TncDocumentContextModel;
+    accepted_score: Integer;
+begin
+    model := TncDocumentContextModel.Create;
+    try
+        model.set_snapshot('doc-a', 'sharedanchortargetphrase');
+        model.record_completion_feedback('sharedanchor', 'targetphrase', True);
+        accepted_score := model.completion_feedback_score(
+            'sharedanchor', 'targetphrase');
+        AssertTrue(accepted_score > 0);
+        model.set_snapshot('doc-a', 'sharedanchortargetphrase');
+        AssertEquals(accepted_score, model.completion_feedback_score(
+            'sharedanchor', 'targetphrase'));
+        model.record_completion_feedback('sharedanchor', 'targetphrase', False);
+        AssertTrue(model.completion_feedback_score(
+            'sharedanchor', 'targetphrase') < accepted_score);
+
+        model.set_snapshot('doc-b', 'otherdocumentcontent');
+        AssertEquals(0, model.completion_feedback_score(
+            'sharedanchor', 'targetphrase'));
     finally
         model.Free;
     end;

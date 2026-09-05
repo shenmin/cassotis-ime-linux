@@ -150,6 +150,8 @@ compile_target "$cassotis_root/tools/integration/cassotis_neural_engine_smoke.lp
     cassotis-neural-engine-smoke
 compile_target "$cassotis_root/tools/benchmark/cassotis_completion_benchmark.lpr" \
     cassotis-completion-benchmark
+compile_target "$cassotis_root/tools/benchmark/cassotis_short_completion_benchmark.lpr" \
+    cassotis-short-completion-benchmark
 
 cassotis_require_command cc
 cassotis_require_command pkg-config

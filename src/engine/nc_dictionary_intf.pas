@@ -35,6 +35,9 @@ type
             const baseline_full_pinyin, baseline_text: string;
             const challenger_full_pinyin, challenger_text: string;
             out audit: TncOneKeyCompletionPairAudit): Boolean; virtual;
+        function resolve_exact_text_prefix(const text: string;
+            const max_segments, max_units: Integer;
+            out resolved: TncExactTextPath): Boolean; virtual;
         procedure record_one_key_completion_accept(const typed_prefix: string;
             const full_pinyin: string; const text: string); virtual;
         procedure record_one_key_completion_reject(const typed_prefix: string;
@@ -178,6 +181,14 @@ function TncDictionaryProvider.lookup_one_key_completion_pair_audit(
     out audit: TncOneKeyCompletionPairAudit): Boolean;
 begin
     audit := Default(TncOneKeyCompletionPairAudit);
+    Result := False;
+end;
+
+function TncDictionaryProvider.resolve_exact_text_prefix(
+    const text: string; const max_segments, max_units: Integer;
+    out resolved: TncExactTextPath): Boolean;
+begin
+    resolved := Default(TncExactTextPath);
     Result := False;
 end;
 

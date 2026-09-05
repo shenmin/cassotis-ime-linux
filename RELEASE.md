@@ -7,11 +7,14 @@ package.
 
 The full automated release-gated targets are Ubuntu 26.04.1 x86_64 and Ubuntu
 26.04.1 aarch64 on GNOME Wayland. Do not publish a binary for another
-architecture/session merely because it compiles. At minimum, run the native
-test suite, simplified/traditional regressions, quality and memory gates,
-artifact validation, package installation, installed-engine self-test, and
-the complete desktop matrix. State any missing manual-GUI coverage explicitly;
-manual application checks remain required for both current architectures.
+architecture/session merely because it compiles. The complete release process
+must include the native test suite, simplified/traditional regressions,
+quality and memory gates, artifact validation, final-package installation,
+installed-engine self-test, and the complete desktop matrix. The automated
+gate validates the staged Debian payload; installing its final package is part
+of the subsequent manual host check. State any missing manual-GUI coverage
+explicitly; manual application checks remain required for both current
+architectures.
 
 ## 1. Freeze Inputs
 
@@ -21,11 +24,12 @@ the final simplified and traditional databases from the tagged Cassotis
 Lexicon release into empty target files with the current importer. Do not
 enrich or reuse a database created by an older importer: source parity checks
 the base, completion-competition, pair-audit, and long-completion row counts
-in addition to the complete file hashes. The v1.20 gate also freezes the
+in addition to the complete file hashes. The v1.21 gate also freezes the
 conditional Transformer model, constrained candidate generator, generated
-invocation/fusion gates, local-completion models/index/manifest, native recall selector,
-architecture-specific ONNX Runtime libraries, and native runtime bridge. Do
-not substitute any database, model, or runtime artifact after validation.
+invocation/fusion gates, local-completion models/index/manifest, all three
+reviewed native recall-selector source units, architecture-specific ONNX
+Runtime libraries, and the native runtime bridge. Do not substitute any
+database, model, or runtime artifact after validation.
 
 ## 2. Source And Dictionary Parity
 
@@ -42,6 +46,9 @@ Both referenced repositories must be at the recorded revisions with clean
 worktrees, and the command must report `"ok": true`. The official release
 package must use the matching simplified and traditional databases from the
 same lexicon release; the full gate rejects a missing traditional database.
+The full gate also rechecks the report's Windows and lexicon revisions and
+both database hashes against `porting/windows-baseline.txt`, so a successful
+report from an older baseline cannot be reused.
 
 Keep the resulting report with the release. The full gate binds its dictionary
 hash to this report, so a report from another database cannot be reused.
@@ -70,23 +77,33 @@ source. The command is successful only after all of these pass:
 3. Frozen simplified and traditional candidate parity.
 4. Multi-client IBus transport, malformed-frame, restart, latency, and
    bounded-memory stress tests against an isolated socket and user database.
-5. Complete 16,300 + 65,000 x 2 quality, latency, and peak-memory benchmark.
-6. Complete 16,300-case static-plus-neural one-key-completion benchmark with
+5. Complete 16,300 + 65,000 x 2 quality, latency, and peak-memory benchmark;
+   the deterministic long-sentence accuracy pass must use one ONNX inference
+   thread, while the latency pass retains deployed concurrency.
+6. Complete 12,831-opportunity short-word one-key-completion benchmark with
+   exact visible-result signature and architecture-specific latency bounds.
+7. Complete 16,300-case static-plus-neural one-key-completion benchmark with
    the deployed 40 ms result budget and architecture-specific quality/latency
    floors.
-7. Portable and Debian payload extraction, exact simplified/traditional
+8. Portable and Debian payload extraction, exact simplified/traditional
    dictionary hashes, checksums, dependencies, desktop-entry metadata,
    install/uninstall round-trip, and isolated adapter execution.
-8. IBus and Fcitx 5 desktop platform matrix with state restoration.
+9. IBus and Fcitx 5 desktop platform matrix with state restoration.
 
 `release-validation/STATUS` must contain `passed` and
 `release-validation.json` must contain `"ok": true`.
 
+Release-artifact extraction uses the disk-backed
+`build/release-validation-tmp/` directory by default rather than the system
+`/tmp`, which may be a small tmpfs. Set `CASSOTIS_RELEASE_TMPDIR` to another
+disk-backed directory when needed. The validator creates one unique child
+directory there and removes only that child when it exits.
+
 If a long benchmark must be resumed, `--skip-benchmark` is accepted only when
-both saved benchmark reports exist and the saved benchmark manifest exactly
-matches the current quality and completion benchmark binaries, dictionary,
-long cases, short cases, native bridge, ONNX Runtime libraries, Transformer
-model, and Transformer vocabulary by SHA-256.
+all three saved benchmark reports exist and the saved benchmark manifest
+exactly matches the current quality, long-completion, and short-completion
+benchmark binaries, dictionary, long cases, short cases, native bridge, ONNX
+Runtime libraries, Transformer model, and Transformer vocabulary by SHA-256.
 
 ## 4. Manual Desktop Check
 

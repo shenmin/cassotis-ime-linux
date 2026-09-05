@@ -21,13 +21,13 @@ corresponding model-training data.
 
 The current Linux engine is reviewed against:
 
-- Cassotis IME v1.20.0 (`318bf7fa89a238d4d6af4c024e8f41c9715e8d36`)
-- Cassotis Lexicon v1.20.0 (`ea78cdf430680847d0c5b88da5e116e505c8b6aa`)
+- Cassotis IME v1.21.0 (`a06df4c9150ac4fcd140b8709c53c5b7bf7e1be4`)
+- Cassotis Lexicon v1.21.0 (`63f4df366f3b62d4ebad2e3192811d5d1e4e3f2b`)
 - Simplified dictionary schema 24, SHA-256
-  `f4357388d78cc7557def22469ee631f766cf872c96e9330f47c7a196fcd192a8`
+  `fc6800d88d67d3b68b6ccb1b9f1832cd5f5a17598c5b28a9109f9da12985ee37`
 - Traditional dictionary schema 24, SHA-256
-  `faa35b6793da5e99e0f135a96b9986836b81568e38296456d999108a8c83bc5b`
-- Simplified/traditional base entries: 213,077 / 216,229
+  `845d7c63de2d03ba6bacac66c699b99c5256afe58332eacb2326ca42a9682681`
+- Simplified/traditional base entries: 213,233 / 216,385
 - Simplified/traditional completion competition rows: 42,453 / 42,448
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379
 - Simplified long-completion tables: 35,423 visible paths and 97,589 total
@@ -40,7 +40,8 @@ manifest of the reviewed production engine, SQLite provider, pinyin parser,
 fuzzy-pinyin and shuangpin sources on both platforms, all 42 generated model
 units, expanded model evidence, and the frozen dictionary. It also binds the
 Transformer scorer, constrained Pinyin and completion generators, their
-runtime allow-list, index and manifest, the native inference bridge, the
+runtime allow-list, index and manifest, the native inference bridge, three
+reviewed native completion-selector source units, the
 architecture-specific ONNX Runtime
 libraries, and the required lexical, completion-competition, pair-audit, and
 long-completion table populations. The manifest
@@ -52,11 +53,12 @@ The small `tests/cases/candidate_quality.tsv` and
 traditional candidate behavior through the actual SQLite provider.
 The full quality gate also computes canonical failure signatures after
 excluding host-dependent latency. The deterministic short-word track requires
-an exact per-case signature. The v1.20 neural long-sentence track is guarded by
-aggregate rank floors instead: repeated equivalent ONNX Runtime evaluations
-can move a few samples across floating-point decision boundaries. Its failure
-TSV remains a complete local diagnostic, but an unstable hash is not presented
-as a reproducibility guarantee.
+an exact per-case signature. The v1.21 neural long-sentence track is guarded by
+aggregate rank floors instead: repeated runs have shown a small number of
+candidate differences. Floating-point and runtime behavior can contribute,
+but the precise cause of each differing case has not been established. Its
+failure TSV remains a complete local diagnostic; an unstable hash is not
+presented as a reproducibility guarantee.
 
 The published corpus comparison disables persisted user learning and external
 document context, matching the Windows benchmark protocol. Document-local
@@ -88,21 +90,92 @@ python3 tools/parity/validate_quality_report.py \
   --dictionary /path/to/dict_sc.db \
   --long-cases /path/to/long_sentence_16300.tsv \
   --short-cases /path/to/word_input_yhwd_context.tsv \
-  --baseline tests/baselines/quality-v1.20.0-linux-x86_64.txt
+  --baseline tests/baselines/quality-v1.21.0-linux-x86_64.txt
 ```
 
-The long-sentence accuracy pass uses deterministic work limits and accepts a
-completed Transformer decision without a wall-clock cutoff. A separate
-production-mode pass measures latency with the deployed 30 ms neural-result
-acceptance budget. Both passes use the same model and bounded search; this
-separation prevents transient host load from changing the frozen accuracy
-result while retaining realistic production latency behavior.
+The long-sentence accuracy pass uses deterministic work limits, single-threaded
+ONNX inference, and accepts a completed Transformer decision without a
+wall-clock cutoff. A separate production-mode pass measures latency with the
+deployed model concurrency and 30 ms diagnostic threshold. In v1.21, a
+completed synchronous inference remains eligible even after that threshold;
+it is not a cancellation deadline. Both passes use the same model and bounded
+search. The separation reduces concurrency-related accuracy variation while
+retaining realistic production latency, but does not guarantee bitwise-identical
+neural decisions across runs or platforms. The separate asynchronous completion
+benchmark still uses its deployed 40 ms result-acceptance deadline.
 
 The runner reports Top1/Top2/Top5/Top9 counts, mean/P50/P95/maximum query
 latency, and Linux process RSS/high-water marks. Memory events contain only
 the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
+
+## Frozen v1.21.0 Port Results
+
+The v1.21.0 port uses the same separately supplied 16,300 long-sentence and
+65,000 short-word cases as v1.20.0, with the input sizes and SHA-256 hashes
+listed in the next section. The following qualification measurements were
+made on Ubuntu 26.04.1 GNOME Wayland hosts on 2026-09-05. Release packages
+must pass the complete gate again from their exact source revision; these
+measurements do not replace the per-release validation records.
+
+| Architecture | Long Top1 | Long Top2 / Top5 / Top9 | Mean | P50 | P95 | Maximum |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 11,094/16,300 | 12,403/16,300 | 187.938 ms | 181 ms | 371 ms | 1,001 ms |
+| aarch64 | 11,090/16,300 | 12,412/16,300 | 76.876 ms | 72 ms | 142 ms | 622 ms |
+
+Windows v1.21.0 publishes Top1 11,080 and Top2 12,395. The Linux counts are
+higher by 14/8 cases on x86_64 and 10/17 on aarch64. The release floors require
+at least the published Windows counts on each architecture, not reduced
+platform-specific accuracy targets. This is aggregate parity, not per-case
+identity: compared with a rerun of the exact Windows tag, aarch64 gained 69
+Top1 cases and lost 59, with 170 differing target ranks overall. The cause
+of every neural difference has not been established. Timing is host-dependent
+and must not be interpreted as a cross-platform implementation speed ratio.
+
+The complete short-word tracks have the same counts on both Linux
+architectures and Windows:
+
+| Track | Top1 / 65,000 | Top2 / 65,000 | Top5 | Top9 | Contested Top1 / 11,728 | Contested Top2 / 11,728 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Context disabled | 60,346 | 63,163 | 64,499 | 64,620 | 8,737 | 10,528 |
+| Context enabled | 61,827 | 63,517 | 64,541 | 64,620 | 9,596 | 10,775 |
+
+The exact short-word failure signature is 7,827 rows with SHA-256
+`18cad226349cbfd1451c35c25f9572b3e004f121c79c5c22658fe47b970b207b`.
+The long-sentence process reached RSS/high-water marks of 1,005,416 KiB on
+x86_64 and 792,300 KiB on aarch64, both below the existing 1,048,576 KiB gate.
+Both architectures passed 146 FPCUnit tests, 22 simplified and 9 traditional
+candidate regressions, and the five-stage automated IBus/Fcitx matrix.
+
+Short-word one-key completion now has a native benchmark using the same
+12,831 incremental-prefix opportunities and frozen left context as Windows:
+
+| Architecture | Completion Hit | Avg Keys Saved | Stability | P95 |
+| --- | ---: | ---: | ---: | ---: |
+| x86_64 | 9,420/12,831 | 2.548 | 1,691/1,749 | 3 ms |
+| aarch64 | 9,420/12,831 | 2.548 | 1,691/1,749 | 2 ms |
+
+Both architectures save 24,006 keys and produce the exact visible-decision
+signature `D33AC07C1551CAA1`, matching the rerun of the exact Windows v1.21.0
+tag. The Windows README's published historical row reports 9,419 hits and
+2.549 average keys saved; that published value is not silently replaced by
+the one-case-higher rerun.
+
+The separate 16,300-case production long-completion track retains the real
+40 ms asynchronous result-acceptance deadline:
+
+| Architecture | Local Completion Hit | Prompt Coverage | Total Keys Saved | P95 |
+| --- | ---: | ---: | ---: | ---: |
+| x86_64 | 275/16,300 | 5,101/16,300 | 700 | 141 ms |
+| aarch64 | 348/16,300 | 6,281/16,300 | 825 | 100 ms |
+
+Windows publishes 357 hits, 6,475 prompts and 861 keys saved. This timed
+background track does not match those counts on the validation hosts, unlike
+the deterministic short-completion track. Results arriving after the deployed
+deadline remain rejected; the gate does not increase the deadline to manufacture
+matching results. The 500-case deadline-free smoke uses the exact per-architecture
+signatures `7190F18DE6E96FEC` (x86_64) and `BB58A43A76877A5B` (aarch64).
 
 ## Frozen v1.20.0 Port Results
 

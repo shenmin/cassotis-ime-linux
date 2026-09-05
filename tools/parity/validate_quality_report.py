@@ -217,6 +217,10 @@ def validate_baseline(
             "metadata.long_accuracy_neural_timeout_ms",
             "long.accuracy_neural_timeout_ms",
         ),
+        (
+            "metadata.long_accuracy_neural_threads",
+            "long.accuracy_neural_threads",
+        ),
         ("metadata.long_latency_mode", "long.latency_mode"),
         (
             "metadata.long_latency_neural_timeout_ms",

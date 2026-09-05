@@ -4,24 +4,27 @@
 
 | Platform | IBus | Fcitx 5 | Status |
 | --- | --- | --- | --- |
-| Ubuntu 26.04 x86_64, GNOME, Wayland | Native adapter, real daemon input-context smoke | Native addon, official testfrontend plus desktop discovery/reload | Automated release gate passed |
-| Ubuntu 26.04 x86_64, GNOME, X11 | Expected from the same framework APIs | Expected from the same framework APIs | Not yet release-gated |
-| Ubuntu 26.04.1 aarch64, GNOME, Wayland | Native adapter, real daemon input-context smoke | Native addon, official testfrontend plus desktop discovery/reload | Automated release gate passed |
+| Ubuntu 26.04.1 x86_64, GNOME, Wayland | Native adapter, real daemon input-context smoke | Native addon, official testfrontend plus desktop discovery/reload | Automated framework matrix passed |
+| Ubuntu 26.04.1 x86_64, GNOME, X11 | Expected from the same framework APIs | Expected from the same framework APIs | Not yet release-gated |
+| Ubuntu 26.04.1 aarch64, GNOME, Wayland | Native adapter, real daemon input-context smoke | Native addon, official testfrontend plus desktop discovery/reload | Automated framework matrix passed |
 | Other distributions | Source build | Source build | Community-tested; no repackaged Debian binaries |
 
-The x86_64 release-gated host uses Linux 7.0.0, Free Pascal 3.2.2, IBus
+The x86_64 release-gated host uses Ubuntu 26.04.1, Linux 7.0.0-30,
+Free Pascal 3.2.2, IBus
 1.5.34-rc2, and Fcitx 5.1.19. Its automated desktop matrix was last completed
-on 2026-08-28. Native ARM64 validation was completed on 2026-08-28
+on 2026-09-05. Native ARM64 validation was completed on 2026-09-05
 using Ubuntu 26.04.1, Linux 7.0.0-30, Free Pascal 3.2.2, IBus 1.5.34-rc2, and
 Fcitx 5.1.19. Package/portable validation uses the same native binaries and
 schema-24 simplified/traditional dictionaries.
 
-Both architecture runs covered the core test suite, simplified/traditional
-dictionary regressions, frozen corpus quality and memory gates, neural-runtime
-smokes, portable/Debian payload parity and integrity, real package installation
-checks, installed-engine self-test, and all five automated IBus/Fcitx desktop
-matrix stages. Manual application focus, rendering, and desktop appearance
-remain checklist items on both architectures.
+Both architecture qualification runs covered the core test suite, simplified/traditional
+dictionary regressions, frozen corpus quality and memory measurements, neural-runtime
+smokes, portable/Debian payload parity and integrity, package metadata,
+staged-engine checks, and all five automated IBus/Fcitx desktop matrix stages.
+Each binary release must separately pass the full gate from its exact source
+revision. Installing the final Debian package, application focus,
+rendering, and desktop appearance remain manual checklist items on both
+architectures.
 
 Both framework adapters are deliberately thin. Parsing, dictionaries,
 ranking, completion, settings state, and user learning live in the same local

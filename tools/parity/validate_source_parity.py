@@ -235,15 +235,26 @@ def validate_models(windows_root: Path) -> tuple[int, list[str]]:
         ) != normalize_generated_pascal(linux_model):
             failures.append(f"Transformer host model differs: {model_name}")
 
-    selector_name = "nc_local_completion_recall_selector.inc"
-    windows_selector = windows_root / "src" / "host" / "native" / selector_name
-    linux_selector = ROOT / "src" / "host" / "native" / selector_name
-    if not windows_selector.is_file() or not linux_selector.is_file():
-        failures.append(f"missing local-completion recall selector: {selector_name}")
-    elif normalized_source_sha256(
-        windows_selector.read_bytes()
-    ) != normalized_source_sha256(linux_selector.read_bytes()):
-        failures.append(f"local-completion recall selector differs: {selector_name}")
+    selector_names = (
+        "nc_local_completion_recall_selector.inc",
+        "nc_local_completion_combined_recall_selector.inc",
+        "nc_local_completion_phonetic_recall_selector.inc",
+    )
+    for selector_name in selector_names:
+        windows_selector = (
+            windows_root / "src" / "host" / "native" / selector_name
+        )
+        linux_selector = ROOT / "src" / "host" / "native" / selector_name
+        if not windows_selector.is_file() or not linux_selector.is_file():
+            failures.append(
+                f"missing local-completion recall selector: {selector_name}"
+            )
+        elif normalized_source_sha256(
+            windows_selector.read_bytes()
+        ) != normalized_source_sha256(linux_selector.read_bytes()):
+            failures.append(
+                f"local-completion recall selector differs: {selector_name}"
+            )
     return len(names), failures
 
 

@@ -85,7 +85,9 @@ mapfile -t deb_packages < <(
 [[ ${#deb_packages[@]} -eq 1 ]] ||
     cassotis_die 'expected exactly one Debian package'
 
-temporary_dir="$(mktemp -d)"
+validation_tmp_root="${CASSOTIS_RELEASE_TMPDIR:-$cassotis_root/build/release-validation-tmp}"
+mkdir -p "$validation_tmp_root"
+temporary_dir="$(mktemp -d "$validation_tmp_root/release-artifacts.XXXXXX")"
 trap 'rm -rf -- "$temporary_dir"' EXIT
 portable_extract="$temporary_dir/portable"
 deb_extract="$temporary_dir/deb"

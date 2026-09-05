@@ -1,8 +1,8 @@
 schema_version: 2
-windows_tag: v1.20.0
-windows_baseline: 318bf7fa89a238d4d6af4c024e8f41c9715e8d36
-lexicon_tag: v1.20.0
-lexicon_baseline: ea78cdf430680847d0c5b88da5e116e505c8b6aa
+windows_tag: v1.21.0
+windows_baseline: a06df4c9150ac4fcd140b8709c53c5b7bf7e1be4
+lexicon_tag: v1.21.0
+lexicon_baseline: 63f4df366f3b62d4ebad2e3192811d5d1e4e3f2b
 dictionary_schema: 24
 units:
   - windows: src/common/nc_types.pas
@@ -32,11 +32,11 @@ units:
   - windows: src/engine/nc_engine_intf.pas
     linux: src/engine/nc_engine_intf.pas
     status: ported-production-engine
-    notes: Candidate recall, short/long ranking, document-local adaptation, Pinyin-conditioned Transformer reranking and generation, constrained asynchronous local completion, context, user learning, deletion, completion, all seven pinyin schemes, fuzzy recall, and input-state behavior follow the Windows v1.20.0 source; anonymous comparer calls use stable explicit FPC sorts, and the Linux service supplies context, worker, and IPC lifecycle around TncEngine.
+    notes: Candidate recall, short/long ranking, document-local adaptation and copy completion, Pinyin-conditioned Transformer reranking and generation, constrained asynchronous local completion, context, user learning, deletion, completion, all seven pinyin schemes, fuzzy recall, and input-state behavior follow the Windows v1.21.0 source. Exact lexicon prefixes remain visible, deterministic work budgets protect corpus accuracy, and the Linux service supplies context, worker, and IPC lifecycle around TncEngine; anonymous comparer calls use stable explicit FPC sorts.
   - windows: src/engine/nc_document_context_model.pas
     linux: src/engine/nc_document_context_model.pas
     status: ported-baseline
-    notes: Bounded snapshot merging, n-gram evidence, document-key isolation, protected-context clearing, score caps, and generated tests are preserved; IBus and Fcitx surrounding text supplies the snapshot at the platform boundary.
+    notes: Bounded snapshot merging, n-gram evidence, document-key isolation, continuation lookup, accept/reject feedback, protected-context clearing, score caps, and generated tests are preserved. Framework composition reset retains evidence for the same live context, while deactivation and context destruction clear it; IBus and Fcitx surrounding text supplies the snapshot at the platform boundary.
   - windows: src/engine/nc_*_model.pas and src/engine/nc_short_context_expanded_evidence.pas
     linux: src/engine/nc_*_model.pas and src/engine/nc_short_context_expanded_evidence.pas
     status: ported-generated-models
@@ -44,7 +44,7 @@ units:
   - windows: src/host/nc_pinyin_transformer_host.pas, src/host/nc_local_completion_host.pas, src/host/native/nc_pinyin_transformer_ort.cpp
     linux: src/host/nc_pinyin_transformer_host.pas, src/host/nc_local_completion_host.pas, src/host/native/nc_pinyin_transformer_ort.cpp
     status: ported-platform-adaptation
-    notes: Windows DLL loading, UTF-16 paths, file mapping, and main-thread callbacks were replaced by ELF loading, UTF-8 paths, mmap, and a bounded Linux worker queue. The v1.20.0 conditional sequence scorer, constrained Pinyin and completion generators, learned invocation/runtime/fusion gates, multi-level completion index, native recall selector, confidence checks, timeout semantics, and fail-closed behavior are retained for x86_64 and aarch64. Sparse generator arenas and glibc heap reclamation are Linux lifecycle adaptations and do not alter model inputs or decisions.
+    notes: Windows DLL loading, UTF-16 paths, file mapping, and main-thread callbacks were replaced by ELF loading, UTF-8 paths, mmap, and a bounded Linux worker queue. The v1.21.0 conditional sequence scorer, constrained Pinyin and completion generators, learned invocation/runtime/fusion gates, multi-level completion index, lexical/combined/phonetic native recall selectors, confidence checks, completed-inference timeout semantics, and fail-closed behavior are retained for x86_64 and aarch64. Sparse generator arenas and glibc heap reclamation are Linux lifecycle adaptations and do not alter model inputs or decisions.
   - windows: src/tsf
     linux: adapters/fcitx5 and adapters/ibus
     status: redesigned-native-thin-adapters

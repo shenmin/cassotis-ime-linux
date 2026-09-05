@@ -38,6 +38,7 @@ type
         procedure DeletesOnlySelectedUserCandidateWithControlDelete;
         procedure ClearsUserDictionaryWithoutResettingSettings;
         procedure ProvidesAndAcceptsExactOneKeyCompletion;
+        procedure ResetContextPreservesDocumentCompletionEvidence;
         procedure AppliesControlledFuzzyExactRecall;
         procedure SupportsAllShuangpinSchemes;
         procedure LearnsShuangpinSelectionWithCanonicalQuery;
@@ -1506,6 +1507,53 @@ begin
     end;
 end;
 
+procedure TncEngineServiceTests.ResetContextPreservesDocumentCompletionEvidence;
+var
+    service: TncEngineService;
+    engine_result: TncEngineResult;
+    document_text: string;
+    expected_completion: string;
+    generation: QWord;
+
+    procedure TypeInput;
+    const
+        c_input = 'nihao';
+    var
+        input_index: Integer;
+    begin
+        for input_index := 1 to Length(c_input) do
+        begin
+            Inc(generation);
+            engine_result := service.ProcessKey(25, generation,
+                LetterEvent(c_input[input_index]));
+        end;
+    end;
+begin
+    expected_completion := UnicodeString(WideChar($4F60)) + WideChar($597D) +
+        WideChar($4E16) + WideChar($754C);
+    document_text := expected_completion + expected_completion;
+    generation := 0;
+    service := TncEngineService.Create(FDatabasePath);
+    try
+        AssertTrue(service.CreateContext(25));
+        Inc(generation);
+        AssertTrue(service.SetActive(25, True, generation));
+        Inc(generation);
+        AssertTrue(service.SetSurrounding(25, document_text,
+            Length(document_text), generation));
+        TypeInput;
+        AssertEquals(expected_completion, engine_result.completion_text);
+
+        Inc(generation);
+        AssertTrue(service.ResetContext(25, generation));
+        TypeInput;
+        AssertEquals('framework reset must retain same-document completion',
+            expected_completion, engine_result.completion_text);
+    finally
+        service.Free;
+    end;
+end;
+
 procedure TncEngineServiceTests.ShowsIncrementalPrefixCandidates;
 var
     service: TncEngineService;
@@ -1517,7 +1565,8 @@ begin
         engine_result := service.ProcessKey(4, 1, LetterEvent('w'));
         AssertTrue(engine_result.handled);
         AssertEquals(UnicodeString('w'), engine_result.preedit_text);
-        AssertEquals(2, Length(engine_result.candidates));
+        AssertTrue('complete prefix alternatives must remain visible',
+            Length(engine_result.candidates) >= 2);
         AssertEquals(UnicodeString(WideChar($6211)),
             engine_result.candidates[0].text);
         AssertEquals(UnicodeString(WideChar($4E3A)),
@@ -1544,7 +1593,8 @@ begin
 
         engine_result := service.ProcessKey(4, 7, LetterEvent('o'));
         AssertEquals('nihao', engine_result.preedit_text);
-        AssertEquals(2, Length(engine_result.candidates));
+        AssertTrue('complete exact alternatives must remain visible',
+            Length(engine_result.candidates) >= 2);
         AssertEquals(UnicodeString(WideChar($4F60)) + WideChar($597D),
             engine_result.candidates[0].text);
         AssertEquals(UnicodeString(WideChar($62DF)) + WideChar($597D),
@@ -1589,7 +1639,8 @@ begin
                 LetterEvent(input_text[index]));
         AssertTrue(engine_result.handled);
         AssertEquals('nihao', engine_result.preedit_text);
-        AssertEquals(2, Length(engine_result.candidates));
+        AssertTrue('complete exact alternatives must remain visible',
+            Length(engine_result.candidates) >= 2);
         AssertEquals(UnicodeString(WideChar($4F60)) + WideChar($597D),
             engine_result.candidates[0].text);
         AssertEquals(0, engine_result.selected_index);

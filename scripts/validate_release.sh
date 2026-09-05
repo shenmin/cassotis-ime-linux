@@ -11,6 +11,7 @@ short_cases=''
 source_parity_report=''
 quality_baseline=''
 completion_baseline=''
+short_completion_baseline=''
 report_dir="$cassotis_root/release-validation"
 skip_build=0
 skip_benchmark=0
@@ -26,8 +27,10 @@ Options:
   --report-dir DIR              Validation output directory.
   --quality-baseline FILE       Quality/latency release thresholds.
   --completion-baseline FILE    Full completion release thresholds.
+  --short-completion-baseline FILE
+                                Short completion release thresholds.
   --skip-build                  Reuse build/bin.
-  --skip-benchmark              Reuse saved quality and completion reports.
+  --skip-benchmark              Reuse all three saved benchmark reports.
   --skip-desktop                Skip Fcitx desktop discovery/reload.
 EOF
 }
@@ -61,6 +64,10 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] ||
                 cassotis_die '--completion-baseline requires a path'
             completion_baseline="$2"; shift ;;
+        --short-completion-baseline)
+            [[ $# -ge 2 ]] ||
+                cassotis_die '--short-completion-baseline requires a path'
+            short_completion_baseline="$2"; shift ;;
         --skip-build) skip_build=1 ;;
         --skip-benchmark) skip_benchmark=1 ;;
         --skip-desktop) skip_desktop=1 ;;
@@ -79,14 +86,17 @@ cassotis_require_command desktop-file-validate
 cassotis_require_command python3
 cassotis_require_command realpath
 if [[ -z "$quality_baseline" ]]; then
-    quality_baseline="$cassotis_root/tests/baselines/quality-v1.20.0-linux-$(uname -m).txt"
+    quality_baseline="$cassotis_root/tests/baselines/quality-v1.21.0-linux-$(uname -m).txt"
 fi
 if [[ -z "$completion_baseline" ]]; then
-    completion_baseline="$cassotis_root/tests/baselines/completion-quality-v1.20.0-linux-$(uname -m).txt"
+    completion_baseline="$cassotis_root/tests/baselines/completion-quality-v1.21.0-linux-$(uname -m).txt"
+fi
+if [[ -z "$short_completion_baseline" ]]; then
+    short_completion_baseline="$cassotis_root/tests/baselines/short-completion-quality-v1.21.0-linux-$(uname -m).txt"
 fi
 for required in dictionary_path traditional_dictionary_path long_cases \
                 short_cases source_parity_report quality_baseline \
-                completion_baseline; do
+                completion_baseline short_completion_baseline; do
     [[ -n "${!required}" && -r "${!required}" ]] ||
         cassotis_die "required input is missing: $required=${!required}"
 done
@@ -108,7 +118,8 @@ on_exit() {
 trap on_exit EXIT
 
 python3 - "$source_parity_report" "$report_dir/source-parity.json" \
-    "$dictionary_path" "$traditional_dictionary_path" <<'PY'
+    "$dictionary_path" "$traditional_dictionary_path" \
+    "$cassotis_root/porting/windows-baseline.txt" <<'PY'
 import hashlib
 import json
 from pathlib import Path
@@ -119,18 +130,41 @@ source = Path(sys.argv[1])
 destination = Path(sys.argv[2])
 dictionary = Path(sys.argv[3])
 traditional_dictionary = Path(sys.argv[4])
+baseline_path = Path(sys.argv[5])
 report = json.loads(source.read_text(encoding="utf-8-sig"))
 if report.get("format") != "cassotis-source-parity-v1" or not report.get("ok"):
     raise SystemExit("source parity report is not a successful v1 report")
+baseline = {}
+for raw_line in baseline_path.read_text(encoding="utf-8-sig").splitlines():
+    key, separator, value = raw_line.partition("=")
+    if separator:
+        baseline[key.strip()] = value.strip()
+for report_key, baseline_key in (
+    ("windows_head", "reviewed_through"),
+    ("windows_expected", "reviewed_through"),
+    ("lexicon_head", "lexicon_reviewed_through"),
+    ("lexicon_expected", "lexicon_reviewed_through"),
+):
+    expected = baseline.get(baseline_key)
+    if not expected or report.get(report_key) != expected:
+        raise SystemExit(
+            f"source parity {report_key} does not match {baseline_key}"
+        )
 digest = hashlib.sha256(dictionary.read_bytes()).hexdigest()
 if report.get("dictionary", {}).get("sha256") != digest:
     raise SystemExit(
         "source parity report does not describe the selected dictionary"
     )
+if baseline.get("dictionary_sha256") != digest:
+    raise SystemExit("selected dictionary does not match the reviewed baseline")
 traditional_digest = hashlib.sha256(traditional_dictionary.read_bytes()).hexdigest()
 if report.get("dictionary_traditional", {}).get("sha256") != traditional_digest:
     raise SystemExit(
         "source parity report does not describe the selected traditional dictionary"
+    )
+if baseline.get("dictionary_tc_sha256") != traditional_digest:
+    raise SystemExit(
+        "selected traditional dictionary does not match the reviewed baseline"
     )
 shutil.copyfile(source, destination)
 PY
@@ -175,7 +209,8 @@ python3 - "$dictionary_path" "$long_cases" "$short_cases" \
     "$cassotis_root/build/bin/cassotis-quality-benchmark" \
     "$cassotis_root/build/bin" "$cassotis_root/VERSION" \
     "$benchmark_inputs" "$skip_benchmark" \
-    "$cassotis_root/build/bin/cassotis-completion-benchmark" <<'PY'
+    "$cassotis_root/build/bin/cassotis-completion-benchmark" \
+    "$cassotis_root/build/bin/cassotis-short-completion-benchmark" <<'PY'
 import hashlib
 import json
 from pathlib import Path
@@ -206,6 +241,7 @@ current = {
     "short_cases": file_record(sys.argv[3]),
     "benchmark_binary": file_record(sys.argv[4]),
     "completion_benchmark_binary": file_record(sys.argv[9]),
+    "short_completion_benchmark_binary": file_record(sys.argv[10]),
     "neural_runtime": {
         name: file_record(runtime / name)
         for name in (
@@ -265,6 +301,20 @@ python3 "$cassotis_root/tools/parity/validate_completion_quality_report.py" \
     --report "$report_dir/completion-quality-validation.json" \
     >"$report_dir/logs/completion-quality-validation.log"
 
+short_completion_log="$report_dir/benchmarks/short-completion-quality.txt"
+if [[ $skip_benchmark -eq 0 ]]; then
+    "$cassotis_root/build/bin/cassotis-short-completion-benchmark" \
+        "$dictionary_path" "$short_cases" 65000 5000 \
+        >"$short_completion_log" \
+        2>"$report_dir/logs/short-completion-quality-progress.log"
+fi
+python3 \
+    "$cassotis_root/tools/parity/validate_short_completion_quality_report.py" \
+    --log "$short_completion_log" --baseline "$short_completion_baseline" \
+    --dictionary "$dictionary_path" --cases "$short_cases" \
+    --report "$report_dir/short-completion-quality-validation.json" \
+    >"$report_dir/logs/short-completion-quality-validation.log"
+
 release_args=(--dictionary "$dictionary_path" \
     --output "$report_dir/artifacts" --skip-build)
 matrix_args=(--dictionary "$dictionary_path" \
@@ -298,6 +348,11 @@ version = Path(sys.argv[2]).read_text(encoding="utf-8").strip()
 quality = json.loads((root / "quality-validation.json").read_text(encoding="utf-8"))
 completion_quality = json.loads(
     (root / "completion-quality-validation.json").read_text(encoding="utf-8")
+)
+short_completion_quality = json.loads(
+    (root / "short-completion-quality-validation.json").read_text(
+        encoding="utf-8"
+    )
 )
 completion_deterministic = json.loads(
     (root / "neural-engine-smoke-deterministic-validation.json").read_text(
@@ -345,6 +400,7 @@ summary = {
     },
     "quality": quality["metrics"],
     "completion_quality": completion_quality["metrics"],
+    "short_completion_quality": short_completion_quality["metrics"],
     "neural_engine_smoke": completion_deterministic["metrics"],
     "neural_engine_smoke_production": completion_production["metrics"],
     "quality_inputs": quality_inputs,
@@ -353,6 +409,7 @@ summary = {
     "core_tests": "passed",
     "neural_engine_smoke_validation": "passed",
     "completion_quality_validation": "passed",
+    "short_completion_quality_validation": "passed",
     "neural_engine_smoke_deterministic_validation": "passed",
     "neural_engine_smoke_production_validation": "passed",
     "candidate_parity_simplified": "passed",

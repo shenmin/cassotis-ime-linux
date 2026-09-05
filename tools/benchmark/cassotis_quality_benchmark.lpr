@@ -178,7 +178,7 @@ begin
     WriteLn('Usage: cassotis-quality-benchmark --dictionary DB [OPTIONS]');
     WriteLn('  --long-cases FILE    Windows long_sentence_16300.tsv');
     WriteLn('  --short-cases FILE   Windows word_input_yhwd_context.tsv');
-    WriteLn('  --neural-runtime DIR Enable the v1.20 ONNX scoring and generation runtime');
+    WriteLn('  --neural-runtime DIR Enable the reviewed ONNX scoring and generation runtime');
     WriteLn('  --report-dir DIR     Summary/failure output directory');
     WriteLn('  --long-limit N       Limit long cases (0 means all)');
     WriteLn('  --short-limit N      Limit short cases (0 means all)');
@@ -413,7 +413,8 @@ end;
 function create_benchmark_engine(const dictionary_path: string;
     const neural_runtime_path: string = '';
     const neural_result_timeout_ms: QWord =
-    c_nc_pinyin_transformer_result_timeout_ms): TncEngine;
+    c_nc_pinyin_transformer_result_timeout_ms;
+    const neural_model_threads: Integer = 0): TncEngine;
 var
     config: TncEngineConfig;
     provider: TncSqliteDictionary;
@@ -434,7 +435,8 @@ begin
         if neural_runtime_path <> '' then
         begin
             reranker_instance := TncPinyinTransformerHostReranker.Create(
-                neural_runtime_path, False, neural_result_timeout_ms);
+                neural_runtime_path, False, neural_result_timeout_ms,
+                neural_model_threads);
             reranker := reranker_instance;
             if not reranker_instance.Ready then
                 raise Exception.Create('neural runtime failed: ' +
@@ -571,8 +573,10 @@ var
 begin
     content := read_utf8_file(options.long_cases_path);
     accuracy_results := nil;
+    // Freeze floating-point reduction order for the accuracy track. The
+    // separate latency engine below keeps production inference concurrency.
     accuracy_engine := create_benchmark_engine(options.dictionary_path,
-        options.neural_runtime_path, 0);
+        options.neural_runtime_path, 0, 1);
     accuracy_engine.debug_set_search_budget_policy(sbm_deterministic, 100);
     failures := TUTF8LineWriter.Create(
         IncludeTrailingPathDelimiter(options.report_directory) +
@@ -656,6 +660,7 @@ begin
         end;
         write_metric(writer, 'long.accuracy_mode', 'deterministic');
         write_metric(writer, 'long.accuracy_neural_timeout_ms', '0');
+        write_metric(writer, 'long.accuracy_neural_threads', '1');
         write_metric(writer, 'long.latency_mode', 'production');
         write_metric(writer, 'long.latency_neural_timeout_ms',
             IntToStr(c_nc_pinyin_transformer_result_timeout_ms));

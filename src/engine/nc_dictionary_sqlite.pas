@@ -148,6 +148,7 @@ type
             TDictionary<string, TncOneKeyCompletionCompetitionEvidenceList>;
         m_one_key_completion_pair_audit_cache:
             TDictionary<string, TncOneKeyCompletionPairAudit>;
+        m_exact_text_prefix_cache: TDictionary<string, TncExactTextPath>;
         m_literal_lookup_result_cache: TDictionary<string, TncCandidateList>;
         m_literal_user_words_available: Integer;
         m_exact_base_entry_cache: TDictionary<string, Boolean>;
@@ -309,6 +310,9 @@ type
             const baseline_full_pinyin, baseline_text: string;
             const challenger_full_pinyin, challenger_text: string;
             out audit: TncOneKeyCompletionPairAudit): Boolean; override;
+        function resolve_exact_text_prefix(const text: string;
+            const max_segments, max_units: Integer;
+            out resolved: TncExactTextPath): Boolean; override;
         procedure record_one_key_completion_accept(const typed_prefix: string;
             const full_pinyin: string; const text: string); override;
         procedure record_one_key_completion_reject(const typed_prefix: string;
@@ -2586,6 +2590,8 @@ begin
         TDictionary<string, TncOneKeyCompletionCompetitionEvidenceList>.Create;
     m_one_key_completion_pair_audit_cache :=
         TDictionary<string, TncOneKeyCompletionPairAudit>.Create;
+    m_exact_text_prefix_cache :=
+        TDictionary<string, TncExactTextPath>.Create;
     m_literal_lookup_result_cache := TDictionary<string, TncCandidateList>.Create;
     m_literal_user_words_available := -1;
     m_exact_base_entry_cache := TDictionary<string, Boolean>.Create;
@@ -2836,6 +2842,11 @@ begin
     begin
         m_one_key_completion_pair_audit_cache.Free;
         m_one_key_completion_pair_audit_cache := nil;
+    end;
+    if m_exact_text_prefix_cache <> nil then
+    begin
+        m_exact_text_prefix_cache.Free;
+        m_exact_text_prefix_cache := nil;
     end;
     if m_literal_lookup_result_cache <> nil then
     begin
@@ -3466,6 +3477,7 @@ function TncSqliteDictionary.lookup_one_key_completions(
     out results: TncOneKeyCompletionList): Boolean;
 const
     c_result_cache_limit = 4096;
+    c_result_limit = 32;
     c_query_limit = 256;
     c_source_result_limit = 8;
     c_base_exact_prefix_anchor_bonus = 80;
@@ -3798,6 +3810,10 @@ var
                 begin
                     step_result := m_base_connection.step(stmt);
                     Continue;
+                end;
+                if Length(results) >= c_result_limit then
+                begin
+                    Break;
                 end;
                 item := Default(TncOneKeyCompletion);
                 item.text := candidate_text;
@@ -4210,6 +4226,10 @@ var
     begin
         for item_idx := 0 to High(items) do
         begin
+            if Length(results) >= c_result_limit then
+            begin
+                Exit;
+            end;
             duplicate := False;
             for result_idx := 0 to High(results) do
             begin
@@ -4325,8 +4345,10 @@ begin
 
     exact_prefix_texts := TDictionary<string, Boolean>.Create;
     try
-        // User completions are a separate priority class. Literal words are
-        // explicit user selections, so they win inside that class.
+        // Keep all reliable sources in one bounded pool. User completions are
+        // appended first and remain an absolute priority in the engine, but
+        // they no longer hide exact and transition alternatives from the
+        // unified scorer, diagnostics, or incremental hysteresis.
         SetLength(user_items, 0);
         SetLength(base_items, 0);
         SetLength(base_weight_items, 0);
@@ -4339,14 +4361,7 @@ begin
             query_user_stored_prefix(explicit_prefix, True);
         end;
         sort_ranked(user_items);
-        if Length(user_items) > 0 then
-        begin
-            SetLength(results, 1);
-            results[0] := user_items[0].item;
-            load_feedback_counts;
-            cache_results;
-            Exit(True);
-        end;
+        append_ranked_items(user_items);
 
         // New dictionaries provide a bounded offline Top-K exact lookup.
         // Empty legacy tables fall back to the range scans below so upgrades
@@ -4858,6 +4873,216 @@ begin
             audit);
     end;
     Result := audit.available;
+end;
+
+function TncSqliteDictionary.resolve_exact_text_prefix(
+    const text: string; const max_segments, max_units: Integer;
+    out resolved: TncExactTextPath): Boolean;
+const
+    c_cache_limit = 4096;
+    c_max_word_units = 6;
+    select_sql =
+        'SELECT pinyin, weight FROM dict_base WHERE text = ?1 ' +
+        'ORDER BY weight DESC LIMIT 16';
+type
+    TSearchBest = record
+        score: Int64;
+        total_weight: Integer;
+        single_count: Integer;
+        value: TncExactTextPath;
+    end;
+var
+    text_key: string;
+    cache_key: string;
+    text_units: TArray<string>;
+    search_limit: Integer;
+    stmt: Psqlite3_stmt;
+    segment_cache: TDictionary<string, TncExactTextPath>;
+    best: TSearchBest;
+
+    function join_units(const start_idx, end_idx: Integer): string;
+    var
+        idx: Integer;
+    begin
+        Result := '';
+        for idx := start_idx to end_idx do
+        begin
+            Result := Result + text_units[idx];
+        end;
+    end;
+
+    function lookup_segment(const segment_text: string;
+        const unit_count: Integer; out segment: TncExactTextPath): Boolean;
+    var
+        step_result: Integer;
+        pinyin_value: string;
+        syllables: TArray<string>;
+    begin
+        if segment_cache.TryGetValue(segment_text, segment) then
+        begin
+            Exit(segment.valid);
+        end;
+        segment := Default(TncExactTextPath);
+        if (stmt = nil) or (segment_text = '') or
+            (not m_base_connection.reset(stmt)) or
+            (not m_base_connection.clear_bindings(stmt)) or
+            (not m_base_connection.BindText(stmt, 1, segment_text)) then
+        begin
+            segment_cache.AddOrSetValue(segment_text, segment);
+            Exit(False);
+        end;
+        step_result := m_base_connection.step(stmt);
+        while step_result = SQLITE_ROW do
+        begin
+            pinyin_value := LowerCase(Trim(
+                m_base_connection.ColumnText(stmt, 0)));
+            syllables := split_full_pinyin_syllables(pinyin_value);
+            if (Length(syllables) = unit_count) and
+                is_full_pinyin_key(pinyin_value) then
+            begin
+                segment.valid := True;
+                segment.text := segment_text;
+                segment.full_pinyin := normalize_compact_pinyin_key(
+                    pinyin_value);
+                segment.path_text := segment_text;
+                segment.weight := m_base_connection.ColumnInt(stmt, 1);
+                segment.segment_count := 1;
+                segment.unit_count := unit_count;
+                Break;
+            end;
+            step_result := m_base_connection.step(stmt);
+        end;
+        segment_cache.AddOrSetValue(segment_text, segment);
+        Result := segment.valid;
+    end;
+
+    procedure search(const start_idx, segment_count, total_weight,
+        single_count: Integer; const pinyin_path, text_path: string);
+    var
+        end_idx: Integer;
+        segment_units: Integer;
+        segment_text: string;
+        segment: TncExactTextPath;
+        next_pinyin: string;
+        next_path: string;
+        consumed_units: Integer;
+        next_weight: Integer;
+        next_single_count: Integer;
+        score: Int64;
+    begin
+        if (start_idx >= search_limit) or
+            (segment_count >= max_segments) then
+        begin
+            Exit;
+        end;
+        for end_idx := start_idx to Min(search_limit - 1,
+            start_idx + c_max_word_units - 1) do
+        begin
+            segment_units := end_idx - start_idx + 1;
+            segment_text := join_units(start_idx, end_idx);
+            if not lookup_segment(segment_text, segment_units, segment) then
+            begin
+                Continue;
+            end;
+            if pinyin_path = '' then
+            begin
+                next_pinyin := segment.full_pinyin;
+                next_path := segment.text;
+            end
+            else
+            begin
+                next_pinyin := pinyin_path + segment.full_pinyin;
+                next_path := text_path + #3 + segment.text;
+            end;
+            consumed_units := end_idx + 1;
+            next_weight := total_weight + segment.weight;
+            next_single_count := single_count + Ord(segment_units = 1);
+            // A one-character prompt is too easy to trigger accidentally.
+            // Single-character exact words remain legal inside a longer path.
+            if consumed_units >= 2 then
+            begin
+                score := Int64(consumed_units) * 100000 +
+                    Int64(next_weight) -
+                    Int64(segment_count + 1) * 900 -
+                    Int64(next_single_count) * 1400;
+                if (not best.value.valid) or (score > best.score) or
+                    ((score = best.score) and
+                    (segment_count + 1 < best.value.segment_count)) then
+                begin
+                    best.score := score;
+                    best.total_weight := next_weight;
+                    best.single_count := next_single_count;
+                    best.value.valid := True;
+                    best.value.text := join_units(0, end_idx);
+                    best.value.full_pinyin := next_pinyin;
+                    best.value.path_text := next_path;
+                    best.value.segment_count := segment_count + 1;
+                    best.value.unit_count := consumed_units;
+                    best.value.weight := next_weight div
+                        (segment_count + 1);
+                end;
+            end;
+            search(end_idx + 1, segment_count + 1, next_weight,
+                next_single_count, next_pinyin, next_path);
+        end;
+    end;
+
+begin
+    resolved := Default(TncExactTextPath);
+    Result := False;
+    text_key := Trim(text);
+    if (text_key = '') or (max_segments < 1) or (max_segments > 3) or
+        (max_units < 2) then
+    begin
+        Exit;
+    end;
+    cache_key := text_key + #1 + IntToStr(max_segments) + #1 +
+        IntToStr(max_units);
+    if (m_exact_text_prefix_cache <> nil) and
+        m_exact_text_prefix_cache.TryGetValue(cache_key, resolved) then
+    begin
+        Exit(resolved.valid);
+    end;
+    if (not ensure_open) or (not m_base_ready) or
+        (m_base_connection = nil) then
+    begin
+        Exit;
+    end;
+    text_units := split_text_units_local(text_key);
+    search_limit := Min(Length(text_units), max_units);
+    if search_limit < 2 then
+    begin
+        Exit;
+    end;
+
+    stmt := nil;
+    segment_cache := TDictionary<string, TncExactTextPath>.Create;
+    try
+        if not m_base_connection.prepare(select_sql, stmt) then
+        begin
+            Exit;
+        end;
+        best := Default(TSearchBest);
+        best.score := Low(Int64);
+        search(0, 0, 0, 0, '', '');
+        resolved := best.value;
+    finally
+        segment_cache.Free;
+        if stmt <> nil then
+        begin
+            m_base_connection.finalize(stmt);
+        end;
+    end;
+
+    if m_exact_text_prefix_cache <> nil then
+    begin
+        if m_exact_text_prefix_cache.Count >= c_cache_limit then
+        begin
+            m_exact_text_prefix_cache.Clear;
+        end;
+        m_exact_text_prefix_cache.AddOrSetValue(cache_key, resolved);
+    end;
+    Result := resolved.valid;
 end;
 
 procedure TncSqliteDictionary.record_one_key_completion_accept(
@@ -10293,6 +10518,10 @@ begin
     if m_one_key_completion_pair_audit_cache <> nil then
     begin
         m_one_key_completion_pair_audit_cache.Clear;
+    end;
+    if m_exact_text_prefix_cache <> nil then
+    begin
+        m_exact_text_prefix_cache.Clear;
     end;
     if m_literal_lookup_result_cache <> nil then
     begin

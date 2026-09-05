@@ -34,6 +34,10 @@ completion_quality = load_module(
     "cassotis_validate_completion_quality_report",
     ROOT / "tools" / "parity" / "validate_completion_quality_report.py",
 )
+short_completion_quality = load_module(
+    "cassotis_validate_short_completion_quality_report",
+    ROOT / "tools" / "parity" / "validate_short_completion_quality_report.py",
+)
 source_parity = load_module(
     "cassotis_validate_source_parity",
     ROOT / "tools" / "parity" / "validate_source_parity.py",
@@ -73,10 +77,23 @@ def main() -> int:
             "completion smoke does not isolate deterministic inference while "
             "retaining production defaults"
         )
+    quality_source = (
+        ROOT / "tools" / "benchmark" / "cassotis_quality_benchmark.lpr"
+    ).read_text(encoding="utf-8")
+    normalized_quality_source = " ".join(quality_source.split())
+    if (
+        "options.neural_runtime_path, 0, 1); accuracy_engine."
+        "debug_set_search_budget_policy(sbm_deterministic, 100)"
+        not in normalized_quality_source
+    ):
+        raise AssertionError(
+            "deterministic quality benchmark does not use one inference thread"
+        )
 
     baseline = {
         "format": "cassotis-quality-baseline-v1",
         "metadata.long_accuracy_neural_timeout_ms": "0",
+        "metadata.long_accuracy_neural_threads": "1",
         "metadata.long_latency_neural_timeout_ms": "30",
         "long.top1_min": "100",
         "completion.cases_exact": "500",
@@ -87,6 +104,7 @@ def main() -> int:
     quality_failures = quality.validate_baseline(
         {
             "long.accuracy_neural_timeout_ms": "0",
+            "long.accuracy_neural_threads": "1",
             "long.latency_neural_timeout_ms": "30",
             "long.top1": "100",
         },
@@ -96,6 +114,16 @@ def main() -> int:
         raise AssertionError(
             "quality validator consumed completion-only metrics: "
             + repr(quality_failures)
+        )
+    wrong_thread_metrics = {
+        "long.accuracy_neural_timeout_ms": "0",
+        "long.accuracy_neural_threads": "8",
+        "long.latency_neural_timeout_ms": "30",
+        "long.top1": "100",
+    }
+    if not quality.validate_baseline(wrong_thread_metrics, baseline):
+        raise AssertionError(
+            "quality validator accepted a multithreaded deterministic track"
         )
 
     completion_failures = completion.compare_baseline(
@@ -210,6 +238,64 @@ def main() -> int:
             "full completion validator allowed prompts beyond opportunities"
         )
 
+    short_completion_metrics = {
+        "format": "cassotis-short-completion-quality-v1",
+        "cases": "65000",
+        "opportunities": "12831",
+        "prompts": "12775",
+        "hits": "9420",
+        "wrong_prompts": "3355",
+        "saved_keys": "24006",
+        "average_saved_keys": "2.548",
+        "stability_pairs": "1749",
+        "stable_pairs": "1691",
+        "completion_signature": "D33AC07C1551CAA1",
+        "mean_ms": "1.241",
+        "p50_ms": "1",
+        "p95_ms": "3",
+        "max_ms": "51",
+    }
+    short_invariant_failures = short_completion_quality.validate_invariants(
+        short_completion_metrics
+    )
+    if short_invariant_failures:
+        raise AssertionError(
+            "short completion validator rejected valid metrics: "
+            + repr(short_invariant_failures)
+        )
+    short_completion_baseline = {
+        "format": "cassotis-short-completion-quality-baseline-v1",
+        "cases_exact": "65000",
+        "opportunities_exact": "12831",
+        "hits_min": "9420",
+        "completion_signature_exact": "D33AC07C1551CAA1",
+        "p95_ms_max": "10",
+    }
+    short_baseline_failures = short_completion_quality.compare_baseline(
+        short_completion_metrics, short_completion_baseline
+    )
+    if short_baseline_failures:
+        raise AssertionError(
+            "short completion validator rejected valid release floors: "
+            + repr(short_baseline_failures)
+        )
+    short_signature_drift = dict(short_completion_metrics)
+    short_signature_drift["completion_signature"] = "0123456789ABCDEF"
+    if not short_completion_quality.compare_baseline(
+        short_signature_drift, short_completion_baseline
+    ):
+        raise AssertionError(
+            "short completion validator missed visible-result drift"
+        )
+    invalid_short_completion = dict(short_completion_metrics)
+    invalid_short_completion["wrong_prompts"] = "3354"
+    if not short_completion_quality.validate_invariants(
+        invalid_short_completion
+    ):
+        raise AssertionError(
+            "short completion validator missed invalid prompt counts"
+        )
+
     with tempfile.TemporaryDirectory() as temporary_directory:
         frozen_dictionary_path = Path(temporary_directory) / "frozen.db"
         frozen_cases_path = Path(temporary_directory) / "frozen.tsv"
@@ -237,6 +323,41 @@ def main() -> int:
         )
         if not any("cases sha256" in item for item in frozen_failures):
             raise AssertionError("full completion validator missed input drift")
+
+        short_frozen_baseline = {
+            "metadata.dictionary_sha256": short_completion_quality.sha256_file(
+                frozen_dictionary_path
+            ),
+            "metadata.cases_sha256": short_completion_quality.sha256_file(
+                frozen_cases_path
+            ),
+        }
+        _, short_frozen_failures = (
+            short_completion_quality.validate_frozen_inputs(
+                short_frozen_baseline,
+                frozen_dictionary_path,
+                frozen_cases_path,
+            )
+        )
+        if short_frozen_failures:
+            raise AssertionError(
+                "short completion validator rejected frozen inputs: "
+                + repr(short_frozen_failures)
+            )
+        frozen_dictionary_path.write_bytes(b"changed dictionary")
+        _, short_frozen_failures = (
+            short_completion_quality.validate_frozen_inputs(
+                short_frozen_baseline,
+                frozen_dictionary_path,
+                frozen_cases_path,
+            )
+        )
+        if not any(
+            "dictionary sha256" in item for item in short_frozen_failures
+        ):
+            raise AssertionError(
+                "short completion validator missed input drift"
+            )
 
         dictionary_path = Path(temporary_directory) / "dictionary.db"
         with closing(sqlite3.connect(dictionary_path)) as connection:

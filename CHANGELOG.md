@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-09-05
+
+- Advanced the reviewed engine and dictionary baseline to Cassotis IME and
+  Cassotis Lexicon v1.21.0 with matching schema-24 dictionaries.
+- Added bounded exact-text prefix resolution and retained complete exact
+  lexicon paths while the next syllable is still partial.
+- Expanded one-key completion recall with lexical and phonetic-repair
+  selectors, then applied the same deterministic full-query work budget and
+  final arbitration used by the Windows baseline.
+- Added document-local continuation and copy completion with scoped positive
+  and negative feedback. Evidence is derived only from text already exposed
+  by the active framework, stays in memory, and is never persisted.
+- Preserved document evidence across ordinary composition resets while
+  clearing it on context teardown, and resolved copied completion anchors to
+  their complete dictionary Pinyin before learning subsequent feedback.
+- Made completed local model inference remain eligible after a diagnostic wait
+  expires; unavailable, stale, or still-running work continues to fail closed.
+- Added exact short-word completion result signatures to the native release
+  gate alongside the existing long/short quality and production completion
+  benchmarks.
+- Made the long-sentence accuracy track use deterministic work limits and one
+  ONNX inference thread to reduce concurrency-related variation; the separate
+  latency track continues to exercise deployed inference concurrency.
+- Hardened release validation so source-parity reports must match the current
+  reviewed revisions and dictionary hashes, and artifact extraction uses a
+  disk-backed, uniquely scoped temporary directory.
+
 ## 0.4.0 - 2026-08-31
 
 - Advanced the reviewed engine and dictionary baseline to Cassotis IME and
