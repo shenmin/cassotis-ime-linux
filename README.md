@@ -68,6 +68,15 @@ and phonetic-repair selectors, and adds context-scoped document continuation
 and copy completion. The new paths remain bounded, locally executed, and fail
 closed.
 
+Native qualification on x86_64 and aarch64 covers the benchmarks in
+[BENCHMARK.md](BENCHMARK.md). Across 16,300 long-sentence cases, Top1/Top2
+counts are 11,080/12,396 and 11,088/12,412 respectively, meeting the published
+Windows aggregate results; individual neural candidates are not guaranteed
+identical. The complete short-word result remains identical to Windows on
+both architectures. Native core and dictionary tests, package-payload checks,
+and the automated IBus/Fcitx desktop matrix are also covered. See
+[COMPATIBILITY.md](COMPATIBILITY.md) for desktop and framework test coverage.
+
 The v0.5.0 release targets amd64 and arm64 with `.deb` packages and portable
 binary archives. Qualification uses Ubuntu 26.04.1 GNOME Wayland on both
 architectures; results are recorded in [BENCHMARK.md](BENCHMARK.md).
@@ -145,6 +154,14 @@ not both desktop daemons.
 
 Detailed build, framework-install, benchmark, and release-validation commands
 are documented in:
+
+- [BUILD.md](BUILD.md)
+- [CONFIGURATION.md](CONFIGURATION.md)
+- [BENCHMARK.md](BENCHMARK.md) / [简体中文](BENCHMARK.CN.md)
+- [COMPATIBILITY.md](COMPATIBILITY.md)
+- [CHANGELOG.md](CHANGELOG.md)
+- [Dictionary format](docs/DICTIONARY.md)
+- [IPC and process architecture](docs/IPC.md)
 
 ## Related Projects
 

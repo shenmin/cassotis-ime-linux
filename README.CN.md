@@ -53,6 +53,14 @@ v0.5.0 源码以言泉输入法与 Cassotis Lexicon v1.21.0 为行为和
 扩展补全召回，并增加按输入上下文隔离的文档续写与复制补全。新增路径均有界、
 在本地运行，并在条件不满足时保持原有结果。
 
+x86_64 与 aarch64 的原生验证覆盖
+[BENCHMARK.CN.md](BENCHMARK.CN.md) 中的基准。16,300 条长句的 Top1/Top2
+分别为 11,080/12,396 和 11,088/12,412，均达到 Windows 公布的汇总成绩；
+神经模型的逐条候选不保证完全一致。两个架构的完整短词结果均与 Windows
+完全一致。验证还覆盖原生核心与词库测试、安装包内容检查和自动化 IBus/Fcitx
+桌面矩阵。桌面与输入框架的具体测试范围见
+[COMPATIBILITY.md](COMPATIBILITY.md)。
+
 v0.5.0 面向 amd64 与 arm64 提供 `.deb` 安装包和便携二进制包。验证环境为
 两个架构的 Ubuntu 26.04.1 GNOME Wayland，结果记录在
 [BENCHMARK.CN.md](BENCHMARK.CN.md)。已发布安装包及校验信息请以
@@ -119,6 +127,14 @@ sudo ./install.sh
 ```
 
 完整的构建、框架安装、基准测试和发行验收命令见：
+
+- [BUILD.md](BUILD.md)
+- [配置说明](CONFIGURATION.CN.md)
+- [基准测试](BENCHMARK.CN.md) / [English](BENCHMARK.md)
+- [COMPATIBILITY.md](COMPATIBILITY.md)
+- [CHANGELOG.md](CHANGELOG.md)
+- [词库格式](docs/DICTIONARY.md)
+- [IPC 与进程架构](docs/IPC.md)
 
 ## 相关项目
 

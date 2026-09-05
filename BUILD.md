@@ -138,6 +138,12 @@ local-completion assets,
 and the required third-party notices; end users do not install a separate
 inference runtime.
 
+The release builder does not produce RPM or Arch packages from Debian-built
+binaries. Other distributions should build both native adapters from source.
+See [BENCHMARK.md](BENCHMARK.md) / [简体中文](BENCHMARK.CN.md) for benchmark
+instructions and results, and [COMPATIBILITY.md](COMPATIBILITY.md) for desktop
+and framework test coverage.
+
 End-user settings and persistent data behavior are documented in
 [CONFIGURATION.md](CONFIGURATION.md).
 
