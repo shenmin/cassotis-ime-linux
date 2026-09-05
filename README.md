@@ -74,9 +74,8 @@ counts are 11,080/12,396 and 11,088/12,412 respectively, meeting the published
 Windows aggregate results; individual neural candidates are not guaranteed
 identical. The complete short-word result remains identical to Windows on
 both architectures. Native core and dictionary tests, package-payload checks,
-and the automated IBus/Fcitx desktop matrix are also covered. Each binary
-release must separately pass the complete gate and application-level checks
-in [RELEASE.md](RELEASE.md) against its exact source revision.
+and the automated IBus/Fcitx desktop matrix are also covered. See
+[COMPATIBILITY.md](COMPATIBILITY.md) for desktop and framework test coverage.
 
 The v0.5.0 release targets amd64 and arm64 with `.deb` packages and portable
 binary archives. Qualification uses Ubuntu 26.04.1 GNOME Wayland on both
@@ -159,7 +158,6 @@ are documented in:
 - [BUILD.md](BUILD.md)
 - [CONFIGURATION.md](CONFIGURATION.md)
 - [BENCHMARK.md](BENCHMARK.md) / [简体中文](BENCHMARK.CN.md)
-- [RELEASE.md](RELEASE.md)
 - [COMPATIBILITY.md](COMPATIBILITY.md)
 - [CHANGELOG.md](CHANGELOG.md)
 - [Dictionary format](docs/DICTIONARY.md)

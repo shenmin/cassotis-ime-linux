@@ -232,7 +232,7 @@ sed "s|@SETUP@|$libexec_path/cassotis-settings|g" \
     "$cassotis_root/adapters/ibus/ibus-setup-cassotis.desktop.in" \
     > "$(stage_path "$applications_path/ibus-setup-cassotis.desktop")"
 
-for document in README.md README.CN.md BUILD.md RELEASE.md COMPATIBILITY.md \
+for document in README.md README.CN.md BUILD.md COMPATIBILITY.md \
                 BENCHMARK.md BENCHMARK.CN.md CONFIGURATION.md \
                 CONFIGURATION.CN.md \
                 CHANGELOG.md LICENSE NOTICE.md; do

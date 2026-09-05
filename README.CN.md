@@ -58,8 +58,8 @@ x86_64 与 aarch64 的原生验证覆盖
 分别为 11,080/12,396 和 11,088/12,412，均达到 Windows 公布的汇总成绩；
 神经模型的逐条候选不保证完全一致。两个架构的完整短词结果均与 Windows
 完全一致。验证还覆盖原生核心与词库测试、安装包内容检查和自动化 IBus/Fcitx
-桌面矩阵。每次二进制发行仍须针对精确源码提交，单独通过
-[RELEASE.md](RELEASE.md) 中的完整门禁及实际应用界面检查。
+桌面矩阵。桌面与输入框架的具体测试范围见
+[COMPATIBILITY.md](COMPATIBILITY.md)。
 
 v0.5.0 面向 amd64 与 arm64 提供 `.deb` 安装包和便携二进制包。验证环境为
 两个架构的 Ubuntu 26.04.1 GNOME Wayland，结果记录在
@@ -131,7 +131,6 @@ sudo ./install.sh
 - [BUILD.md](BUILD.md)
 - [配置说明](CONFIGURATION.CN.md)
 - [基准测试](BENCHMARK.CN.md) / [English](BENCHMARK.md)
-- [RELEASE.md](RELEASE.md)
 - [COMPATIBILITY.md](COMPATIBILITY.md)
 - [CHANGELOG.md](CHANGELOG.md)
 - [词库格式](docs/DICTIONARY.md)

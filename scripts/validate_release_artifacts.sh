@@ -119,7 +119,7 @@ for portable_script in install.sh uninstall.sh; do
 done
 [[ -r "$bundle_dir/root/usr/share/cassotis-ime/dict_tc.db" ]] ||
     cassotis_die 'portable release is missing the traditional dictionary'
-for document in README.md README.CN.md BUILD.md RELEASE.md COMPATIBILITY.md \
+for document in README.md README.CN.md BUILD.md COMPATIBILITY.md \
                 BENCHMARK.md BENCHMARK.CN.md CONFIGURATION.md \
                 CONFIGURATION.CN.md \
                 CHANGELOG.md LICENSE NOTICE.md docs/DICTIONARY.md docs/IPC.md \
