@@ -53,11 +53,10 @@ v0.5.0 源码以言泉输入法与 Cassotis Lexicon v1.21.0 为行为和
 扩展补全召回，并增加按输入上下文隔离的文档续写与复制补全。新增路径均有界、
 在本地运行，并在条件不满足时保持原有结果。
 
-v0.5.0 二进制版本仍等待最终双架构验收，尚待处理的补全基线问题记录在
-[BENCHMARK.CN.md](BENCHMARK.CN.md)。计划提供 amd64 与 arm64 的 `.deb`
-安装包和便携二进制包，验证环境为两个架构的 Ubuntu 26.04.1 GNOME Wayland。
-新版正式发布前，请使用 GitHub Releases 中最新可用的安装包，不要将下方示例
-中的 v0.5.0 文件名理解为已经提供下载。
+v0.5.0 面向 amd64 与 arm64 提供 `.deb` 安装包和便携二进制包。验证环境为
+两个架构的 Ubuntu 26.04.1 GNOME Wayland，结果记录在
+[BENCHMARK.CN.md](BENCHMARK.CN.md)。已发布安装包及校验信息请以
+[GitHub Releases](https://github.com/shenmin/cassotis-ime-linux/releases) 为准。
 
 两种架构的安装包均包含 IBus 与 Fcitx 5 适配层，安装后选择其中一个框架
 启用即可。

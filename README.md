@@ -68,13 +68,11 @@ and phonetic-repair selectors, and adds context-scoped document continuation
 and copy completion. The new paths remain bounded, locally executed, and fail
 closed.
 
-The v0.5.0 binary release is pending final dual-architecture acceptance; the
-remaining completion-baseline issue is recorded in [BENCHMARK.md](BENCHMARK.md).
-The planned assets are `.deb` packages and portable binary archives for both
-amd64 and arm64. Qualification uses Ubuntu 26.04.1 GNOME Wayland on both
-architectures. Until the new release is published, use the latest available
-packages from GitHub Releases rather than assuming that the v0.5.0 filenames
-shown below are already downloadable.
+The v0.5.0 release targets amd64 and arm64 with `.deb` packages and portable
+binary archives. Qualification uses Ubuntu 26.04.1 GNOME Wayland on both
+architectures; results are recorded in [BENCHMARK.md](BENCHMARK.md).
+Use [GitHub Releases](https://github.com/shenmin/cassotis-ime-linux/releases)
+for the published packages and their checksums.
 
 Both architecture packages include the IBus and Fcitx 5 adapters; enable
 either framework after installation.
