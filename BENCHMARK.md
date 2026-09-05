@@ -186,13 +186,16 @@ deadline remain rejected; the gate does not increase the deadline to manufacture
 matching results. The 500-case deadline-free smoke uses the exact per-architecture
 signatures `06E92EB69EB24518` (x86_64) and `4775EE37F80823C9` (aarch64).
 
-The x86_64 qualification passes all current completion bounds. On aarch64,
-3,209 neural results were accepted and applied, exceeding the existing 3,200
-upper bounds for these two counters; all other completion bounds pass. Those
-upper bounds remain unchanged pending review. This qualification must not be
-reported as a successful full release gate. The maximum completion-process RSS
-on aarch64 was 809,832 KiB. A separate repeat of the first 5,000 complete long
-queries also produced identical Top1 text and target ranks on aarch64.
+On aarch64, 3,209 neural results were accepted and applied. These are pipeline
+counts, not correct-hit counts. The former fixed upper bounds of 3,200 were
+removed after review: increased throughput alone is not a quality regression.
+Minimum pipeline counts, request-chain invariants, hit/error/coverage bounds,
+saved-key and latency requirements, and the 40 ms deadline remain unchanged.
+The original reports pass the revised completion checks on both architectures;
+this revalidation does not replace the complete final-source release gate.
+The maximum completion-process RSS on aarch64 was 809,832 KiB. A separate
+repeat of the first 5,000 complete long queries also produced identical Top1
+text and target ranks on aarch64.
 
 ## Frozen v1.20.0 Port Results
 

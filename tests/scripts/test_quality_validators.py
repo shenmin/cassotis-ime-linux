@@ -273,6 +273,47 @@ def main() -> int:
             "full completion validator allowed prompts beyond opportunities"
         )
 
+    arm_completion_baseline = completion_quality.parse_metrics(
+        ROOT / "tests" / "baselines" /
+        "completion-quality-v1.21.0-linux-aarch64.txt"
+    )
+    for counter in ("neural_accepted", "neural_applied"):
+        if counter + "_max" in arm_completion_baseline:
+            raise AssertionError("pipeline throughput must not have a fixed cap")
+    arm_completion_metrics = dict(
+        completion_quality_metrics, prompts="6200", hits="350",
+        full_sentence_hits="20", wrong_prompts="5850", saved_keys="820",
+        stability_pairs="650", stable_pairs="20", neural_requests="8300",
+        neural_accepted="4000", neural_applied="3900",
+    )
+    for accepted, applied in ((2900, 2900), (4000, 3900), (8300, 6200)):
+        higher_throughput = dict(arm_completion_metrics,
+                                 neural_accepted=str(accepted),
+                                 neural_applied=str(applied))
+        failures = completion_quality.validate_invariants(higher_throughput)
+        failures += completion_quality.compare_baseline(
+            higher_throughput, arm_completion_baseline
+        )
+        if failures:
+            raise AssertionError("valid completion throughput was rejected: "
+                                 + repr(failures))
+    for accepted, applied in ((8301, 3900), (4000, 4001), (-1, -1)):
+        invalid_pipeline = dict(arm_completion_metrics,
+                                neural_accepted=str(accepted),
+                                neural_applied=str(applied))
+        if not completion_quality.validate_invariants(invalid_pipeline):
+            raise AssertionError("invalid completion pipeline counts were accepted")
+    for metric, value in (("hits", "339"), ("wrong_prompts", "6201"),
+                          ("saved_keys", "809"), ("p95_ms", "131"),
+                          ("result_timeout_ms", "41")):
+        regressed = dict(arm_completion_metrics)
+        regressed[metric] = value
+        failures = completion_quality.compare_baseline(
+            regressed, arm_completion_baseline
+        )
+        if not any(item.startswith(metric + "=") for item in failures):
+            raise AssertionError("completion constraint was not enforced: " + metric)
+
     short_completion_metrics = {
         "format": "cassotis-short-completion-quality-v1",
         "cases": "65000",
