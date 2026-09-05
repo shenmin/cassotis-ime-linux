@@ -13,6 +13,30 @@ uses
     nc_types;
 
 type
+    TncDocumentContinuation = record
+        anchor_text: string;
+        suffix_text: string;
+        context_width: Integer;
+        occurrence_count: Integer;
+        last_position: Integer;
+        evidence: Integer;
+    end;
+
+    TncDocumentContinuationList = TArray<TncDocumentContinuation>;
+
+    TncDocumentContinuationStats = record
+        occurrence_count: Integer;
+        last_position: Integer;
+    end;
+
+    TncDocumentContinuationFeedback = record
+        accept_count: Integer;
+        reject_count: Integer;
+    end;
+
+    TncDocumentContinuationMap =
+        TDictionary<string, TncDocumentContinuationStats>;
+
     TncDocumentContextModel = class
     private
         m_document_key: string;
@@ -20,6 +44,10 @@ type
         m_document_text: string;
         m_recent_tail: string;
         m_ngrams: TDictionary<string, Integer>;
+        m_continuations:
+            TObjectDictionary<string, TncDocumentContinuationMap>;
+        m_completion_feedback:
+            TDictionary<string, TncDocumentContinuationFeedback>;
         procedure add_ngram(const value: string);
         procedure add_incremental_ngrams(const value: string;
             const prefix_chars: Integer);
@@ -27,7 +55,10 @@ type
             out incremental_text: string; out incremental_prefix: Integer;
             out requires_rebuild: Boolean): Boolean;
         procedure rebuild;
+        procedure rebuild_continuations;
         function ngram_count(const value: string): Integer;
+        function completion_feedback_key(const anchor_text,
+            suffix_text: string): string;
     public
         constructor create;
         destructor Destroy; override;
@@ -36,6 +67,13 @@ type
         function score_text(const text: string): Integer;
         function score_path(const encoded_path: string;
             const separator: Char): Integer;
+        function lookup_continuations(const current_text: string;
+            const max_results: Integer;
+            out results: TncDocumentContinuationList): Boolean;
+        procedure record_completion_feedback(const anchor_text,
+            suffix_text: string; const accepted: Boolean);
+        function completion_feedback_score(const anchor_text,
+            suffix_text: string): Integer;
         function has_context: Boolean;
         property document_key: string read m_document_key;
     end;
@@ -53,6 +91,10 @@ const
     c_min_snapshot_overlap = 16;
     c_text_score_cap = 720;
     c_path_score_cap = 860;
+    c_min_completion_anchor_chars = 2;
+    c_max_completion_anchor_chars = 12;
+    c_max_completion_suffix_chars = 12;
+    c_completion_feedback_cap = 8;
 
 function is_text_character(const value: Char): Boolean;
 var
@@ -79,10 +121,17 @@ constructor TncDocumentContextModel.create;
 begin
     inherited create;
     m_ngrams := TDictionary<string, Integer>.Create;
+    m_continuations :=
+        TObjectDictionary<string, TncDocumentContinuationMap>.Create(
+        [doOwnsValues]);
+    m_completion_feedback :=
+        TDictionary<string, TncDocumentContinuationFeedback>.Create;
 end;
 
 destructor TncDocumentContextModel.Destroy;
 begin
+    m_completion_feedback.Free;
+    m_continuations.Free;
     m_ngrams.Free;
     inherited;
 end;
@@ -94,6 +143,8 @@ begin
     m_document_text := '';
     m_recent_tail := '';
     m_ngrams.Clear;
+    m_continuations.Clear;
+    m_completion_feedback.Clear;
 end;
 
 procedure TncDocumentContextModel.add_ngram(const value: string);
@@ -191,7 +242,76 @@ begin
             run_text := '';
         end;
     end;
+    rebuild_continuations;
+end;
 
+procedure TncDocumentContextModel.rebuild_continuations;
+var
+    run_text: string;
+    run_start: Integer;
+    idx: Integer;
+
+    procedure index_run(const value: string; const base_position: Integer);
+    var
+        boundary: Integer;
+        width: Integer;
+        anchor_text: string;
+        suffix_text: string;
+        values: TncDocumentContinuationMap;
+        stats: TncDocumentContinuationStats;
+    begin
+        if Length(value) <= c_min_completion_anchor_chars then
+        begin
+            Exit;
+        end;
+        for boundary := c_min_completion_anchor_chars to Length(value) - 1 do
+        begin
+            suffix_text := Copy(value, boundary + 1,
+                c_max_completion_suffix_chars);
+            if suffix_text = '' then
+            begin
+                Continue;
+            end;
+            for width := c_min_completion_anchor_chars to
+                Min(c_max_completion_anchor_chars, boundary) do
+            begin
+                anchor_text := Copy(value, boundary - width + 1, width);
+                if not m_continuations.TryGetValue(anchor_text, values) then
+                begin
+                    values := TncDocumentContinuationMap.Create;
+                    m_continuations.Add(anchor_text, values);
+                end;
+                stats := Default(TncDocumentContinuationStats);
+                values.TryGetValue(suffix_text, stats);
+                Inc(stats.occurrence_count);
+                stats.last_position := base_position + boundary;
+                values.AddOrSetValue(suffix_text, stats);
+            end;
+        end;
+    end;
+
+begin
+    m_continuations.Clear;
+    run_text := '';
+    run_start := 1;
+    for idx := 1 to Length(m_document_text) + 1 do
+    begin
+        if (idx <= Length(m_document_text)) and
+            is_text_character(m_document_text[idx]) then
+        begin
+            if run_text = '' then
+            begin
+                run_start := idx;
+            end;
+            run_text := run_text + m_document_text[idx];
+            Continue;
+        end;
+        if run_text <> '' then
+        begin
+            index_run(run_text, run_start - 1);
+            run_text := '';
+        end;
+    end;
 end;
 
 function TncDocumentContextModel.merge_snapshot(const value: string;
@@ -336,7 +456,165 @@ begin
     if changed and (not requires_rebuild) then
     begin
         add_incremental_ngrams(incremental_text, incremental_prefix);
+        // The retained document is bounded to a few thousand characters.
+        // Rebuilding this index on a snapshot update keeps occurrence and
+        // recency values exact without adding work to the per-key query path.
+        rebuild_continuations;
     end;
+end;
+
+function TncDocumentContextModel.completion_feedback_key(
+    const anchor_text, suffix_text: string): string;
+begin
+    Result := Trim(anchor_text) + #1 + Trim(suffix_text);
+end;
+
+procedure TncDocumentContextModel.record_completion_feedback(
+    const anchor_text, suffix_text: string; const accepted: Boolean);
+var
+    key: string;
+    feedback: TncDocumentContinuationFeedback;
+begin
+    key := completion_feedback_key(anchor_text, suffix_text);
+    if (not has_context) or (Trim(anchor_text) = '') or
+        (Trim(suffix_text) = '') then
+    begin
+        Exit;
+    end;
+    feedback := Default(TncDocumentContinuationFeedback);
+    m_completion_feedback.TryGetValue(key, feedback);
+    if accepted then
+    begin
+        feedback.accept_count := Min(c_completion_feedback_cap,
+            feedback.accept_count + 1);
+    end
+    else
+    begin
+        feedback.reject_count := Min(c_completion_feedback_cap,
+            feedback.reject_count + 1);
+    end;
+    m_completion_feedback.AddOrSetValue(key, feedback);
+end;
+
+function TncDocumentContextModel.completion_feedback_score(
+    const anchor_text, suffix_text: string): Integer;
+var
+    feedback: TncDocumentContinuationFeedback;
+begin
+    Result := 0;
+    if (not has_context) or
+        (not m_completion_feedback.TryGetValue(
+        completion_feedback_key(anchor_text, suffix_text), feedback)) then
+    begin
+        Exit;
+    end;
+    Result := feedback.accept_count * 180 - feedback.reject_count * 220;
+end;
+
+function TncDocumentContextModel.lookup_continuations(
+    const current_text: string; const max_results: Integer;
+    out results: TncDocumentContinuationList): Boolean;
+var
+    lookup_text: string;
+    anchor_text: string;
+    values: TncDocumentContinuationMap;
+    pair: TPair<string, TncDocumentContinuationStats>;
+    deduplicated: TDictionary<string, TncDocumentContinuation>;
+    item: TncDocumentContinuation;
+    existing: TncDocumentContinuation;
+    width: Integer;
+    distance: Integer;
+    recency_bonus: Integer;
+    limit: Integer;
+    sort_idx: Integer;
+    insert_idx: Integer;
+    sort_item: TncDocumentContinuation;
+
+    function compare_continuations(const left_value,
+        right_value: TncDocumentContinuation): Integer;
+    begin
+        Result := right_value.evidence - left_value.evidence;
+        if Result = 0 then
+        begin
+            Result := Length(right_value.suffix_text) -
+                Length(left_value.suffix_text);
+        end;
+        if Result = 0 then
+        begin
+            Result := CompareText(left_value.suffix_text,
+                right_value.suffix_text);
+        end;
+    end;
+begin
+    SetLength(results, 0);
+    Result := False;
+    limit := Max(0, max_results);
+    if (not has_context) or (limit <= 0) then
+    begin
+        Exit;
+    end;
+    lookup_text := trim_tail(m_recent_tail + Trim(current_text),
+        c_max_completion_anchor_chars);
+    if Length(lookup_text) < c_min_completion_anchor_chars then
+    begin
+        Exit;
+    end;
+
+    deduplicated := TDictionary<string, TncDocumentContinuation>.Create;
+    try
+        for width := Min(c_max_completion_anchor_chars,
+            Length(lookup_text)) downto c_min_completion_anchor_chars do
+        begin
+            anchor_text := Copy(lookup_text,
+                Length(lookup_text) - width + 1, width);
+            if not m_continuations.TryGetValue(anchor_text, values) then
+            begin
+                Continue;
+            end;
+            for pair in values do
+            begin
+                item := Default(TncDocumentContinuation);
+                item.anchor_text := anchor_text;
+                item.suffix_text := pair.Key;
+                item.context_width := width;
+                item.occurrence_count := pair.Value.occurrence_count;
+                item.last_position := pair.Value.last_position;
+                distance := Max(0, Length(m_document_text) -
+                    pair.Value.last_position);
+                recency_bonus := Max(0, 256 - distance div 4);
+                item.evidence := width * 96 +
+                    Min(8, item.occurrence_count) * 88 + recency_bonus;
+                if deduplicated.TryGetValue(item.suffix_text, existing) and
+                    (existing.evidence >= item.evidence) then
+                begin
+                    Continue;
+                end;
+                deduplicated.AddOrSetValue(item.suffix_text, item);
+            end;
+        end;
+        results := deduplicated.Values.ToArray;
+    finally
+        deduplicated.Free;
+    end;
+
+    for sort_idx := 1 to High(results) do
+    begin
+        sort_item := results[sort_idx];
+        insert_idx := sort_idx - 1;
+        while (insert_idx >= 0) and
+            (compare_continuations(sort_item,
+            results[insert_idx]) < 0) do
+        begin
+            results[insert_idx + 1] := results[insert_idx];
+            Dec(insert_idx);
+        end;
+        results[insert_idx + 1] := sort_item;
+    end;
+    if Length(results) > limit then
+    begin
+        SetLength(results, limit);
+    end;
+    Result := Length(results) > 0;
 end;
 
 function TncDocumentContextModel.ngram_count(const value: string): Integer;

@@ -580,11 +580,15 @@ begin
     Result := PrepareContext(context_id, generation_id, context) = 0;
     if not Result then
         Exit;
-    context.Reset;
+    context.ClearModifierShortcut;
+    context.ClearComposition;
     if FLoadedContextId = context_id then
     begin
-        FEngine.Reset;
-        FLoadedContextId := c_invalid_context_id;
+        // Framework reset ends the current composition but keeps the same
+        // input context alive. Preserve document-local completion evidence;
+        // deactivation and context destruction still perform a full reset.
+        FEngine.Reset(True);
+        SetEngineLeftContext(context);
     end;
 end;
 

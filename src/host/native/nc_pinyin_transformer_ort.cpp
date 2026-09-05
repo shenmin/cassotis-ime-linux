@@ -580,14 +580,27 @@ constexpr std::array<char, 8> kLocalCompletionMagic{
     'C', 'A', 'S', 'L', 'C', 'I', '0', '1'};
 constexpr uint32_t kLocalCompletionLegacyIndexVersion = 1;
 constexpr uint32_t kLocalCompletionIndexVersion = 2;
+constexpr uint32_t kLocalCompletionFeatureContextualRepair = 1u << 0;
 constexpr size_t kLocalCompletionInputLength = 105;
 constexpr size_t kLocalCompletionCandidateCount = 32;
 constexpr size_t kLocalCompletionRecallPool = 384;
 constexpr size_t kLocalCompletionPathWords = 3;
 constexpr size_t kLocalCompletionFeatureCount = 8;
 constexpr size_t kLocalCompletionOutputCount = kLocalCompletionCandidateCount + 1;
+#if defined(CASSOTIS_EXPERIMENTAL_TOP32_CROSS_RANKER)
+constexpr size_t kLocalCompletionCrossContextChars = 64;
+constexpr size_t kLocalCompletionCrossQuerySyllables = 64;
+constexpr size_t kLocalCompletionCrossBaseChars = 64;
+constexpr size_t kLocalCompletionCrossCandidateChars = 16;
+constexpr size_t kLocalCompletionCrossCandidateLeftContext = 4;
+constexpr size_t kLocalCompletionCrossMaximumInputLength = 261;
+#endif
 
 #include "nc_local_completion_recall_selector.inc"
+#include "nc_local_completion_phonetic_recall_selector.inc"
+#if defined(CASSOTIS_EXPERIMENTAL_CONTEXTUAL_RECALL)
+#include "nc_local_completion_combined_recall_selector.inc"
+#endif
 
 #pragma pack(push, 1)
 struct LocalCompletionIndexHeader {
@@ -1061,6 +1074,10 @@ struct LocalRuntimeCandidate {
     int base_rank{};
     int anchor_width{};
     bool word_anchor{};
+    bool phonetic_anchor{};
+    bool contextual_anchor{};
+    int replace_units{};
+    int repair_words{};
     int rank_score{};
     int text_units{};
     int pinyin_units{};
@@ -1075,6 +1092,7 @@ struct LocalRuntimeCandidate {
     int specific_support_count{};
     int baseline_rank{};
     double selector_score{};
+    double guard_score{};
     std::string text;
 };
 
@@ -1085,14 +1103,34 @@ struct LocalCompletionHandle {
 
 bool SameRuntimeCandidate(const LocalRuntimeCandidate& left,
     const LocalRuntimeCandidate& right) {
-    return left.word_ids == right.word_ids;
+    if (left.word_ids != right.word_ids ||
+        left.replace_units != right.replace_units) {
+        return false;
+    }
+    // A phonetic repair is applied to its selected base path.  The same word
+    // IDs over Top1 and Top2 can therefore produce different visible text and
+    // must remain separate recall candidates.
+    return (!left.phonetic_anchor && !right.phonetic_anchor) ||
+        left.base_rank == right.base_rank;
 }
 
 uint64_t RuntimeCandidateKey(
-    const std::array<uint16_t, kLocalCompletionPathWords>& word_ids) {
+    const std::array<uint16_t, kLocalCompletionPathWords>& word_ids,
+    int replace_units = 0) {
     return static_cast<uint64_t>(word_ids[0]) |
         (static_cast<uint64_t>(word_ids[1]) << 16) |
-        (static_cast<uint64_t>(word_ids[2]) << 32);
+        (static_cast<uint64_t>(word_ids[2]) << 32) |
+        (static_cast<uint64_t>(replace_units & 0xff) << 48);
+}
+
+uint64_t PhoneticRepairKey(const LocalRuntimeCandidate& candidate) {
+    uint64_t key = static_cast<uint64_t>(candidate.word_ids[0]);
+    if (candidate.repair_words >= 2) {
+        key |= static_cast<uint64_t>(candidate.word_ids[1]) << 16;
+    }
+    key |= static_cast<uint64_t>(candidate.replace_units & 0xff) << 32;
+    key |= static_cast<uint64_t>(candidate.repair_words & 0xff) << 40;
+    return key;
 }
 
 void AppendUtf8Codepoint(std::string& output, uint32_t codepoint) {
@@ -1123,14 +1161,94 @@ std::string Utf8Suffix(const char* text, size_t width) {
     return result;
 }
 
+std::string CodepointSuffixUtf8(const std::vector<uint32_t>& codepoints,
+    size_t end, size_t width) {
+    const size_t bounded_end = std::min(end, codepoints.size());
+    const size_t start = bounded_end > width ? bounded_end - width : 0;
+    std::string result;
+    for (size_t position = start; position < bounded_end; ++position) {
+        AppendUtf8Codepoint(result, codepoints[position]);
+    }
+    return result;
+}
+
+int RepairWordCount(const LocalCompletionIndex& index,
+    const std::array<uint16_t, kLocalCompletionPathWords>& word_ids,
+    int replace_units) {
+    int units = 0;
+    int words = 0;
+    for (uint16_t word_id : word_ids) {
+        if (word_id == 0) {
+            break;
+        }
+        units += index.Word(word_id).text_units;
+        ++words;
+        if (units == replace_units) {
+            return words;
+        }
+        if (units > replace_units) {
+            return 0;
+        }
+    }
+    return 0;
+}
+
+int ContextualRepairWordCount(const LocalCompletionIndex& index,
+    const std::array<uint16_t, kLocalCompletionPathWords>& word_ids,
+    int replace_units, const std::vector<std::string>& query_syllables) {
+    if (replace_units <= 0 ||
+        static_cast<size_t>(replace_units) > query_syllables.size()) {
+        return 0;
+    }
+    int total_words = 0;
+    for (uint16_t word_id : word_ids) {
+        if (word_id != 0) {
+            ++total_words;
+        }
+    }
+    size_t query_position = query_syllables.size() - replace_units;
+    const size_t query_end = query_syllables.size();
+    for (int word_position = 0; word_position < total_words; ++word_position) {
+        const std::string_view pinyin = index.WordPinyin(word_ids[word_position]);
+        size_t part_start = 0;
+        while (part_start < pinyin.size()) {
+            const size_t separator = pinyin.find('\'', part_start);
+            const size_t part_end = separator == std::string_view::npos
+                ? pinyin.size() : separator;
+            if (part_end == part_start || query_position >= query_end ||
+                pinyin.substr(part_start, part_end - part_start) !=
+                    query_syllables[query_position]) {
+                return 0;
+            }
+            ++query_position;
+            if (separator == std::string_view::npos) {
+                break;
+            }
+            part_start = separator + 1;
+        }
+        if (query_position == query_end) {
+            return word_position + 1 < total_words ? word_position + 1 : 0;
+        }
+    }
+    return 0;
+}
+
 void MergeAnchorCandidates(const LocalCompletionIndex& index,
     const LocalCompletionAnchorRecord& anchor, int base_rank, int anchor_width,
     bool word_anchor, int backoff_bonus,
     std::vector<LocalRuntimeCandidate>& output,
-    std::unordered_map<uint64_t, size_t>& positions) {
+    std::unordered_map<uint64_t, size_t>& positions,
+    bool phonetic_anchor = false, int replace_units = 0) {
     for (uint32_t item = 0; item < anchor.candidate_count; ++item) {
         const auto source = index.Candidate(anchor.candidate_start + item);
-        const uint64_t key = RuntimeCandidateKey(source.word_ids);
+        const int repair_words = phonetic_anchor
+            ? RepairWordCount(index, source.word_ids, replace_units)
+            : 0;
+        if (phonetic_anchor && repair_words == 0) {
+            continue;
+        }
+        const uint64_t key = RuntimeCandidateKey(
+            source.word_ids, phonetic_anchor ? replace_units : 0);
         const int rank_score = source.score + backoff_bonus;
         auto found = positions.find(key);
         if (found == positions.end()) {
@@ -1138,15 +1256,18 @@ void MergeAnchorCandidates(const LocalCompletionIndex& index,
             value.source = source;
             value.word_ids = source.word_ids;
             value.base_rank = base_rank;
-            value.anchor_width = anchor_width;
+            value.anchor_width = phonetic_anchor ? repair_words : anchor_width;
             value.word_anchor = word_anchor;
+            value.phonetic_anchor = phonetic_anchor;
+            value.replace_units = replace_units;
+            value.repair_words = repair_words;
             value.rank_score = rank_score;
             value.support_count = 1;
             value.word_support_count = word_anchor ? 1 : 0;
             value.char_support_count = word_anchor ? 0 : 1;
             value.support_score_sum = rank_score;
             value.best_anchor_rank = static_cast<int>(item) + 1;
-            value.max_word_anchor_width = word_anchor ? anchor_width : 0;
+            value.max_word_anchor_width = word_anchor ? value.anchor_width : 0;
             value.max_char_anchor_width = word_anchor ? 0 : anchor_width;
             value.specific_support_count =
                 (word_anchor && anchor_width >= 2) ||
@@ -1182,8 +1303,11 @@ void MergeAnchorCandidates(const LocalCompletionIndex& index,
             (!word_anchor && anchor_width >= 4) ? 1 : 0;
         if (rank_score > previous.rank_score) {
             previous.source = source;
-            previous.anchor_width = anchor_width;
+            previous.anchor_width = phonetic_anchor ? repair_words : anchor_width;
             previous.word_anchor = word_anchor;
+            previous.phonetic_anchor = phonetic_anchor;
+            previous.replace_units = replace_units;
+            previous.repair_words = repair_words;
             previous.rank_score = rank_score;
         }
     }
@@ -1252,6 +1376,159 @@ std::vector<LocalRuntimeCandidate> BuildBaseCandidates(
     return result;
 }
 
+std::vector<LocalRuntimeCandidate> BuildPhoneticCandidates(
+    const LocalCompletionIndex& index, int base_rank,
+    const std::vector<std::string>& query_syllables) {
+    std::vector<LocalRuntimeCandidate> result;
+    std::unordered_map<uint64_t, size_t> positions;
+    const int max_width = std::min<int>(
+        6, static_cast<int>(query_syllables.size()));
+    for (int width = max_width; width >= 1; --width) {
+        std::string anchor = "p:" + std::to_string(width) + ":";
+        for (size_t position = query_syllables.size() - width;
+             position < query_syllables.size(); ++position) {
+            anchor.append(query_syllables[position]);
+        }
+        if (const auto* row = index.FindAnchor(anchor)) {
+            MergeAnchorCandidates(index, *row, base_rank, width, true, 0,
+                result, positions, true, width);
+        }
+    }
+    std::sort(result.begin(), result.end(),
+        [](const LocalRuntimeCandidate& left,
+           const LocalRuntimeCandidate& right) {
+            if (left.rank_score != right.rank_score) {
+                return left.rank_score > right.rank_score;
+            }
+            if (left.source.source_count != right.source.source_count) {
+                return left.source.source_count > right.source.source_count;
+            }
+            if (left.source.count != right.source.count) {
+                return left.source.count > right.source.count;
+            }
+            if (left.replace_units != right.replace_units) {
+                return left.replace_units > right.replace_units;
+            }
+            if (left.text != right.text) {
+                return left.text < right.text;
+            }
+            return left.word_ids < right.word_ids;
+        });
+    if (result.size() > kLocalCompletionRecallPool) {
+        result.resize(kLocalCompletionRecallPool);
+    }
+    for (auto& item : result) {
+        item.rank_score -= (base_rank - 1) * 12;
+    }
+    return result;
+}
+
+std::vector<LocalRuntimeCandidate> BuildContextualRepairCandidates(
+    const LocalCompletionIndex& index, int base_rank, const char* base_text,
+    const std::vector<std::string>& query_syllables) {
+    std::vector<LocalRuntimeCandidate> result;
+    std::unordered_map<uint64_t, size_t> positions;
+    const auto codepoints = Utf8Codepoints(base_text);
+    const int max_replace = std::min<int>({6,
+        static_cast<int>(query_syllables.size()),
+        static_cast<int>(codepoints.size()) - 1});
+    for (int replace_units = 1; replace_units <= max_replace; ++replace_units) {
+        const size_t stable_size = codepoints.size() - replace_units;
+        const int max_anchor_width = std::min<int>(
+            6, static_cast<int>(stable_size));
+        for (int anchor_width = max_anchor_width; anchor_width >= 1;
+             --anchor_width) {
+            const std::string anchor = "c:" + CodepointSuffixUtf8(
+                codepoints, stable_size, anchor_width);
+            const auto* row = index.FindAnchor(anchor);
+            if (row == nullptr) {
+                continue;
+            }
+            for (uint32_t item = 0; item < row->candidate_count; ++item) {
+                const auto source = index.Candidate(row->candidate_start + item);
+                const int repair_words = ContextualRepairWordCount(
+                    index, source.word_ids, replace_units, query_syllables);
+                if (repair_words == 0) {
+                    continue;
+                }
+                const uint64_t key = RuntimeCandidateKey(
+                    source.word_ids, replace_units);
+                const int rank_score = source.score + anchor_width * 20 -
+                    (base_rank - 1) * 12;
+                auto found = positions.find(key);
+                if (found == positions.end()) {
+                    LocalRuntimeCandidate value{};
+                    value.source = source;
+                    value.word_ids = source.word_ids;
+                    value.base_rank = base_rank;
+                    value.anchor_width = anchor_width;
+                    value.phonetic_anchor = true;
+                    value.contextual_anchor = true;
+                    value.replace_units = replace_units;
+                    value.repair_words = repair_words;
+                    value.rank_score = rank_score;
+                    value.support_count = 1;
+                    value.char_support_count = 1;
+                    value.support_score_sum = rank_score;
+                    value.best_anchor_rank = static_cast<int>(item) + 1;
+                    value.max_char_anchor_width = anchor_width;
+                    value.specific_support_count = anchor_width >= 4 ? 1 : 0;
+                    for (uint16_t word_id : value.word_ids) {
+                        if (word_id == 0) {
+                            continue;
+                        }
+                        const auto& word = index.Word(word_id);
+                        value.text_units += word.text_units;
+                        value.pinyin_units += word.syllable_count;
+                        ++value.path_words;
+                        value.text.append(index.WordText(word_id));
+                    }
+                    positions.emplace(key, result.size());
+                    result.push_back(std::move(value));
+                    continue;
+                }
+
+                auto& previous = result[found->second];
+                ++previous.support_count;
+                ++previous.char_support_count;
+                previous.support_score_sum += rank_score;
+                previous.best_anchor_rank = std::min(previous.best_anchor_rank,
+                    static_cast<int>(item) + 1);
+                previous.max_char_anchor_width = std::max(
+                    previous.max_char_anchor_width, anchor_width);
+                previous.specific_support_count += anchor_width >= 4 ? 1 : 0;
+                if (rank_score > previous.rank_score) {
+                    previous.source = source;
+                    previous.anchor_width = anchor_width;
+                    previous.repair_words = repair_words;
+                    previous.rank_score = rank_score;
+                }
+            }
+        }
+    }
+    std::sort(result.begin(), result.end(),
+        [](const LocalRuntimeCandidate& left,
+           const LocalRuntimeCandidate& right) {
+            if (left.rank_score != right.rank_score) {
+                return left.rank_score > right.rank_score;
+            }
+            if (left.source.source_count != right.source.source_count) {
+                return left.source.source_count > right.source.source_count;
+            }
+            if (left.source.count != right.source.count) {
+                return left.source.count > right.source.count;
+            }
+            if (left.base_rank != right.base_rank) {
+                return left.base_rank < right.base_rank;
+            }
+            return left.word_ids < right.word_ids;
+        });
+    if (result.size() > kLocalCompletionRecallPool) {
+        result.resize(kLocalCompletionRecallPool);
+    }
+    return result;
+}
+
 std::array<double, kLocalRecallFeatureCount> LocalRecallFeatures(
     const LocalRuntimeCandidate& item, int best_rank_score, int retrieval_rank) {
     const double count = static_cast<double>(std::max(0, item.source.count));
@@ -1288,6 +1565,62 @@ std::array<double, kLocalRecallFeatureCount> LocalRecallFeatures(
         static_cast<double>(item.max_word_anchor_width),
         static_cast<double>(item.max_char_anchor_width),
         static_cast<double>(item.specific_support_count),
+    };
+}
+
+std::array<double, kLocalPhoneticRecallFeatureCount>
+LocalPhoneticRecallFeatures(const LocalRuntimeCandidate& item,
+    int best_rank_score, int retrieval_rank) {
+    const double count = static_cast<double>(std::max(0, item.source.count));
+    const double source_count =
+        static_cast<double>(std::max(0, item.source.source_count));
+    const double anchor_total =
+        static_cast<double>(std::max(1, item.source.anchor_total));
+    const double rank_score = item.rank_score / 512.0;
+    const double log_rank = std::log1p(
+        static_cast<double>(std::max(1, retrieval_rank)));
+    const double repair_words =
+        static_cast<double>(std::max(1, item.repair_words));
+    const bool contextual = item.contextual_anchor;
+    const double support_count = static_cast<double>(
+        std::max(1, item.support_count));
+    const double specific = contextual
+        ? (item.max_char_anchor_width >= 4 ? 1.0 : 0.0)
+        : (item.repair_words >= 2 ? 1.0 : 0.0);
+    return {
+        contextual ? item.source.score / 512.0 : rank_score,
+        rank_score,
+        (item.rank_score - best_rank_score) / 512.0,
+        std::log1p(count),
+        source_count,
+        static_cast<double>(item.source.domain_count),
+        std::log1p(anchor_total),
+        std::log((count + 0.5) / (anchor_total + 1.0)),
+        source_count / std::max(1.0, count),
+        contextual ? 0.0 : 1.0,
+        repair_words,
+        static_cast<double>(item.base_rank),
+        log_rank,
+        static_cast<double>(item.path_words),
+        static_cast<double>(item.text_units),
+        static_cast<double>(item.pinyin_units),
+        item.path_words == 1 ? 1.0 : 0.0,
+        specific,
+        support_count,
+        contextual ? 0.0 : 1.0,
+        contextual ? support_count : 0.0,
+        contextual
+            ? item.support_score_sum / support_count / 512.0
+            : rank_score,
+        contextual
+            ? std::log1p(static_cast<double>(
+                std::max(0, item.best_anchor_rank)))
+            : log_rank,
+        contextual ? 0.0 : repair_words,
+        contextual ? static_cast<double>(item.max_char_anchor_width) : 0.0,
+        contextual
+            ? static_cast<double>(item.specific_support_count)
+            : specific,
     };
 }
 
@@ -1371,16 +1704,20 @@ bool BuildLocalRecallPool(const LocalCompletionIndex& index,
 bool BuildLocalInputs(const LocalCompletionIndex& index, const char* context,
     const char* query_syllables, const char* top1_text,
     const char* top1_path, const char* top2_text, const char* top2_path,
+    bool phonetic_only,
     std::array<int64_t, kLocalCompletionInputLength>& input_ids,
     std::array<int64_t, kLocalCompletionInputLength>& type_ids,
     std::array<int64_t, kLocalCompletionCandidateCount * kLocalCompletionPathWords>& candidate_ids,
     std::array<float, kLocalCompletionCandidateCount * kLocalCompletionFeatureCount>& candidate_features,
     std::vector<LocalRuntimeCandidate>& candidates) {
-    if (!BuildLocalRecallPool(index, top1_text, top1_path,
-            top2_text, top2_path, candidates)) {
-        return false;
+    if (!phonetic_only) {
+        BuildLocalRecallPool(index, top1_text, top1_path,
+            top2_text, top2_path, candidates);
+    } else {
+        candidates.clear();
     }
-    if (index.header().version == kLocalCompletionIndexVersion) {
+    if (!candidates.empty() &&
+        index.header().version == kLocalCompletionIndexVersion) {
         std::stable_sort(candidates.begin(), candidates.end(),
             [](const LocalRuntimeCandidate& left,
                const LocalRuntimeCandidate& right) {
@@ -1390,14 +1727,223 @@ bool BuildLocalInputs(const LocalCompletionIndex& index, const char* context,
                 return left.baseline_rank < right.baseline_rank;
             });
     }
-    if (candidates.size() > kLocalCompletionCandidateCount) {
-        candidates.resize(kLocalCompletionCandidateCount);
+    const auto pinyins = SplitPinyin(query_syllables);
+    const bool contextual_repair_enabled =
+#if defined(CASSOTIS_EXPERIMENTAL_CONTEXTUAL_RECALL)
+        (index.header().reserved &
+            kLocalCompletionFeatureContextualRepair) != 0;
+#else
+        false;
+#endif
+    std::vector<LocalRuntimeCandidate> phonetic_candidates;
+    std::vector<LocalRuntimeCandidate> contextual_candidates;
+    if (pinyins.size() >= 5) {
+        auto append_channel = [](
+            std::vector<LocalRuntimeCandidate>& target,
+            std::vector<LocalRuntimeCandidate>& values) {
+            for (auto& value : values) {
+                auto previous = std::find_if(
+                    target.begin(), target.end(),
+                    [&value](const LocalRuntimeCandidate& item) {
+                        return SameRuntimeCandidate(item, value);
+                    });
+                if (previous == target.end()) {
+                    target.push_back(std::move(value));
+                } else if ((previous->contextual_anchor &&
+                        !value.contextual_anchor) ||
+                    (previous->contextual_anchor == value.contextual_anchor &&
+                        value.rank_score > previous->rank_score)) {
+                    *previous = std::move(value);
+                }
+            }
+        };
+        auto top1_phonetic = BuildPhoneticCandidates(
+            index, 1, pinyins);
+        append_channel(phonetic_candidates, top1_phonetic);
+        if (contextual_repair_enabled) {
+            auto top1_contextual = BuildContextualRepairCandidates(
+                index, 1, top1_text, pinyins);
+            append_channel(contextual_candidates, top1_contextual);
+        }
+        if (top2_text != nullptr && *top2_text != '\0' &&
+            top2_path != nullptr && *top2_path != '\0') {
+            auto top2_phonetic = BuildPhoneticCandidates(
+                index, 2, pinyins);
+            append_channel(phonetic_candidates, top2_phonetic);
+            if (contextual_repair_enabled) {
+                auto top2_contextual = BuildContextualRepairCandidates(
+                    index, 2, top2_text, pinyins);
+                append_channel(contextual_candidates, top2_contextual);
+            }
+        }
+        auto score_channel = [&index](
+            std::vector<LocalRuntimeCandidate>& values) {
+            std::sort(values.begin(), values.end(),
+                [](const LocalRuntimeCandidate& left,
+                   const LocalRuntimeCandidate& right) {
+                    if (left.rank_score != right.rank_score) {
+                        return left.rank_score > right.rank_score;
+                    }
+                    if (left.source.source_count != right.source.source_count) {
+                        return left.source.source_count > right.source.source_count;
+                    }
+                    if (left.source.count != right.source.count) {
+                        return left.source.count > right.source.count;
+                    }
+                    if (left.base_rank != right.base_rank) {
+                        return left.base_rank < right.base_rank;
+                    }
+                    return left.word_ids < right.word_ids;
+                });
+            if (values.size() > kLocalCompletionRecallPool) {
+                values.resize(kLocalCompletionRecallPool);
+            }
+            if (values.empty() ||
+                index.header().version != kLocalCompletionIndexVersion) {
+                return;
+            }
+            const int best_rank_score = values.front().rank_score;
+            for (size_t position = 0; position < values.size(); ++position) {
+                auto& item = values[position];
+                item.baseline_rank = static_cast<int>(position) + 1;
+                const auto features = LocalPhoneticRecallFeatures(
+                    item, best_rank_score, item.baseline_rank);
+                const double phonetic_score =
+                    ScoreLocalPhoneticRecallSelector(features);
+#if defined(CASSOTIS_EXPERIMENTAL_CONTEXTUAL_RECALL)
+                item.guard_score = ScoreLocalCombinedRecallSelector(features);
+#else
+                item.guard_score = phonetic_score;
+#endif
+                item.selector_score = item.contextual_anchor
+                    ? item.guard_score
+                    : phonetic_score;
+            }
+        };
+        score_channel(phonetic_candidates);
+        score_channel(contextual_candidates);
+        phonetic_candidates.erase(std::remove_if(
+            phonetic_candidates.begin(), phonetic_candidates.end(),
+            [&candidates](const LocalRuntimeCandidate& value) {
+                return std::any_of(candidates.begin(), candidates.end(),
+                    [&value](const LocalRuntimeCandidate& item) {
+                        return SameRuntimeCandidate(item, value);
+                    });
+            }), phonetic_candidates.end());
+        contextual_candidates.erase(std::remove_if(
+            contextual_candidates.begin(), contextual_candidates.end(),
+            [&candidates, &phonetic_candidates](
+                const LocalRuntimeCandidate& value) {
+                return std::any_of(candidates.begin(), candidates.end(),
+                           [&value](const LocalRuntimeCandidate& item) {
+                               return SameRuntimeCandidate(item, value);
+                           }) ||
+                    std::any_of(phonetic_candidates.begin(),
+                        phonetic_candidates.end(),
+                        [&value](const LocalRuntimeCandidate& item) {
+                            return SameRuntimeCandidate(item, value);
+                        });
+            }), contextual_candidates.end());
+        std::stable_sort(phonetic_candidates.begin(),
+            phonetic_candidates.end(),
+            [](const LocalRuntimeCandidate& left,
+               const LocalRuntimeCandidate& right) {
+                if (left.selector_score != right.selector_score) {
+                    return left.selector_score > right.selector_score;
+                }
+                return left.baseline_rank < right.baseline_rank;
+            });
+        std::stable_sort(contextual_candidates.begin(),
+            contextual_candidates.end(),
+            [](const LocalRuntimeCandidate& left,
+               const LocalRuntimeCandidate& right) {
+                if (left.selector_score != right.selector_score) {
+                    return left.selector_score > right.selector_score;
+                }
+                return left.baseline_rank < right.baseline_rank;
+            });
+    }
+    const size_t requested_phonetic = pinyins.size() < 5
+        ? 0u
+        : (phonetic_only
+            ? kLocalCompletionCandidateCount
+            : (pinyins.size() <= 12 ? 4u : 1u));
+    std::vector<LocalRuntimeCandidate> selected_phonetic;
+    if (phonetic_only) {
+        const size_t protected_phonetic = std::min(
+            requested_phonetic, phonetic_candidates.size());
+        for (size_t position = 0; position < protected_phonetic; ++position) {
+            selected_phonetic.push_back(std::move(phonetic_candidates[position]));
+        }
+        int contextual_replacements = 0;
+        for (auto& challenger : contextual_candidates) {
+            if (selected_phonetic.size() < requested_phonetic) {
+                selected_phonetic.push_back(std::move(challenger));
+                ++contextual_replacements;
+                continue;
+            }
+            if (contextual_replacements >= 8 || selected_phonetic.empty()) {
+                break;
+            }
+            auto weakest = std::min_element(selected_phonetic.begin(),
+                selected_phonetic.end(),
+                [](const LocalRuntimeCandidate& left,
+                   const LocalRuntimeCandidate& right) {
+                    return left.guard_score < right.guard_score;
+                });
+            if (challenger.guard_score < weakest->guard_score + 0.5) {
+                break;
+            }
+            *weakest = std::move(challenger);
+            ++contextual_replacements;
+        }
+    } else {
+        const size_t phonetic_quota = std::min(
+            requested_phonetic, phonetic_candidates.size());
+        std::unordered_map<uint64_t, int> repair_counts;
+        for (auto& item : phonetic_candidates) {
+            const uint64_t repair_key = PhoneticRepairKey(item);
+            if (repair_counts[repair_key] >= 2) {
+                continue;
+            }
+            ++repair_counts[repair_key];
+            selected_phonetic.push_back(std::move(item));
+            if (selected_phonetic.size() >= phonetic_quota) {
+                break;
+            }
+        }
+        if (selected_phonetic.size() < phonetic_quota) {
+            for (auto& item : phonetic_candidates) {
+                if (std::any_of(selected_phonetic.begin(),
+                        selected_phonetic.end(),
+                        [&item](const LocalRuntimeCandidate& selected) {
+                            return SameRuntimeCandidate(selected, item);
+                        })) {
+                    continue;
+                }
+                selected_phonetic.push_back(std::move(item));
+                if (selected_phonetic.size() >= phonetic_quota) {
+                    break;
+                }
+            }
+        }
+    }
+    const size_t text_limit = kLocalCompletionCandidateCount -
+        std::min<size_t>(kLocalCompletionCandidateCount,
+            selected_phonetic.size());
+    if (candidates.size() > text_limit) {
+        candidates.resize(text_limit);
+    }
+    for (auto& item : selected_phonetic) {
+        candidates.push_back(std::move(item));
+    }
+    if (candidates.empty()) {
+        return false;
     }
 
     std::vector<int64_t> ids{static_cast<int64_t>(index.header().cls_id)};
     std::vector<int64_t> types{0};
     AppendTextInput(index, Utf8Codepoints(context), 12, 1, ids, types);
-    const auto pinyins = SplitPinyin(query_syllables);
     const size_t pinyin_start = pinyins.size() > 24 ? pinyins.size() - 24 : 0;
     for (size_t position = pinyin_start; position < pinyins.size(); ++position) {
         ids.push_back(index.header().pinyin_offset + index.PinyinId(pinyins[position]));
@@ -1429,7 +1975,8 @@ bool BuildLocalInputs(const LocalCompletionIndex& index, const char* context,
         candidate_features[feature_offset + 1] = static_cast<float>(item.source.count);
         candidate_features[feature_offset + 2] = static_cast<float>(item.source.source_count);
         candidate_features[feature_offset + 3] = static_cast<float>(item.source.domain_count);
-        candidate_features[feature_offset + 4] = static_cast<float>(item.anchor_width);
+        candidate_features[feature_offset + 4] = static_cast<float>(
+            item.phonetic_anchor ? -item.replace_units : item.anchor_width);
         candidate_features[feature_offset + 5] = static_cast<float>(item.base_rank);
         candidate_features[feature_offset + 6] = static_cast<float>(path_words);
         candidate_features[feature_offset + 7] = static_cast<float>(item.text_units);
@@ -1437,8 +1984,334 @@ bool BuildLocalInputs(const LocalCompletionIndex& index, const char* context,
     return true;
 }
 
+#if defined(CASSOTIS_EXPERIMENTAL_TOP32_CROSS_RANKER)
+struct LocalCrossModelInputs {
+    std::vector<int64_t> input_ids;
+    std::vector<int64_t> type_ids;
+    std::array<int64_t,
+        kLocalCompletionCandidateCount * kLocalCompletionCrossCandidateChars>
+        candidate_char_ids{};
+    std::array<int64_t,
+        kLocalCompletionCandidateCount * kLocalCompletionCrossCandidateChars>
+        candidate_pinyin_ids{};
+    std::array<int64_t,
+        kLocalCompletionCandidateCount * kLocalCompletionCrossCandidateChars>
+        candidate_boundary_ids{};
+    std::array<int64_t, kLocalCompletionCandidateCount> candidate_source_ids{};
+};
+
+std::vector<uint32_t> LocalCandidateSuggestion(
+    const LocalCompletionIndex& index, const LocalRuntimeCandidate& candidate,
+    const char* top1_text, const char* top2_text) {
+    const char* base_text = candidate.base_rank == 2 ? top2_text : top1_text;
+    auto result = Utf8Codepoints(base_text);
+    if (candidate.replace_units < 0 ||
+        static_cast<size_t>(candidate.replace_units) > result.size()) {
+        result.clear();
+    } else if (candidate.replace_units > 0) {
+        result.resize(result.size() - candidate.replace_units);
+    }
+    for (uint16_t word_id : candidate.word_ids) {
+        if (word_id == 0) {
+            continue;
+        }
+        const std::string word(index.WordText(word_id));
+        const auto codepoints = Utf8Codepoints(word.c_str());
+        result.insert(result.end(), codepoints.begin(), codepoints.end());
+    }
+    return result;
+}
+
+bool BuildLocalCrossModelInputs(const LocalCompletionIndex& index,
+    const char* context, const char* query_syllables,
+    const char* top1_text, const char* top2_text,
+    const std::vector<LocalRuntimeCandidate>& candidates,
+    LocalCrossModelInputs& output) {
+    output = LocalCrossModelInputs{};
+    output.input_ids.push_back(index.header().cls_id);
+    output.type_ids.push_back(0);
+    AppendTextInput(index, Utf8Codepoints(context),
+        kLocalCompletionCrossContextChars, 1,
+        output.input_ids, output.type_ids);
+    const auto pinyins = SplitPinyin(query_syllables);
+    const size_t pinyin_start = pinyins.size() >
+        kLocalCompletionCrossQuerySyllables
+        ? pinyins.size() - kLocalCompletionCrossQuerySyllables : 0;
+    for (size_t position = pinyin_start; position < pinyins.size(); ++position) {
+        output.input_ids.push_back(index.header().pinyin_offset +
+            index.PinyinId(pinyins[position]));
+        output.type_ids.push_back(2);
+    }
+    output.input_ids.push_back(index.header().separator_id);
+    output.type_ids.push_back(0);
+    AppendTextInput(index, Utf8Codepoints(top1_text),
+        kLocalCompletionCrossBaseChars, 3,
+        output.input_ids, output.type_ids);
+    AppendTextInput(index, Utf8Codepoints(top2_text),
+        kLocalCompletionCrossBaseChars, 4,
+        output.input_ids, output.type_ids);
+    if (output.input_ids.size() > kLocalCompletionCrossMaximumInputLength) {
+        return false;
+    }
+
+    const auto top1 = Utf8Codepoints(top1_text);
+    const auto top2 = Utf8Codepoints(top2_text);
+    const int64_t unknown_pinyin = index.header().pinyin_offset +
+        index.header().unknown_pinyin_id;
+    for (size_t candidate_index = 0;
+         candidate_index < candidates.size() &&
+             candidate_index < kLocalCompletionCandidateCount;
+         ++candidate_index) {
+        const auto& candidate = candidates[candidate_index];
+        const auto& base = candidate.base_rank == 2 ? top2 : top1;
+        const auto suggestion = LocalCandidateSuggestion(
+            index, candidate, top1_text, top2_text);
+        size_t common = 0;
+        while (common < base.size() && common < suggestion.size() &&
+               base[common] == suggestion[common]) {
+            ++common;
+        }
+        const size_t start = common > kLocalCompletionCrossCandidateLeftContext
+            ? common - kLocalCompletionCrossCandidateLeftContext : 0;
+        const size_t difference_offset = common - start;
+        const size_t tail_size = std::min(
+            kLocalCompletionCrossCandidateChars,
+            suggestion.size() > start ? suggestion.size() - start : 0);
+        const size_t offset = candidate_index *
+            kLocalCompletionCrossCandidateChars;
+        for (size_t position = 0; position < tail_size; ++position) {
+            output.candidate_char_ids[offset + position] =
+                index.CharId(suggestion[start + position]);
+            // The deployed training data deliberately uses an unknown
+            // pronunciation token here. This keeps the native path independent
+            // of an additional per-character pronunciation table.
+            output.candidate_pinyin_ids[offset + position] = unknown_pinyin;
+            output.candidate_boundary_ids[offset + position] =
+                position < difference_offset ? 1 : 2;
+        }
+        output.candidate_source_ids[candidate_index] =
+            (candidate.phonetic_anchor ? 3 : 1) +
+            (candidate.base_rank == 2 ? 1 : 0);
+    }
+    return true;
+}
+#endif
+
+struct LocalScoredRuntimeCandidate {
+    LocalRuntimeCandidate candidate;
+    float score{};
+};
+
+bool ScoreLocalCompletionCandidates(LocalCompletionHandle& handle,
+    const char* context, const char* query_syllables,
+    const char* top1_text, const char* top1_path,
+    const char* top2_text, const char* top2_path,
+    bool phonetic_only,
+    std::vector<LocalScoredRuntimeCandidate>& ranked_candidates,
+    float& abstain_score) {
+    std::array<int64_t, kLocalCompletionInputLength> input_ids{};
+    std::array<int64_t, kLocalCompletionInputLength> type_ids{};
+    std::array<int64_t,
+        kLocalCompletionCandidateCount * kLocalCompletionPathWords> candidate_ids{};
+    std::array<float,
+        kLocalCompletionCandidateCount * kLocalCompletionFeatureCount>
+        candidate_features{};
+    std::vector<LocalRuntimeCandidate> candidates;
+    if (!BuildLocalInputs(handle.index, context, query_syllables,
+            top1_text, top1_path, top2_text, top2_path, phonetic_only,
+            input_ids, type_ids,
+            candidate_ids, candidate_features, candidates)) {
+        return false;
+    }
+
+    std::array<float, kLocalCompletionOutputCount> model_scores{};
+    auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator,
+        OrtMemTypeDefault);
+    constexpr std::array<const char*, 1> output_names{"scores"};
+#if defined(CASSOTIS_EXPERIMENTAL_TOP32_CROSS_RANKER)
+    LocalCrossModelInputs cross_inputs;
+    if (!BuildLocalCrossModelInputs(handle.index, context, query_syllables,
+            top1_text, top2_text, candidates, cross_inputs)) {
+        return false;
+    }
+    const std::array<int64_t, 2> input_shape{
+        1, static_cast<int64_t>(cross_inputs.input_ids.size())};
+    const std::array<int64_t, 3> candidate_text_shape{
+        1, static_cast<int64_t>(kLocalCompletionCandidateCount),
+        static_cast<int64_t>(kLocalCompletionCrossCandidateChars)};
+    const std::array<int64_t, 2> candidate_source_shape{
+        1, static_cast<int64_t>(kLocalCompletionCandidateCount)};
+    const std::array<int64_t, 3> feature_shape{
+        1, static_cast<int64_t>(kLocalCompletionCandidateCount),
+        static_cast<int64_t>(kLocalCompletionFeatureCount)};
+    std::array<Ort::Value, 7> inputs{
+        Ort::Value::CreateTensor<int64_t>(memory, cross_inputs.input_ids.data(),
+            cross_inputs.input_ids.size(), input_shape.data(), input_shape.size()),
+        Ort::Value::CreateTensor<int64_t>(memory, cross_inputs.type_ids.data(),
+            cross_inputs.type_ids.size(), input_shape.data(), input_shape.size()),
+        Ort::Value::CreateTensor<int64_t>(memory,
+            cross_inputs.candidate_char_ids.data(),
+            cross_inputs.candidate_char_ids.size(), candidate_text_shape.data(),
+            candidate_text_shape.size()),
+        Ort::Value::CreateTensor<int64_t>(memory,
+            cross_inputs.candidate_pinyin_ids.data(),
+            cross_inputs.candidate_pinyin_ids.size(), candidate_text_shape.data(),
+            candidate_text_shape.size()),
+        Ort::Value::CreateTensor<int64_t>(memory,
+            cross_inputs.candidate_boundary_ids.data(),
+            cross_inputs.candidate_boundary_ids.size(), candidate_text_shape.data(),
+            candidate_text_shape.size()),
+        Ort::Value::CreateTensor<int64_t>(memory,
+            cross_inputs.candidate_source_ids.data(),
+            cross_inputs.candidate_source_ids.size(), candidate_source_shape.data(),
+            candidate_source_shape.size()),
+        Ort::Value::CreateTensor<float>(memory, candidate_features.data(),
+            candidate_features.size(), feature_shape.data(), feature_shape.size())};
+    constexpr std::array<const char*, 7> input_names{
+        "input_ids", "type_ids", "candidate_char_ids",
+        "candidate_pinyin_ids", "candidate_boundary_ids",
+        "candidate_source_ids", "candidate_features"};
+#else
+    const std::array<int64_t, 2> input_shape{
+        1, static_cast<int64_t>(kLocalCompletionInputLength)};
+    const std::array<int64_t, 3> candidate_shape{
+        1, static_cast<int64_t>(kLocalCompletionCandidateCount),
+        static_cast<int64_t>(kLocalCompletionPathWords)};
+    const std::array<int64_t, 3> feature_shape{
+        1, static_cast<int64_t>(kLocalCompletionCandidateCount),
+        static_cast<int64_t>(kLocalCompletionFeatureCount)};
+    std::array<Ort::Value, 4> inputs{
+        Ort::Value::CreateTensor<int64_t>(memory, input_ids.data(),
+            input_ids.size(), input_shape.data(), input_shape.size()),
+        Ort::Value::CreateTensor<int64_t>(memory, type_ids.data(),
+            type_ids.size(), input_shape.data(), input_shape.size()),
+        Ort::Value::CreateTensor<int64_t>(memory, candidate_ids.data(),
+            candidate_ids.size(), candidate_shape.data(), candidate_shape.size()),
+        Ort::Value::CreateTensor<float>(memory, candidate_features.data(),
+            candidate_features.size(), feature_shape.data(), feature_shape.size())};
+    constexpr std::array<const char*, 4> input_names{
+        "input_ids", "type_ids", "candidate_ids", "candidate_features"};
+#endif
+    auto outputs = handle.session->Run(Ort::RunOptions{nullptr},
+        input_names.data(), inputs.data(), inputs.size(), output_names.data(),
+        output_names.size());
+    if (outputs.size() != 1 || !outputs[0].IsTensor() ||
+        outputs[0].GetTensorTypeAndShapeInfo().GetElementCount() <
+            kLocalCompletionOutputCount) {
+        throw std::runtime_error(
+            "local-completion model returned an invalid output tensor");
+    }
+    std::copy_n(outputs[0].GetTensorData<float>(),
+        kLocalCompletionOutputCount, model_scores.begin());
+    abstain_score = model_scores[kLocalCompletionCandidateCount];
+    ranked_candidates.clear();
+    ranked_candidates.reserve(candidates.size());
+    for (size_t index_value = 0; index_value < candidates.size(); ++index_value) {
+        ranked_candidates.push_back(
+            LocalScoredRuntimeCandidate{std::move(candidates[index_value]),
+                model_scores[index_value]});
+    }
+    std::stable_sort(ranked_candidates.begin(), ranked_candidates.end(),
+        [](const LocalScoredRuntimeCandidate& left,
+           const LocalScoredRuntimeCandidate& right) {
+            // Preserve the model-input order on an exact score tie. The
+            // single-result ABI scans this same input array and keeps the
+            // first maximum, so the diagnostic pool must use that tie break.
+            return left.score > right.score;
+        });
+    return !ranked_candidates.empty();
+}
+
+bool BuildLocalCandidateOutput(const LocalCompletionIndex& index,
+    const LocalRuntimeCandidate& candidate, std::string& suffix_text,
+    std::string& suffix_pinyin, std::string& suffix_path,
+    int& replace_units) {
+    std::string text;
+    std::string pinyin;
+    suffix_path.clear();
+    for (uint16_t word_id : candidate.word_ids) {
+        if (word_id == 0) {
+            continue;
+        }
+        const std::string_view word_text = index.WordText(word_id);
+        const std::string_view word_pinyin = index.WordPinyin(word_id);
+        text.append(word_text);
+        if (!pinyin.empty()) {
+            pinyin.push_back('\3');
+        }
+        pinyin.append(word_pinyin);
+        if (!suffix_path.empty()) {
+            suffix_path.push_back('\3');
+        }
+        suffix_path.append(word_text);
+    }
+    if (text.empty() || pinyin.empty()) {
+        return false;
+    }
+    suffix_text = std::move(text);
+    suffix_pinyin = std::move(pinyin);
+    replace_units = candidate.replace_units;
+    return true;
+}
+
 void WarmLocalCompletionSession(Ort::Session& session,
     const LocalCompletionIndex& index) {
+#if defined(CASSOTIS_EXPERIMENTAL_TOP32_CROSS_RANKER)
+    std::array<int64_t, 1> input_ids{
+        static_cast<int64_t>(index.header().cls_id)};
+    std::array<int64_t, 1> type_ids{};
+    std::array<int64_t,
+        kLocalCompletionCandidateCount * kLocalCompletionCrossCandidateChars>
+        candidate_char_ids{};
+    std::array<int64_t,
+        kLocalCompletionCandidateCount * kLocalCompletionCrossCandidateChars>
+        candidate_pinyin_ids{};
+    std::array<int64_t,
+        kLocalCompletionCandidateCount * kLocalCompletionCrossCandidateChars>
+        candidate_boundary_ids{};
+    std::array<int64_t, kLocalCompletionCandidateCount> candidate_source_ids{};
+    std::array<float,
+        kLocalCompletionCandidateCount * kLocalCompletionFeatureCount>
+        candidate_features{};
+    candidate_char_ids[0] = index.header().unknown_char_id;
+    candidate_pinyin_ids[0] = index.header().pinyin_offset +
+        index.header().unknown_pinyin_id;
+    candidate_boundary_ids[0] = 2;
+    candidate_source_ids[0] = 1;
+    const std::array<int64_t, 2> input_shape{1, 1};
+    const std::array<int64_t, 3> candidate_text_shape{
+        1, static_cast<int64_t>(kLocalCompletionCandidateCount),
+        static_cast<int64_t>(kLocalCompletionCrossCandidateChars)};
+    const std::array<int64_t, 2> candidate_source_shape{
+        1, static_cast<int64_t>(kLocalCompletionCandidateCount)};
+    const std::array<int64_t, 3> feature_shape{
+        1, static_cast<int64_t>(kLocalCompletionCandidateCount),
+        static_cast<int64_t>(kLocalCompletionFeatureCount)};
+    auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+    std::array<Ort::Value, 7> inputs{
+        Ort::Value::CreateTensor<int64_t>(memory, input_ids.data(), input_ids.size(),
+            input_shape.data(), input_shape.size()),
+        Ort::Value::CreateTensor<int64_t>(memory, type_ids.data(), type_ids.size(),
+            input_shape.data(), input_shape.size()),
+        Ort::Value::CreateTensor<int64_t>(memory, candidate_char_ids.data(),
+            candidate_char_ids.size(), candidate_text_shape.data(),
+            candidate_text_shape.size()),
+        Ort::Value::CreateTensor<int64_t>(memory, candidate_pinyin_ids.data(),
+            candidate_pinyin_ids.size(), candidate_text_shape.data(),
+            candidate_text_shape.size()),
+        Ort::Value::CreateTensor<int64_t>(memory, candidate_boundary_ids.data(),
+            candidate_boundary_ids.size(), candidate_text_shape.data(),
+            candidate_text_shape.size()),
+        Ort::Value::CreateTensor<int64_t>(memory, candidate_source_ids.data(),
+            candidate_source_ids.size(), candidate_source_shape.data(),
+            candidate_source_shape.size()),
+        Ort::Value::CreateTensor<float>(memory, candidate_features.data(),
+            candidate_features.size(), feature_shape.data(), feature_shape.size())};
+    constexpr std::array<const char*, 7> input_names{
+        "input_ids", "type_ids", "candidate_char_ids",
+        "candidate_pinyin_ids", "candidate_boundary_ids",
+        "candidate_source_ids", "candidate_features"};
+#else
     std::array<int64_t, kLocalCompletionInputLength> input_ids{};
     std::array<int64_t, kLocalCompletionInputLength> type_ids{};
     std::array<int64_t,
@@ -1469,6 +2342,7 @@ void WarmLocalCompletionSession(Ort::Session& session,
             candidate_features.size(), feature_shape.data(), feature_shape.size())};
     constexpr std::array<const char*, 4> input_names{
         "input_ids", "type_ids", "candidate_ids", "candidate_features"};
+#endif
     constexpr std::array<const char*, 1> output_names{"scores"};
     const auto outputs = session.Run(Ort::RunOptions{nullptr}, input_names.data(),
         inputs.data(), inputs.size(), output_names.data(), output_names.size());
@@ -1543,6 +2417,7 @@ extern "C" CASSOTIS_EXPORT int nc_lc_build_inputs_for_test(
     const char* top1_path,
     const char* top2_text,
     const char* top2_path,
+    int phonetic_only,
     int64_t* output_input_ids,
     int64_t* output_type_ids,
     int64_t* output_candidate_ids,
@@ -1563,7 +2438,8 @@ extern "C" CASSOTIS_EXPORT int nc_lc_build_inputs_for_test(
             kLocalCompletionCandidateCount * kLocalCompletionFeatureCount> candidate_features{};
         std::vector<LocalRuntimeCandidate> candidates;
         if (!BuildLocalInputs(handle->index, context, query_syllables,
-                top1_text, top1_path, top2_text, top2_path, input_ids, type_ids,
+                top1_text, top1_path, top2_text, top2_path,
+                phonetic_only != 0, input_ids, type_ids,
                 candidate_ids, candidate_features, candidates)) {
             return 0;
         }
@@ -1597,6 +2473,53 @@ extern "C" CASSOTIS_EXPORT int nc_lc_score_recall_selector_for_test(
     } catch (...) {
         return 0;
     }
+}
+
+extern "C" CASSOTIS_EXPORT int
+nc_lc_score_phonetic_recall_selector_for_test(const double* features,
+    int row_count, double* output_scores) {
+    if (features == nullptr || output_scores == nullptr || row_count < 0) {
+        return 0;
+    }
+    try {
+        for (int row = 0; row < row_count; ++row) {
+            std::array<double, kLocalPhoneticRecallFeatureCount> values{};
+            std::copy_n(
+                features + row * kLocalPhoneticRecallFeatureCount,
+                kLocalPhoneticRecallFeatureCount, values.begin());
+            output_scores[row] = ScoreLocalPhoneticRecallSelector(values);
+        }
+        return 1;
+    } catch (...) {
+        return 0;
+    }
+}
+
+extern "C" CASSOTIS_EXPORT int
+nc_lc_score_combined_recall_selector_for_test(const double* features,
+    int row_count, double* output_scores) {
+#if defined(CASSOTIS_EXPERIMENTAL_CONTEXTUAL_RECALL)
+    if (features == nullptr || output_scores == nullptr || row_count < 0) {
+        return 0;
+    }
+    try {
+        for (int row = 0; row < row_count; ++row) {
+            std::array<double, kLocalPhoneticRecallFeatureCount> values{};
+            std::copy_n(
+                features + row * kLocalPhoneticRecallFeatureCount,
+                kLocalPhoneticRecallFeatureCount, values.begin());
+            output_scores[row] = ScoreLocalCombinedRecallSelector(values);
+        }
+        return 1;
+    } catch (...) {
+        return 0;
+    }
+#else
+    (void)features;
+    (void)row_count;
+    (void)output_scores;
+    return 0;
+#endif
 }
 
 extern "C" CASSOTIS_EXPORT int nc_lc_build_recall_pool_for_test(
@@ -1649,6 +2572,7 @@ extern "C" CASSOTIS_EXPORT int nc_lc_run(
     const char* top1_path,
     const char* top2_text,
     const char* top2_path,
+    int phonetic_only,
     float minimum_confidence,
     char* output_suffix_text,
     int output_suffix_text_capacity,
@@ -1657,6 +2581,7 @@ extern "C" CASSOTIS_EXPORT int nc_lc_run(
     char* output_suffix_path,
     int output_suffix_path_capacity,
     int* output_base_rank,
+    int* output_replace_units,
     float* output_confidence,
     char* error_text,
     int error_capacity) {
@@ -1667,12 +2592,16 @@ extern "C" CASSOTIS_EXPORT int nc_lc_run(
     if (output_base_rank != nullptr) {
         *output_base_rank = 0;
     }
+    if (output_replace_units != nullptr) {
+        *output_replace_units = 0;
+    }
     if (output_confidence != nullptr) {
         *output_confidence = 0.0f;
     }
     if (opaque_handle == nullptr || output_suffix_text == nullptr ||
         output_suffix_pinyin == nullptr || output_suffix_path == nullptr ||
-        output_base_rank == nullptr || output_confidence == nullptr) {
+        output_base_rank == nullptr || output_replace_units == nullptr ||
+        output_confidence == nullptr) {
         SetError(error_text, error_capacity,
             "invalid local-completion inference arguments");
         return 0;
@@ -1685,90 +2614,31 @@ extern "C" CASSOTIS_EXPORT int nc_lc_run(
                 "local-completion model session is unavailable");
             return 0;
         }
-        std::array<int64_t, kLocalCompletionInputLength> input_ids{};
-        std::array<int64_t, kLocalCompletionInputLength> type_ids{};
-        std::array<int64_t,
-            kLocalCompletionCandidateCount * kLocalCompletionPathWords> candidate_ids{};
-        std::array<float,
-            kLocalCompletionCandidateCount * kLocalCompletionFeatureCount> candidate_features{};
-        std::vector<LocalRuntimeCandidate> candidates;
-        if (!BuildLocalInputs(handle->index, context, query_syllables,
-                top1_text, top1_path, top2_text, top2_path, input_ids, type_ids,
-                candidate_ids, candidate_features, candidates)) {
+        std::vector<LocalScoredRuntimeCandidate> ranked_candidates;
+        float abstain_score = 0.0f;
+        if (!ScoreLocalCompletionCandidates(*handle, context,
+                query_syllables, top1_text, top1_path, top2_text, top2_path,
+                phonetic_only != 0, ranked_candidates, abstain_score)) {
             return 0;
         }
-
-        const std::array<int64_t, 2> input_shape{
-            1, static_cast<int64_t>(kLocalCompletionInputLength)};
-        const std::array<int64_t, 3> candidate_shape{
-            1, static_cast<int64_t>(kLocalCompletionCandidateCount),
-            static_cast<int64_t>(kLocalCompletionPathWords)};
-        const std::array<int64_t, 3> feature_shape{
-            1, static_cast<int64_t>(kLocalCompletionCandidateCount),
-            static_cast<int64_t>(kLocalCompletionFeatureCount)};
-        auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-        std::array<Ort::Value, 4> inputs{
-            Ort::Value::CreateTensor<int64_t>(memory, input_ids.data(), input_ids.size(),
-                input_shape.data(), input_shape.size()),
-            Ort::Value::CreateTensor<int64_t>(memory, type_ids.data(), type_ids.size(),
-                input_shape.data(), input_shape.size()),
-            Ort::Value::CreateTensor<int64_t>(memory, candidate_ids.data(),
-                candidate_ids.size(), candidate_shape.data(), candidate_shape.size()),
-            Ort::Value::CreateTensor<float>(memory, candidate_features.data(),
-                candidate_features.size(), feature_shape.data(), feature_shape.size())};
-        constexpr std::array<const char*, 4> input_names{
-            "input_ids", "type_ids", "candidate_ids", "candidate_features"};
-        constexpr std::array<const char*, 1> output_names{"scores"};
-        auto outputs = handle->session->Run(Ort::RunOptions{nullptr},
-            input_names.data(), inputs.data(), inputs.size(), output_names.data(),
-            output_names.size());
-        if (outputs.size() != 1 || !outputs[0].IsTensor() ||
-            outputs[0].GetTensorTypeAndShapeInfo().GetElementCount() <
-                kLocalCompletionOutputCount) {
-            SetError(error_text, error_capacity,
-                "local-completion model returned an invalid output tensor");
-            return 0;
-        }
-        const float* scores = outputs[0].GetTensorData<float>();
-        size_t best_index = 0;
-        float best_score = -std::numeric_limits<float>::infinity();
-        float second_score = scores[kLocalCompletionCandidateCount];
-        for (size_t index_value = 0; index_value < candidates.size(); ++index_value) {
-            const float score = scores[index_value];
-            if (score > best_score) {
-                second_score = std::max(second_score, best_score);
-                best_score = score;
-                best_index = index_value;
-            } else {
-                second_score = std::max(second_score, score);
-            }
+        const float best_score = ranked_candidates.front().score;
+        float second_score = abstain_score;
+        if (ranked_candidates.size() > 1) {
+            second_score = std::max(second_score, ranked_candidates[1].score);
         }
         const float confidence = best_score - second_score;
-        if (best_score <= scores[kLocalCompletionCandidateCount] ||
-            confidence < minimum_confidence) {
+        // The calibrated threshold is joint with the explicit ABSTAIN score
+        // and can be negative; do not add a second hard ABSTAIN gate here.
+        if (confidence < minimum_confidence) {
             return 0;
         }
-        const auto& selected = candidates[best_index];
+        const auto& selected = ranked_candidates.front().candidate;
         std::string suffix_text;
         std::string suffix_pinyin;
         std::string suffix_path;
-        for (uint16_t word_id : selected.word_ids) {
-            if (word_id == 0) {
-                continue;
-            }
-            const std::string_view word_text = handle->index.WordText(word_id);
-            const std::string_view word_pinyin = handle->index.WordPinyin(word_id);
-            suffix_text.append(word_text);
-            if (!suffix_pinyin.empty()) {
-                suffix_pinyin.push_back('\3');
-            }
-            suffix_pinyin.append(word_pinyin);
-            if (!suffix_path.empty()) {
-                suffix_path.push_back('\3');
-            }
-            suffix_path.append(word_text);
-        }
-        if (suffix_text.empty() || suffix_pinyin.empty()) {
+        int replace_units = 0;
+        if (!BuildLocalCandidateOutput(handle->index, selected,
+                suffix_text, suffix_pinyin, suffix_path, replace_units)) {
             return 0;
         }
         SetOutput(output_suffix_text, output_suffix_text_capacity, suffix_text);
@@ -1776,6 +2646,7 @@ extern "C" CASSOTIS_EXPORT int nc_lc_run(
             suffix_pinyin);
         SetOutput(output_suffix_path, output_suffix_path_capacity, suffix_path);
         *output_base_rank = selected.base_rank;
+        *output_replace_units = replace_units;
         *output_confidence = confidence;
         return 1;
     } catch (const Ort::Exception& error) {
@@ -1785,6 +2656,100 @@ extern "C" CASSOTIS_EXPORT int nc_lc_run(
     } catch (...) {
         SetError(error_text, error_capacity,
             "unknown local-completion inference failure");
+    }
+    return 0;
+}
+
+extern "C" CASSOTIS_EXPORT int nc_lc_run_pool(
+    void* opaque_handle,
+    const char* context,
+    const char* query_syllables,
+    const char* top1_text,
+    const char* top1_path,
+    const char* top2_text,
+    const char* top2_path,
+    int phonetic_only,
+    char* output_suffix_texts,
+    int output_suffix_text_stride,
+    char* output_suffix_pinyins,
+    int output_suffix_pinyin_stride,
+    char* output_suffix_paths,
+    int output_suffix_path_stride,
+    int* output_base_ranks,
+    int* output_replace_units,
+    float* output_scores,
+    int output_capacity,
+    float* output_abstain_score,
+    int* output_candidate_count,
+    char* error_text,
+    int error_capacity) {
+    SetError(error_text, error_capacity, "");
+    if (opaque_handle == nullptr || output_suffix_texts == nullptr ||
+        output_suffix_pinyins == nullptr || output_suffix_paths == nullptr ||
+        output_base_ranks == nullptr || output_replace_units == nullptr ||
+        output_scores == nullptr || output_abstain_score == nullptr ||
+        output_candidate_count == nullptr || output_suffix_text_stride < 2 ||
+        output_suffix_pinyin_stride < 2 || output_suffix_path_stride < 2 ||
+        output_capacity <= 0) {
+        SetError(error_text, error_capacity,
+            "invalid local-completion pool inference arguments");
+        return 0;
+    }
+    *output_candidate_count = 0;
+    *output_abstain_score = 0.0f;
+    try {
+        FloatingPointMaskGuard floating_point_guard;
+        auto* handle = static_cast<LocalCompletionHandle*>(opaque_handle);
+        if (!handle->session) {
+            SetError(error_text, error_capacity,
+                "local-completion model session is unavailable");
+            return 0;
+        }
+        std::vector<LocalScoredRuntimeCandidate> ranked_candidates;
+        float abstain_score = 0.0f;
+        if (!ScoreLocalCompletionCandidates(*handle, context,
+                query_syllables, top1_text, top1_path, top2_text, top2_path,
+                phonetic_only != 0, ranked_candidates, abstain_score)) {
+            return 0;
+        }
+        const int count = std::min<int>(output_capacity,
+            static_cast<int>(ranked_candidates.size()));
+        int written = 0;
+        for (int index_value = 0; index_value < count; ++index_value) {
+            std::string suffix_text;
+            std::string suffix_pinyin;
+            std::string suffix_path;
+            int replace_units = 0;
+            const auto& item = ranked_candidates[index_value];
+            if (!BuildLocalCandidateOutput(handle->index, item.candidate,
+                    suffix_text, suffix_pinyin, suffix_path,
+                    replace_units)) {
+                continue;
+            }
+            SetOutput(output_suffix_texts +
+                written * output_suffix_text_stride,
+                output_suffix_text_stride, suffix_text);
+            SetOutput(output_suffix_pinyins +
+                written * output_suffix_pinyin_stride,
+                output_suffix_pinyin_stride, suffix_pinyin);
+            SetOutput(output_suffix_paths +
+                written * output_suffix_path_stride,
+                output_suffix_path_stride, suffix_path);
+            output_base_ranks[written] = item.candidate.base_rank;
+            output_replace_units[written] = replace_units;
+            output_scores[written] = item.score;
+            ++written;
+        }
+        *output_abstain_score = abstain_score;
+        *output_candidate_count = written;
+        return written > 0 ? 1 : 0;
+    } catch (const Ort::Exception& error) {
+        SetError(error_text, error_capacity, ErrorText(error.what()));
+    } catch (const std::exception& error) {
+        SetError(error_text, error_capacity, ErrorText(error.what()));
+    } catch (...) {
+        SetError(error_text, error_capacity,
+            "unknown local-completion pool inference failure");
     }
     return 0;
 }
