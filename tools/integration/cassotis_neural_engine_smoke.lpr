@@ -12,6 +12,7 @@ uses
     cwstring,
     {$endif}
     Classes,
+    fpjson,
     Math,
     SysUtils,
     nc_config,
@@ -143,7 +144,8 @@ end;
 procedure evaluate_case(const engine: TncEngine;
     const completion_host: TncLocalCompletionHost;
     const parser: TncPinyinParser; const sentence, full_pinyin: string;
-    const generation: QWord; var totals: TncSmokeTotals);
+    const generation: QWord; var totals: TncSmokeTotals;
+    const trace: TStream);
 var
     syllables: TncPinyinParseResult;
     typed_units: Integer;
@@ -156,72 +158,112 @@ var
     completion_pinyin: string;
     saved_keys: Integer;
     hit: Boolean;
+    stage: string;
+    trace_row: TJSONObject;
+    trace_bytes: UTF8String;
 begin
-    syllables := parser.parse(LowerCase(Trim(full_pinyin)));
-    if Length(syllables) < 5 then
-        Exit;
-    typed_units := Max(4, Length(syllables) - 4);
-    if typed_units >= Length(syllables) then
-        Exit;
+    stage := 'parse';
+    request := Default(TncLongNeuralCompletionRequest);
+    finished := Default(TncLocalCompletionFinished);
+    completion := Default(TncOneKeyCompletion);
+    typed_prefix := '';
+    try
+        syllables := parser.parse(LowerCase(Trim(full_pinyin)));
+        if Length(syllables) < 5 then
+            Exit;
+        typed_units := Max(4, Length(syllables) - 4);
+        if typed_units >= Length(syllables) then
+            Exit;
 
-    Inc(totals.opportunities);
-    typed_prefix := join_syllables(syllables, typed_units);
-    target_prefix_text := Copy(sentence, 1, typed_units);
-    engine.reset;
-    engine.set_external_left_context('');
-    engine.debug_set_composition_text(typed_prefix);
-    if not engine.get_long_neural_completion_request(request) then
-        Exit;
+        Inc(totals.opportunities);
+        typed_prefix := join_syllables(syllables, typed_units);
+        target_prefix_text := Copy(sentence, 1, typed_units);
+        engine.reset;
+        engine.set_external_left_context('');
+        engine.debug_set_composition_text(typed_prefix);
+        stage := 'no-request';
+        if not engine.get_long_neural_completion_request(request) then
+            Exit;
 
-    Inc(totals.requests);
-    task := Default(TncLocalCompletionTask);
-    task.context_id := 1;
-    task.generation_id := generation;
-    task.request := request;
-    if not completion_host.Enqueue(task) then
-        raise Exception.Create('local completion request was not queued');
-    if not wait_for_task(completion_host, task.context_id, finished) then
-        raise Exception.Create('local completion request timed out');
-    if finished.task.generation_id <> generation then
-        raise Exception.Create('local completion generation mismatch');
-    if not finished.accepted then
-        Exit;
+        stage := 'request';
+        Inc(totals.requests);
+        task := Default(TncLocalCompletionTask);
+        task.context_id := 1;
+        task.generation_id := generation;
+        task.request := request;
+        if not completion_host.Enqueue(task) then
+            raise Exception.Create('local completion request was not queued');
+        if not wait_for_task(completion_host, task.context_id, finished) then
+            raise Exception.Create('local completion request timed out');
+        if finished.task.generation_id <> generation then
+            raise Exception.Create('local completion generation mismatch');
+        if not finished.accepted then
+            Exit;
 
-    Inc(totals.accepted);
-    if not engine.apply_long_neural_completion(request,
-        finished.completion_result) then
-        Exit;
-    Inc(totals.applied);
-    completion := engine.get_one_key_completion;
-    if (completion.source <> okcs_long_neural) or
-        (Trim(completion.text) = '') then
-        raise Exception.Create('applied neural completion is not visible');
-    Inc(totals.visible);
-    completion_pinyin := StringReplace(completion.full_pinyin, '''', '',
-        [rfReplaceAll]);
-    hit := (Length(completion.text) > Length(target_prefix_text)) and
-        (Length(completion_pinyin) > Length(typed_prefix)) and
-        SameText(Copy(completion.text, 1, Length(target_prefix_text)),
-        target_prefix_text) and
-        SameText(Copy(sentence, 1, Length(completion.text)),
-        completion.text);
-    if hit then
-    begin
-        Inc(totals.hits);
-        saved_keys := Max(0, Length(completion_pinyin) -
-            Length(typed_prefix) - 1);
-        Inc(totals.saved_keys, saved_keys);
-    end
-    else
-        Inc(totals.wrong_prompts);
-    update_signature(totals.completion_signature, IntToStr(generation) + #9 +
-        completion.text + #9 + completion.full_pinyin + #9 +
-        IntToStr(Ord(hit)) + #10);
-    if totals.visible = 1 then
-    begin
-        WriteLn('sample.query=', UTF8Encode(typed_prefix));
-        WriteLn('sample.sentence=', UTF8Encode(sentence));
-        WriteLn('sample.completion=', UTF8Encode(completion.text));
+        stage := 'accepted';
+        Inc(totals.accepted);
+        if not engine.apply_long_neural_completion(request,
+            finished.completion_result) then
+            Exit;
+        Inc(totals.applied);
+        completion := engine.get_one_key_completion;
+        if (completion.source <> okcs_long_neural) or
+            (Trim(completion.text) = '') then
+            raise Exception.Create('applied neural completion is not visible');
+        Inc(totals.visible);
+        stage := 'visible';
+        completion_pinyin := StringReplace(completion.full_pinyin, '''', '',
+            [rfReplaceAll]);
+        hit := (Length(completion.text) > Length(target_prefix_text)) and
+            (Length(completion_pinyin) > Length(typed_prefix)) and
+            SameText(Copy(completion.text, 1, Length(target_prefix_text)),
+            target_prefix_text) and
+            SameText(Copy(sentence, 1, Length(completion.text)),
+            completion.text);
+        if hit then
+        begin
+            Inc(totals.hits);
+            saved_keys := Max(0, Length(completion_pinyin) -
+                Length(typed_prefix) - 1);
+            Inc(totals.saved_keys, saved_keys);
+        end
+        else
+            Inc(totals.wrong_prompts);
+        update_signature(totals.completion_signature, IntToStr(generation) + #9 +
+            completion.text + #9 + completion.full_pinyin + #9 +
+            IntToStr(Ord(hit)) + #10);
+        if totals.visible = 1 then
+        begin
+            WriteLn('sample.query=', UTF8Encode(typed_prefix));
+            WriteLn('sample.sentence=', UTF8Encode(sentence));
+            WriteLn('sample.completion=', UTF8Encode(completion.text));
+        end;
+    finally
+        if trace <> nil then
+        begin
+            trace_row := TJSONObject.Create;
+            try
+                trace_row.Add('case', Int64(generation));
+                trace_row.Add('query', UTF8Encode(typed_prefix));
+                trace_row.Add('stage', UTF8Encode(stage));
+                trace_row.Add('syllables', UTF8Encode(request.query_syllables));
+                trace_row.Add('phonetic_only', request.phonetic_only);
+                trace_row.Add('top1', UTF8Encode(request.top1_text));
+                trace_row.Add('top1_path', UTF8Encode(request.top1_path));
+                trace_row.Add('top2', UTF8Encode(request.top2_text));
+                trace_row.Add('top2_path', UTF8Encode(request.top2_path));
+                trace_row.Add('suffix', UTF8Encode(
+                    finished.completion_result.suffix_text));
+                trace_row.Add('confidence',
+                    finished.completion_result.confidence);
+                trace_row.Add('completion', UTF8Encode(completion.text));
+                trace_row.Add('pinyin', UTF8Encode(completion.full_pinyin));
+                trace_bytes := trace_row.AsJSON + #10;
+                trace.WriteBuffer(trace_bytes[1], Length(trace_bytes));
+            finally
+                trace_row.Free;
+            end;
+        end;
     end;
 end;
 
@@ -245,11 +287,12 @@ var
     line: string;
     fields: TArray<string>;
     totals: TncSmokeTotals;
+    trace: TFileStream;
 begin
     if ParamCount < 2 then
     begin
         WriteLn(StdErr, 'Usage: cassotis-neural-engine-smoke DICTIONARY CASES ' +
-            '[LIMIT] [RESULT_TIMEOUT_MS]');
+            '[LIMIT] [RESULT_TIMEOUT_MS] [TRACE_JSONL]');
         Halt(2);
     end;
     dictionary_path := ExpandFileName(ParamStr(1));
@@ -283,7 +326,10 @@ begin
     reranker := nil;
     reranker_reference := nil;
     completion_host := nil;
+    trace := nil;
     try
+        if ParamCount >= 5 then
+            trace := TFileStream.Create(UTF8Encode(ParamStr(5)), fmCreate);
         dictionary := TncSqliteDictionary.Create(dictionary_path, '', False);
         if not dictionary.Open then
             raise Exception.Create('dictionary open failed: ' + dictionary_path);
@@ -324,7 +370,7 @@ begin
                 Continue;
             Inc(totals.cases);
             evaluate_case(engine, completion_host, parser, fields[3],
-                fields[4], totals.cases, totals);
+                fields[4], totals.cases, totals, trace);
         end;
         WriteLn('cases=', totals.cases);
         WriteLn('result_timeout_ms=', result_timeout_ms);
@@ -342,6 +388,7 @@ begin
             (totals.applied = 0) or (totals.visible = 0) then
             raise Exception.Create('neural engine path was not exercised');
     finally
+        trace.Free;
         completion_host.Free;
         engine.Free;
         reranker_reference := nil;

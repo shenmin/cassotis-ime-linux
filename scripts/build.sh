@@ -254,6 +254,14 @@ cc -std=gnu11 -O2 -g -Wall -Wextra -Werror \
     $(pkg-config --libs glib-2.0)
 cassotis_require_executable "$bin_dir/cassotis-shortcut-match-tests"
 
+printf '[build] cassotis-ort-precision-tests\n'
+c++ -std=c++20 -O2 -g -Wall -Wextra -Werror -pthread \
+    -I"$ort_root/include" -I"$cassotis_root/src/host/native" \
+    "$cassotis_root/tests/native/test_ort_quantized_precision.cpp" \
+    "$ort_versioned_library" -Wl,-rpath,'$ORIGIN' \
+    -o "$bin_dir/cassotis-ort-precision-tests"
+cassotis_require_executable "$bin_dir/cassotis-ort-precision-tests"
+
 cassotis_require_command python3
 python3 -c 'import pathlib, sys; path = pathlib.Path(sys.argv[1]); compile(path.read_text(encoding="utf-8"), str(path), "exec")' \
     "$cassotis_root/adapters/ibus/cassotis_settings.py"

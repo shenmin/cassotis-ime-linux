@@ -178,6 +178,13 @@ if [[ $skip_build -eq 0 ]]; then
 fi
 "$cassotis_root/scripts/test.sh" --skip-build \
     >"$report_dir/logs/tests.log" 2>&1
+# A resumed gate must run fresh trials without overwriting earlier evidence.
+repeatability_dir="$(mktemp -d "$report_dir/candidate-repeatability.XXXXXX")"
+python3 "$cassotis_root/tools/parity/validate_candidate_repeatability.py" \
+    --binary "$cassotis_root/build/bin/cassotis-neural-engine-smoke" \
+    --dictionary "$dictionary_path" --cases "$long_cases" \
+    --report-dir "$repeatability_dir/trials" \
+    >"$report_dir/candidate-repeatability-validation.json"
 "$cassotis_root/build/bin/cassotis-neural-engine-smoke" \
     "$dictionary_path" "$long_cases" 500 0 \
     >"$report_dir/logs/neural-engine-smoke-deterministic.log" 2>&1
@@ -365,6 +372,11 @@ completion_production = json.loads(
     )
 )
 source = json.loads((root / "source-parity.json").read_text(encoding="utf-8"))
+repeatability = json.loads(
+    (root / "candidate-repeatability-validation.json").read_text(encoding="utf-8")
+)
+if not repeatability["ok"]:
+    raise SystemExit("candidate repeatability validation failed")
 quality_inputs = json.loads(
     (root / "benchmarks" / "benchmark-inputs.json").read_text(encoding="utf-8")
 )
@@ -403,6 +415,7 @@ summary = {
     "short_completion_quality": short_completion_quality["metrics"],
     "neural_engine_smoke": completion_deterministic["metrics"],
     "neural_engine_smoke_production": completion_production["metrics"],
+    "candidate_repeatability": repeatability,
     "quality_inputs": quality_inputs,
     "artifact_sha256": artifact_checksums,
     "platform_matrix_results": matrix,

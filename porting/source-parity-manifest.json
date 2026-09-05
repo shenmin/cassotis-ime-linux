@@ -29,7 +29,7 @@
     {
       "path": "src/engine/nc_engine_intf.pas",
       "windows_sha256": "92898a9711994dda6f82da74ff75325bbdae8f46e052c06ddb0ff632fbbcf153",
-      "linux_sha256": "25e55cb6e5ecfca335b599260af6b2ccc113966cd489cfdfe92e115a35c68b9d"
+      "linux_sha256": "827f59768eef907e9dbd18f47dcfba7f84baff68466729ddbe76eff0230203c4"
     },
     {
       "path": "src/engine/nc_document_context_model.pas",
@@ -64,7 +64,7 @@
     {
       "path": "src/host/native/nc_pinyin_transformer_ort.cpp",
       "windows_sha256": "b1c861fc651796d0c7b4dbbc7b21d523aef7bb07996303900c81258b9d4b0823",
-      "linux_sha256": "0cf5f849ad80d9807a36ce0b6d138f87fb69d9e45034d2e5b43545710bcdb13e"
+      "linux_sha256": "43d117578d66ac25b99d5459b4f10e481823da0537b3531cad5a12d74e1e4a0c"
     }
   ]
 }

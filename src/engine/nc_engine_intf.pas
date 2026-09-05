@@ -68785,6 +68785,8 @@ var
         end;
 
     begin
+        { Fast search also reads this flag, before the fallback lattice starts. }
+        runtime_exact_edge_probe_collection_local := False;
         if (Length(candidates) = 0) or
             (input_syllable_count < c_long_sentence_exact_min_syllables) or
             (not is_full_pinyin_key(lookup_text)) or
@@ -68992,7 +68994,6 @@ var
         standalone_chunk_budget_remaining := 12;
         use_direct_chunk_lattice_only := True;
         suppress_subspan_oracle_local := syllable_count_local <= 8;
-        runtime_exact_edge_probe_collection_local := False;
         if suppress_subspan_oracle_local then
         begin
             Inc(m_disable_subspan_standalone_oracle);
@@ -122443,6 +122444,9 @@ begin
         clear_short_exact_pair_tail_handoff;
     end;
     reset_debug_target_recall_metrics;
+    { Nested prefix/chain helpers may consult this cache on an early exit path. }
+    exact_subspan_cache_prepared := False;
+    head_only_multi_syllable := False;
     subspan_oracle_states := nil;
     subspan_oracle_texts := nil;
     subspan_oracle_scores := nil;

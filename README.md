@@ -60,7 +60,7 @@ cloud service, network connection, or GPU.
 
 ## Supported Release
 
-The v0.5.0 source and binary release follows the Cassotis IME and Cassotis
+The v0.5.0 source follows the Cassotis IME and Cassotis
 Lexicon v1.21.0 baselines with matching schema-24 dictionaries. Compared with
 v0.4.0, it adds exact-text prefix resolution, preserves complete lexicon paths
 while a following syllable is partial, expands completion recall with lexical
@@ -70,7 +70,7 @@ closed.
 
 Native qualification on x86_64 and aarch64 covers the benchmarks in
 [BENCHMARK.md](BENCHMARK.md). Across 16,300 long-sentence cases, Top1/Top2
-counts are 11,094/12,403 and 11,090/12,412 respectively, meeting the published
+counts are 11,080/12,396 and 11,088/12,412 respectively, meeting the published
 Windows aggregate results; individual neural candidates are not guaranteed
 identical. The complete short-word result remains identical to Windows on
 both architectures. Native core and dictionary tests, package-payload checks,
@@ -78,9 +78,13 @@ and the automated IBus/Fcitx desktop matrix are also covered. Each binary
 release must separately pass the complete gate and application-level checks
 in [RELEASE.md](RELEASE.md) against its exact source revision.
 
-The v0.5.0 release provides `.deb` packages and portable binary archives for
-both amd64 and arm64. It was validated on Ubuntu 26.04.1 GNOME Wayland on both
-architectures.
+The v0.5.0 binary release is pending final dual-architecture acceptance; the
+remaining completion-baseline issue is recorded in [BENCHMARK.md](BENCHMARK.md).
+The planned assets are `.deb` packages and portable binary archives for both
+amd64 and arm64. Qualification uses Ubuntu 26.04.1 GNOME Wayland on both
+architectures. Until the new release is published, use the latest available
+packages from GitHub Releases rather than assuming that the v0.5.0 filenames
+shown below are already downloadable.
 
 Both architecture packages include the IBus and Fcitx 5 adapters; enable
 either framework after installation.

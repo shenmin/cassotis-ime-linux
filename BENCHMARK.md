@@ -53,12 +53,19 @@ The small `tests/cases/candidate_quality.tsv` and
 traditional candidate behavior through the actual SQLite provider.
 The full quality gate also computes canonical failure signatures after
 excluding host-dependent latency. The deterministic short-word track requires
-an exact per-case signature. The v1.21 neural long-sentence track is guarded by
-aggregate rank floors instead: repeated runs have shown a small number of
-candidate differences. Floating-point and runtime behavior can contribute,
-but the precise cause of each differing case has not been established. Its
-failure TSV remains a complete local diagnostic; an unstable hash is not
-presented as a reproducibility guarantee.
+an exact per-case signature. The neural long-sentence track must meet the
+published Windows aggregate rank floors. Before the full benchmark, a separate
+500-case check repeats the deterministic candidate/completion trace in three
+fresh processes with different argument and environment layouts. Any difference
+in the recorded candidates, paths, or completion decisions fails that check;
+uninitialized search state is not treated as an acceptable runtime variation.
+The complete long-sentence failure TSV is retained to diagnose cross-platform
+differences rather than claiming per-case equivalence from aggregate counts.
+
+The native runtime also has an exact integer-arithmetic regression for
+quantized inference. All four model sessions enable ONNX Runtime's x86
+quantization precision mode to avoid saturating intermediate products on CPUs
+without VNNI. This does not change the model files or quantization scales.
 
 The published corpus comparison disables persisted user learning and external
 document context, matching the Windows benchmark protocol. Document-local
@@ -100,8 +107,9 @@ deployed model concurrency and 30 ms diagnostic threshold. In v1.21, a
 completed synchronous inference remains eligible even after that threshold;
 it is not a cancellation deadline. Both passes use the same model and bounded
 search. The separation reduces concurrency-related accuracy variation while
-retaining realistic production latency, but does not guarantee bitwise-identical
-neural decisions across runs or platforms. The separate asynchronous completion
+retaining realistic production latency. The repeated-process check above guards
+same-platform stability; bitwise-identical neural decisions across CPU
+architectures are not assumed. The separate asynchronous completion
 benchmark still uses its deployed 40 ms result-acceptance deadline.
 
 The runner reports Top1/Top2/Top5/Top9 counts, mean/P50/P95/maximum query
@@ -121,15 +129,16 @@ measurements do not replace the per-release validation records.
 
 | Architecture | Long Top1 | Long Top2 / Top5 / Top9 | Mean | P50 | P95 | Maximum |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| x86_64 | 11,094/16,300 | 12,403/16,300 | 187.938 ms | 181 ms | 371 ms | 1,001 ms |
-| aarch64 | 11,090/16,300 | 12,412/16,300 | 76.876 ms | 72 ms | 142 ms | 622 ms |
+| x86_64 | 11,080/16,300 | 12,396/16,300 | 150.750 ms | 158 ms | 275 ms | 913 ms |
+| aarch64 | 11,088/16,300 | 12,412/16,300 | 76.522 ms | 72 ms | 141 ms | 574 ms |
 
-Windows v1.21.0 publishes Top1 11,080 and Top2 12,395. The Linux counts are
-higher by 14/8 cases on x86_64 and 10/17 on aarch64. The release floors require
+Windows v1.21.0 publishes Top1 11,080 and Top2 12,395. Linux x86_64 matches
+Top1 and gains one Top2 case; aarch64 gains 8/17 cases. The release floors require
 at least the published Windows counts on each architecture, not reduced
 platform-specific accuracy targets. This is aggregate parity, not per-case
-identity: compared with a rerun of the exact Windows tag, aarch64 gained 69
-Top1 cases and lost 59, with 170 differing target ranks overall. The cause
+identity: compared with a rerun of the exact Windows tag, x86_64 gained two
+Top1 cases and lost two, with seven differing target ranks; aarch64 gained 50
+and lost 42, with 114 differing target ranks overall. The cause
 of every neural difference has not been established. Timing is host-dependent
 and must not be interpreted as a cross-platform implementation speed ratio.
 
@@ -143,8 +152,8 @@ architectures and Windows:
 
 The exact short-word failure signature is 7,827 rows with SHA-256
 `18cad226349cbfd1451c35c25f9572b3e004f121c79c5c22658fe47b970b207b`.
-The long-sentence process reached RSS/high-water marks of 1,005,416 KiB on
-x86_64 and 792,300 KiB on aarch64, both below the existing 1,048,576 KiB gate.
+The long-sentence process reached RSS/high-water marks of 825,004 KiB on
+x86_64 and 810,712 KiB on aarch64, both below the existing 1,048,576 KiB gate.
 Both architectures passed 146 FPCUnit tests, 22 simplified and 9 traditional
 candidate regressions, and the five-stage automated IBus/Fcitx matrix.
 
@@ -167,15 +176,23 @@ The separate 16,300-case production long-completion track retains the real
 
 | Architecture | Local Completion Hit | Prompt Coverage | Total Keys Saved | P95 |
 | --- | ---: | ---: | ---: | ---: |
-| x86_64 | 275/16,300 | 5,101/16,300 | 700 | 141 ms |
-| aarch64 | 348/16,300 | 6,281/16,300 | 825 | 100 ms |
+| x86_64 | 280/16,300 | 5,249/16,300 | 703 | 69 ms |
+| aarch64 | 362/16,300 | 6,478/16,300 | 853 | 45 ms |
 
 Windows publishes 357 hits, 6,475 prompts and 861 keys saved. This timed
 background track does not match those counts on the validation hosts, unlike
 the deterministic short-completion track. Results arriving after the deployed
 deadline remain rejected; the gate does not increase the deadline to manufacture
 matching results. The 500-case deadline-free smoke uses the exact per-architecture
-signatures `7190F18DE6E96FEC` (x86_64) and `BB58A43A76877A5B` (aarch64).
+signatures `06E92EB69EB24518` (x86_64) and `4775EE37F80823C9` (aarch64).
+
+The x86_64 qualification passes all current completion bounds. On aarch64,
+3,209 neural results were accepted and applied, exceeding the existing 3,200
+upper bounds for these two counters; all other completion bounds pass. Those
+upper bounds remain unchanged pending review. This qualification must not be
+reported as a successful full release gate. The maximum completion-process RSS
+on aarch64 was 809,832 KiB. A separate repeat of the first 5,000 complete long
+queries also produced identical Top1 text and target ranks on aarch64.
 
 ## Frozen v1.20.0 Port Results
 

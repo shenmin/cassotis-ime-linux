@@ -50,6 +50,7 @@ bash "$cassotis_root/tests/scripts/test_session_refresh.sh"
 bash "$cassotis_root/tests/scripts/test_process_stop.sh"
 
 "$engine" --self-test
+"$cassotis_root/build/bin/cassotis-ort-precision-tests"
 "$cassotis_root/build/bin/cassotis-neural-runtime-smoke" \
     "$cassotis_root/build/bin"
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from contextlib import closing
 import importlib.util
+import json
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -42,9 +43,43 @@ source_parity = load_module(
     "cassotis_validate_source_parity",
     ROOT / "tools" / "parity" / "validate_source_parity.py",
 )
+repeatability = load_module(
+    "cassotis_validate_candidate_repeatability",
+    ROOT / "tools" / "parity" / "validate_candidate_repeatability.py",
+)
+
+
+def test_repeatability_validator() -> None:
+    row = {field: "" for field in repeatability.TEXT_FIELDS}
+    row.update(case=1, query="jintiantianqibucuo", stage="no-request",
+               phonetic_only=False, confidence=0.0)
+    if repeatability.differences([row], [dict(row)]):
+        raise AssertionError("identical traces must pass")
+    changed = dict(row, top2="a different candidate")
+    if repeatability.differences([row], [changed]) != [
+        {"case": 1, "fields": ["top2"]}
+    ]:
+        raise AssertionError("candidate drift without completion drift was missed")
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "trace.jsonl"
+        path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+        if repeatability.read_trace(path, 1) != [row]:
+            raise AssertionError("valid trace did not round-trip")
+        for invalid in ("", json.dumps(dict(row, case=2)),
+                        json.dumps(dict(row, confidence=float("nan"))),
+                        json.dumps(dict(row, phonetic_only=None)),
+                        json.dumps({"case": 1})):
+            path.write_text(invalid, encoding="utf-8")
+            try:
+                repeatability.read_trace(path, 1)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("incomplete or invalid trace was accepted")
 
 
 def main() -> int:
+    test_repeatability_validator()
     smoke_source = (
         ROOT / "tools" / "integration" / "cassotis_neural_engine_smoke.lpr"
     ).read_text(encoding="utf-8")

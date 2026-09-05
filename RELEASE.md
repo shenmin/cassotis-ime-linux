@@ -72,8 +72,12 @@ source. The command is successful only after all of these pass:
 
 1. Native build with fatal C/C++ warnings and SHA-256 validation of every
    bundled model and architecture-specific runtime artifact.
-2. FPCUnit, native geometry/shortcut tests, engine/socket tests, direct ONNX
-   runtime smoke, and a real-engine asynchronous completion smoke.
+2. FPCUnit, native geometry/shortcut and exact quantized-integer arithmetic
+   tests, engine/socket tests, direct ONNX
+   runtime smoke, and a real-engine asynchronous completion smoke. The 500-case
+   deterministic smoke is also repeated in three fresh processes with different
+   argument/environment layouts against the same read-only dictionary. The
+   recorded candidate paths and completion decisions must agree, not only totals.
 3. Frozen simplified and traditional candidate parity.
 4. Multi-client IBus transport, malformed-frame, restart, latency, and
    bounded-memory stress tests against an isolated socket and user database.
