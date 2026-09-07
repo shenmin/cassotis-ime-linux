@@ -3,3 +3,5 @@
 *.onnx binary
 *.so binary
 *.so.* binary
+# Preserve reviewed model bytes, including CRLF line endings.
+data/models/local_repair/*.json -text whitespace=cr-at-eol

@@ -42,6 +42,9 @@ begin
             raise Exception.Create('pinyin Transformer runtime unavailable: ' +
                 reranker.last_error);
         WriteLn('pinyin_transformer=ready');
+        if not reranker.local_repair_ready then
+            raise Exception.Create('local repair runtime unavailable');
+        WriteLn('local_repair=ready');
         if not reranker.try_generate(
             'wo''xiang''liao''jie''yi''xia', generated_candidates) then
             raise Exception.Create('pinyin parallel generator returned no candidates');

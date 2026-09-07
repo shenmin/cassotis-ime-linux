@@ -71,6 +71,16 @@ verify_asset 'data/models/local_completion/local_completion_index.bin' \
     "$(baseline_value local_completion_index_sha256)"
 verify_asset 'data/models/local_completion/model_manifest.json' \
     "$(baseline_value local_completion_manifest_sha256)"
+verify_asset 'data/models/local_repair/context_int8.onnx' \
+    "$(baseline_value local_repair_context_sha256)"
+verify_asset 'data/models/local_repair/query_int8.onnx' \
+    "$(baseline_value local_repair_query_sha256)"
+verify_asset 'data/models/local_repair/vocab.json' \
+    "$(baseline_value local_repair_vocab_sha256)"
+verify_asset 'data/models/local_repair/readings.json' \
+    "$(baseline_value local_repair_readings_sha256)"
+verify_asset 'data/models/local_repair/runtime_manifest.json' \
+    "$(baseline_value local_repair_manifest_sha256)"
 verify_asset \
     "third_party/onnxruntime/$runtime_arch/libonnxruntime.so.1.20.1" \
     "$runtime_hash"

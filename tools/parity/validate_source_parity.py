@@ -51,6 +51,10 @@ DEPLOYED_MODEL_ASSETS = (
         "data/models/local_completion/model_manifest.json",
         "local_completion_manifest_sha256",
     ),
+    ("data/models/local_repair/context_int8.onnx", "local_repair_context_sha256"),
+    ("data/models/local_repair/query_int8.onnx", "local_repair_query_sha256"),
+    ("data/models/local_repair/vocab.json", "local_repair_vocab_sha256"),
+    ("data/models/local_repair/readings.json", "local_repair_readings_sha256"),
 )
 LINUX_RUNTIME_ASSETS = (
     (
@@ -288,6 +292,29 @@ def validate_deployed_assets(
                 "ok": ok,
             }
         )
+
+    # Distribution metadata omits training-machine paths, never decision fields.
+    repair_path = "data/models/local_repair/runtime_manifest.json"
+    try:
+        original_bytes = git_file(windows_root, windows_revision, repair_path)
+        original = json.loads(original_bytes)
+        packaged = json.loads((ROOT / repair_path).read_bytes())
+        for key in ("word_calibration", "independent_calibration"):
+            original.pop(key, None)
+        repair_hash = sha256_file(ROOT / repair_path)
+        original_hash = hashlib.sha256(original_bytes).hexdigest()
+        repair_ok = (
+            original == packaged
+            and repair_hash == baseline.get("local_repair_manifest_sha256")
+            and original_hash == baseline.get("local_repair_windows_manifest_sha256")
+        )
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        repair_ok = False
+        repair_hash = original_hash = ""
+    if not repair_ok:
+        failures.append("local repair runtime manifest differs from reviewed decisions")
+    results.append({"path": repair_path, "sha256": repair_hash,
+                    "windows_sha256": original_hash, "ok": repair_ok})
 
     runtime_version = baseline.get("onnxruntime_version", "")
     version_path = ROOT / "third_party" / "onnxruntime" / "VERSION"

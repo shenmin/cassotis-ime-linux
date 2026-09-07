@@ -86,13 +86,13 @@ cassotis_require_command desktop-file-validate
 cassotis_require_command python3
 cassotis_require_command realpath
 if [[ -z "$quality_baseline" ]]; then
-    quality_baseline="$cassotis_root/tests/baselines/quality-v1.21.0-linux-$(uname -m).txt"
+    quality_baseline="$cassotis_root/tests/baselines/quality-v1.22.0-linux-$(uname -m).txt"
 fi
 if [[ -z "$completion_baseline" ]]; then
-    completion_baseline="$cassotis_root/tests/baselines/completion-quality-v1.21.0-linux-$(uname -m).txt"
+    completion_baseline="$cassotis_root/tests/baselines/completion-quality-v1.22.0-linux-$(uname -m).txt"
 fi
 if [[ -z "$short_completion_baseline" ]]; then
-    short_completion_baseline="$cassotis_root/tests/baselines/short-completion-quality-v1.21.0-linux-$(uname -m).txt"
+    short_completion_baseline="$cassotis_root/tests/baselines/short-completion-quality-v1.22.0-linux-$(uname -m).txt"
 fi
 for required in dictionary_path traditional_dictionary_path long_cases \
                 short_cases source_parity_report quality_baseline \
@@ -176,8 +176,16 @@ if [[ $skip_build -eq 0 ]]; then
     "$cassotis_root/scripts/build.sh" --clean \
         >"$report_dir/logs/build.log" 2>&1
 fi
-"$cassotis_root/scripts/test.sh" --skip-build \
+CASSOTIS_DICTIONARY="$dictionary_path" \
+    "$cassotis_root/scripts/test.sh" --skip-build \
     >"$report_dir/logs/tests.log" 2>&1
+"$cassotis_root/build/bin/cassotis-local-repair-integration" "$dictionary_path" \
+    >"$report_dir/logs/local-repair-integration.log" 2>&1
+cold_start_dir="$(mktemp -d "$report_dir/cold-start.XXXXXX")"
+python3 "$cassotis_root/tests/scripts/test_cold_start.py" \
+    --runtime "$cassotis_root/build/bin" --dictionary "$dictionary_path" \
+    --report-dir "$cold_start_dir/trials" \
+    >"$report_dir/cold-start-validation.json"
 # A resumed gate must run fresh trials without overwriting earlier evidence.
 repeatability_dir="$(mktemp -d "$report_dir/candidate-repeatability.XXXXXX")"
 python3 "$cassotis_root/tools/parity/validate_candidate_repeatability.py" \
@@ -263,6 +271,11 @@ current = {
             "local_completion/local_completion_generator_int8.onnx",
             "local_completion/local_completion_index.bin",
             "local_completion/model_manifest.json",
+            "local_repair/context_int8.onnx",
+            "local_repair/query_int8.onnx",
+            "local_repair/readings.json",
+            "local_repair/vocab.json",
+            "local_repair/runtime_manifest.json",
         )
     },
 }
@@ -372,6 +385,11 @@ completion_production = json.loads(
     )
 )
 source = json.loads((root / "source-parity.json").read_text(encoding="utf-8"))
+cold_start = json.loads(
+    (root / "cold-start-validation.json").read_text(encoding="utf-8")
+)
+if not cold_start["ok"] or not cold_start["blocked"]["model_initialization_blocked"]:
+    raise SystemExit("cold-start input validation failed")
 repeatability = json.loads(
     (root / "candidate-repeatability-validation.json").read_text(encoding="utf-8")
 )
@@ -420,6 +438,8 @@ summary = {
     "artifact_sha256": artifact_checksums,
     "platform_matrix_results": matrix,
     "core_tests": "passed",
+    "local_repair_integration": "passed",
+    "cold_start_input": cold_start,
     "neural_engine_smoke_validation": "passed",
     "completion_quality_validation": "passed",
     "short_completion_quality_validation": "passed",

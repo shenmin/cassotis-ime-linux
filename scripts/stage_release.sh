@@ -200,11 +200,14 @@ ln -s libonnxruntime.so.1 \
     "$(stage_path "$libexec_path/libonnxruntime.so")"
 install -d -m 0755 \
     "$(stage_path "$libexec_path/pinyin_transformer")" \
-    "$(stage_path "$libexec_path/local_completion")"
+    "$(stage_path "$libexec_path/local_completion")" \
+    "$(stage_path "$libexec_path/local_repair")"
 install -m 0644 "$bin_dir/pinyin_transformer/"* \
     "$(stage_path "$libexec_path/pinyin_transformer")/"
 install -m 0644 "$bin_dir/local_completion/"* \
     "$(stage_path "$libexec_path/local_completion")/"
+install -m 0644 "$bin_dir/local_repair/"* \
+    "$(stage_path "$libexec_path/local_repair")/"
 install -m 0755 "$fcitx_addon" \
     "$(stage_path "$fcitx_library_path/libcassotis.so")"
 install -m 0644 "$icon" "$(stage_path "$icon_path/cassotis-ime.png")"
@@ -252,6 +255,10 @@ install -m 0644 "$cassotis_root/third_party/onnxruntime/LICENSE" \
 install -m 0644 \
     "$cassotis_root/third_party/onnxruntime/ThirdPartyNotices.txt" \
     "$(stage_path "$doc_path/third-party/onnxruntime/ThirdPartyNotices.txt")"
+install -d -m 0755 "$(stage_path "$doc_path/third-party/macbert")"
+install -m 0644 "$cassotis_root/third_party/macbert/LICENSE" \
+    "$cassotis_root/third_party/macbert/NOTICE" \
+    "$(stage_path "$doc_path/third-party/macbert")/"
 
 if grep -R -n -E '@(EXECUTABLE|SETUP|VERSION|FCITX_VERSION|LIBRARY)@' \
         "$resolved_destdir"; then

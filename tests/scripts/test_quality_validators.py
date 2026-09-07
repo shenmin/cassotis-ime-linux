@@ -8,7 +8,9 @@ import importlib.util
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
 import tempfile
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,6 +49,45 @@ repeatability = load_module(
     "cassotis_validate_candidate_repeatability",
     ROOT / "tools" / "parity" / "validate_candidate_repeatability.py",
 )
+cold_start = load_module(
+    "cassotis_test_cold_start",
+    ROOT / "tests" / "scripts" / "test_cold_start.py",
+)
+
+
+def test_cold_start_diagnostics() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        log = root / "input.log"
+        successful = subprocess.CompletedProcess(
+            [], 0, "first_key_ms=12.5\nmaximum_key_ms=22\nkey_count=34\n"
+            "cold_start_input=passed\n", "")
+        with patch.object(cold_start.subprocess, "run", return_value=successful):
+            result = cold_start.exercise(root, root / "socket", root / "engine", log)
+        if result != {"first_key_ms": 12.5, "maximum_key_ms": 22.0, "key_count": 34}:
+            raise AssertionError("cold-start metrics were not preserved")
+        failed = subprocess.CompletedProcess([], 1, "partial input\n", "key blocked\n")
+        with patch.object(cold_start.subprocess, "run", return_value=failed):
+            try:
+                cold_start.exercise(root, root / "socket", root / "engine", log)
+            except subprocess.CalledProcessError:
+                pass
+            else:
+                raise AssertionError("failed cold-start input was accepted")
+        if log.read_text(encoding="utf-8") != failed.stdout or \
+                log.with_suffix(".stderr").read_text(encoding="utf-8") != failed.stderr:
+            raise AssertionError("cold-start failure diagnostics were lost")
+        timed_out = subprocess.TimeoutExpired([], 15, b"partial input\n", b"hung\n")
+        with patch.object(cold_start.subprocess, "run", side_effect=timed_out):
+            try:
+                cold_start.exercise(root, root / "socket", root / "engine", log)
+            except subprocess.TimeoutExpired:
+                pass
+            else:
+                raise AssertionError("cold-start timeout was accepted")
+        if log.read_text(encoding="utf-8") != "partial input\n" or \
+                log.with_suffix(".stderr").read_text(encoding="utf-8") != "hung\n":
+            raise AssertionError("cold-start timeout diagnostics were lost")
 
 
 def test_repeatability_validator() -> None:
@@ -80,6 +121,25 @@ def test_repeatability_validator() -> None:
 
 def main() -> int:
     test_repeatability_validator()
+    test_cold_start_diagnostics()
+    release_source = (ROOT / "scripts" / "validate_release.sh").read_text(
+        encoding="utf-8"
+    )
+    normalized_release_source = " ".join(release_source.replace("\\\n", " ").split())
+    if (
+        'CASSOTIS_DICTIONARY="$dictionary_path" '
+        '"$cassotis_root/scripts/test.sh" --skip-build'
+        not in normalized_release_source
+        or '"$cassotis_root/build/bin/cassotis-local-repair-integration" '
+        '"$dictionary_path"' not in normalized_release_source
+    ):
+        raise AssertionError("release integration tests must use the frozen dictionary")
+    if ('--runtime "$cassotis_root/build/bin" --dictionary "$dictionary_path" '
+            '--report-dir "$cold_start_dir/trials"' not in normalized_release_source
+            or '"cold_start_input": cold_start' not in release_source
+            or 'if not cold_start["ok"] or not cold_start["blocked"]'
+            '["model_initialization_blocked"]:' not in release_source):
+        raise AssertionError("release gate must require blocked-model input validation")
     smoke_source = (
         ROOT / "tools" / "integration" / "cassotis_neural_engine_smoke.lpr"
     ).read_text(encoding="utf-8")

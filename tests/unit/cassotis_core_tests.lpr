@@ -17,6 +17,7 @@ uses
     test_nc_ipc_dispatcher,
     test_nc_engine_context,
     test_nc_document_context_model,
+    test_nc_local_repair,
     test_nc_engine_service,
     test_nc_engine_pagination,
     test_nc_pinyin_parser,
@@ -25,6 +26,7 @@ uses
     test_nc_sqlite,
     test_nc_v118_regressions,
     test_nc_v119_regressions,
+    test_nc_v122_regressions,
     test_nc_dictionary_reader,
     test_nc_user_dictionary;
 

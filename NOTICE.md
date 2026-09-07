@@ -21,3 +21,11 @@ for the selected architecture. ONNX Runtime is distributed under the MIT
 License. Its license and third-party notices are included under
 `third_party/onnxruntime` in the source tree and under
 `third-party/onnxruntime` in binary release documentation.
+
+The bundled six-layer local-repair model is derived from
+`hfl/chinese-macbert-base` (revision
+`a986e004d2a7f2a1c2f5a3edef4e20604a974ed1`), distributed under Apache-2.0.
+Its source attribution, modification notice, and license are provided in
+`third_party/macbert` in the source tree and `third-party/macbert` in binary
+release documentation. The model uses local pinyin constraints and a bounded
+in-memory context cache; its upstream license remains unchanged.

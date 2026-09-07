@@ -53,6 +53,8 @@ bash "$cassotis_root/tests/scripts/test_process_stop.sh"
 "$cassotis_root/build/bin/cassotis-ort-precision-tests"
 "$cassotis_root/build/bin/cassotis-neural-runtime-smoke" \
     "$cassotis_root/build/bin"
+python3 "$cassotis_root/tests/native/test_local_repair_runtime.py" \
+    "$cassotis_root/build/bin"
 
 if [[ -x "$ibus_adapter" && -f "$installed_dictionary" ]]; then
     adapter_test_dir="$(mktemp -d "${TMPDIR:-/tmp}/cassotis-adapter-test.XXXXXX")"

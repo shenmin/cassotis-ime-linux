@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 THREADED_UNITS = (
     "nc_engine_service",
     "nc_local_completion_host",
+    "nc_local_repair_host",
     "nc_pinyin_transformer_host",
 )
 

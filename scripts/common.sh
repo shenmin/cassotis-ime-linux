@@ -423,7 +423,7 @@ cassotis_stage_neural_runtime() {
     local file_name
 
     install -d -m 0755 "$destination_dir/pinyin_transformer" \
-        "$destination_dir/local_completion"
+        "$destination_dir/local_completion" "$destination_dir/local_repair"
     for file_name in libcassotis_pinyin_transformer_ort.so \
                      libonnxruntime.so.1.20.1 \
                      libonnxruntime_providers_shared.so; do
@@ -449,6 +449,11 @@ cassotis_stage_neural_runtime() {
         install -m 0644 "$source_dir/local_completion/$file_name" \
             "$destination_dir/local_completion/$file_name"
     done
+    for file_name in context_int8.onnx query_int8.onnx readings.json \
+                     vocab.json runtime_manifest.json; do
+        install -m 0644 "$source_dir/local_repair/$file_name" \
+            "$destination_dir/local_repair/$file_name"
+    done
 }
 
 cassotis_atomic_install_neural_runtime() {
@@ -458,7 +463,7 @@ cassotis_atomic_install_neural_runtime() {
 
     install -d -m 0700 "$destination_dir" \
         "$destination_dir/pinyin_transformer" \
-        "$destination_dir/local_completion"
+        "$destination_dir/local_completion" "$destination_dir/local_repair"
     for file_name in libcassotis_pinyin_transformer_ort.so \
                      libonnxruntime.so.1.20.1 \
                      libonnxruntime_providers_shared.so; do
@@ -483,6 +488,11 @@ cassotis_atomic_install_neural_runtime() {
         cassotis_atomic_install "$source_dir/local_completion/$file_name" \
             "$destination_dir/local_completion/$file_name" 0644
     done
+    for file_name in context_int8.onnx query_int8.onnx readings.json \
+                     vocab.json runtime_manifest.json; do
+        cassotis_atomic_install "$source_dir/local_repair/$file_name" \
+            "$destination_dir/local_repair/$file_name" 0644
+    done
 }
 
 cassotis_remove_neural_runtime() {
@@ -503,7 +513,13 @@ cassotis_remove_neural_runtime() {
         "$destination_dir/local_completion/local_completion_path_ranker_int8.onnx" \
         "$destination_dir/local_completion/local_completion_generator_int8.onnx" \
         "$destination_dir/local_completion/local_completion_index.bin" \
-        "$destination_dir/local_completion/model_manifest.json"
+        "$destination_dir/local_completion/model_manifest.json" \
+        "$destination_dir/local_repair/context_int8.onnx" \
+        "$destination_dir/local_repair/query_int8.onnx" \
+        "$destination_dir/local_repair/readings.json" \
+        "$destination_dir/local_repair/vocab.json" \
+        "$destination_dir/local_repair/runtime_manifest.json"
     rmdir -- "$destination_dir/pinyin_transformer" \
-        "$destination_dir/local_completion" 2>/dev/null || true
+        "$destination_dir/local_completion" "$destination_dir/local_repair" \
+        2>/dev/null || true
 }

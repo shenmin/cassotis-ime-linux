@@ -75,6 +75,7 @@ type
         function completion_feedback_score(const anchor_text,
             suffix_text: string): Integer;
         function has_context: Boolean;
+        function semantic_tail: string;
         property document_key: string read m_document_key;
     end;
 
@@ -145,6 +146,17 @@ begin
     m_ngrams.Clear;
     m_continuations.Clear;
     m_completion_feedback.Clear;
+end;
+
+function TncDocumentContextModel.semantic_tail: string;
+begin
+    // Use the latest preceding range, not merged history that may lie after a
+    // moved caret. Preserve punctuation and previous sentence boundaries.
+    Result := '';
+    if m_document_key <> '' then
+    begin
+        Result := trim_tail(m_snapshot, 256);
+    end;
 end;
 
 procedure TncDocumentContextModel.add_ngram(const value: string);

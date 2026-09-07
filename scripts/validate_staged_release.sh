@@ -51,6 +51,10 @@ neural_smoke="$libexec/cassotis-neural-runtime-smoke"
 runtime_wrapper="$libexec/libcassotis_pinyin_transformer_ort.so"
 runtime_library="$libexec/libonnxruntime.so.1.20.1"
 runtime_provider="$libexec/libonnxruntime_providers_shared.so"
+for test_tool in model-load-barrier.so cassotis-cold-start-smoke; do
+    [[ ! -e "$libexec/$test_tool" ]] ||
+        cassotis_die "test-only cold-start tool must not be packaged: $test_tool"
+done
 fcitx_addon="$(find "$release_root/usr" -type f \
     -path '*/fcitx5/libcassotis.so' -print -quit)"
 required_files=(
@@ -75,6 +79,11 @@ required_files=(
     "$libexec/local_completion/local_completion_generator_int8.onnx"
     "$libexec/local_completion/local_completion_index.bin"
     "$libexec/local_completion/model_manifest.json"
+    "$libexec/local_repair/context_int8.onnx"
+    "$libexec/local_repair/query_int8.onnx"
+    "$libexec/local_repair/readings.json"
+    "$libexec/local_repair/vocab.json"
+    "$libexec/local_repair/runtime_manifest.json"
     "$fcitx_addon"
     "$icon"
     "$data/dict_sc.db"
@@ -101,6 +110,8 @@ required_files=(
     "$release_root/usr/share/doc/cassotis-ime/docs/LEXICON_ATTRIBUTION.md"
     "$release_root/usr/share/doc/cassotis-ime/third-party/onnxruntime/LICENSE"
     "$release_root/usr/share/doc/cassotis-ime/third-party/onnxruntime/ThirdPartyNotices.txt"
+    "$release_root/usr/share/doc/cassotis-ime/third-party/macbert/LICENSE"
+    "$release_root/usr/share/doc/cassotis-ime/third-party/macbert/NOTICE"
 )
 for path in "${required_files[@]}"; do
     [[ -n "$path" && -r "$path" ]] ||

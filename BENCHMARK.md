@@ -21,10 +21,10 @@ corresponding model-training data.
 
 The current Linux engine is reviewed against:
 
-- Cassotis IME v1.21.0 (`a06df4c9150ac4fcd140b8709c53c5b7bf7e1be4`)
+- Cassotis IME v1.22.0 (`93e50b4a7185c12b9b0c0ad54ed5ad45a6f511bc`)
 - Cassotis Lexicon v1.21.0 (`63f4df366f3b62d4ebad2e3192811d5d1e4e3f2b`)
 - Simplified dictionary schema 24, SHA-256
-  `fc6800d88d67d3b68b6ccb1b9f1832cd5f5a17598c5b28a9109f9da12985ee37`
+  `0ccc9bfc6c9316d072f35a86bad1e960002b60096140b05906adf9222dd4885b`
 - Traditional dictionary schema 24, SHA-256
   `845d7c63de2d03ba6bacac66c699b99c5256afe58332eacb2326ca42a9682681`
 - Simplified/traditional base entries: 213,233 / 216,385
@@ -41,7 +41,8 @@ fuzzy-pinyin and shuangpin sources on both platforms, all 42 generated model
 units, expanded model evidence, and the frozen dictionary. It also binds the
 Transformer scorer, constrained Pinyin and completion generators, their
 runtime allow-list, index and manifest, the native inference bridge, three
-reviewed native completion-selector source units, the
+reviewed native completion-selector source units, the two local-repair graphs
+and their vocabulary, reading constraints and decision manifest, the
 architecture-specific ONNX Runtime
 libraries, and the required lexical, completion-competition, pair-audit, and
 long-completion table populations. The manifest
@@ -54,7 +55,8 @@ traditional candidate behavior through the actual SQLite provider.
 The full quality gate also computes canonical failure signatures after
 excluding host-dependent latency. The deterministic short-word track requires
 an exact per-case signature. The neural long-sentence track must meet the
-published Windows aggregate rank floors. Before the full benchmark, a separate
+reviewed architecture-specific rank floors, recorded alongside the Windows
+reference below. Before the full benchmark, a separate
 500-case check repeats the deterministic candidate/completion trace in three
 fresh processes with different argument and environment layouts. Any difference
 in the recorded candidates, paths, or completion decisions fails that check;
@@ -63,9 +65,24 @@ The complete long-sentence failure TSV is retained to diagnose cross-platform
 differences rather than claiming per-case equivalence from aggregate counts.
 
 The native runtime also has an exact integer-arithmetic regression for
-quantized inference. All four model sessions enable ONNX Runtime's x86
+quantized inference. All six model sessions enable ONNX Runtime's x86
 quantization precision mode to avoid saturating intermediate products on CPUs
 without VNNI. This does not change the model files or quantization scales.
+The local-repair ABI tests additionally exercise phonetic output constraints,
+finite confidence values, and context-cache reuse, replacement and clearing.
+
+Cold-start validation deliberately blocks native model initialization while
+testing the production IPC service: first-key candidates, selection/commit,
+static Tab completion, long-input fallback and polling must remain responsive.
+It then releases the barrier and verifies input again after real background
+loading. A separate new-process trial records startup and key latency without
+the barrier. This is process-cold testing, not a claim that OS file caches were
+dropped. The test interposer is never included in installable packages.
+An aarch64 qualification repeat measured 14.701 ms for the first key and
+48.448 ms maximum across 34 key events with initialization held. The independent
+process-cold trial measured 12.296 ms / 55.269 ms. These key timings exclude
+the separately recorded service startup (about 1.45 s, including dictionary
+opening and cache preparation); they are not end-to-end process-launch times.
 
 The published corpus comparison disables persisted user learning and external
 document context, matching the Windows benchmark protocol. Document-local
@@ -97,15 +114,18 @@ python3 tools/parity/validate_quality_report.py \
   --dictionary /path/to/dict_sc.db \
   --long-cases /path/to/long_sentence_16300.tsv \
   --short-cases /path/to/word_input_yhwd_context.tsv \
-  --baseline tests/baselines/quality-v1.21.0-linux-x86_64.txt
+  --baseline tests/baselines/quality-v1.22.0-linux-x86_64.txt
 ```
 
 The long-sentence accuracy pass uses deterministic work limits, single-threaded
 ONNX inference, and accepts a completed Transformer decision without a
 wall-clock cutoff. A separate production-mode pass measures latency with the
-deployed model concurrency and 30 ms diagnostic threshold. In v1.21, a
+deployed model concurrency and 30 ms diagnostic threshold. Since v1.21, a
 completed synchronous inference remains eligible even after that threshold;
-it is not a cancellation deadline. Both passes use the same model and bounded
+it is not a cancellation deadline for the conditional reranker. The separate
+local-repair stage retains the Windows policy of discarding a repair whose
+completed query exceeded its configured timeout; timeout 0 disables that
+cutoff in the accuracy pass. Both passes use the same models and bounded
 search. The separation reduces concurrency-related accuracy variation while
 retaining realistic production latency. The repeated-process check above guards
 same-platform stability; bitwise-identical neural decisions across CPU
@@ -117,6 +137,49 @@ latency, and Linux process RSS/high-water marks. Memory events contain only
 the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
+
+## v1.22.0 Port Results
+
+The same frozen 16,300 long and 65,000 short cases are used with the reviewed
+v1.22.0 models and freshly rebuilt schema-24 dictionaries. Native qualification
+on Ubuntu 26.04.1 produced these deterministic counts:
+
+| Platform | Long Top1 / 16,300 | Long Top2 / 16,300 | Short Top1, context off / 65,000 | Short Top1, context on / 65,000 |
+| --- | ---: | ---: | ---: | ---: |
+| Windows v1.22.0 reference | 11,672 | 12,809 | 60,346 | 61,827 |
+| Linux x86_64 | 11,671 | 12,810 | 60,346 | 61,827 |
+| Linux aarch64 | 11,669 | 12,810 | 60,346 | 61,827 |
+
+These small long-sentence differences are recorded, not described as exact
+parity. A controlled replay identified the pre-existing Linux span-cache-miss
+fix as the cause of all three x86_64 Top1 losses against Windows: loading the
+same dictionary evidence removes query-history dependence. That fix is retained.
+Additional aarch64 differences include model score/decision boundaries and
+upstream candidate differences; not every individual cause has been established.
+New architecture-specific floors freeze the counts above. The 1 GiB process
+memory ceiling and existing latency ceilings are unchanged.
+
+Both complete short tracks retain the same Top1/Top2/Top5/Top9 counts and
+7,827-row failure signature recorded for v1.21.0 below. Short completion remains
+9,420 hits, 24,006 saved keys and exact signature `D33AC07C1551CAA1`.
+Three independent deadline-free 500-case completion traces freeze
+`B8AADBA2B20D3B4F` on x86_64 and `CC52A67DE3040900` on aarch64.
+
+The production 40 ms completion track measured 397 hits / 937 saved keys on
+x86_64 and 410 / 939 on aarch64, against the Windows reference of 407 / 953.
+A fresh aarch64 repeat produced 410 / 940. Timed acceptance is not an exact
+signature: the gate requires at least 390/400 hits respectively and 930 saved
+keys, along with prompt/error, stability, request-chain and latency checks.
+Static-result challenges increase the number of model requests; pipeline
+throughput is not capped merely to reproduce older request counts.
+
+All six model sessions avoid retaining peak-sized CPU arenas. Free glibc pages
+are returned after model initialization and destruction, never on each key.
+The complete aarch64 allocation-policy recheck preserved all 16,300 first
+candidate texts and target ranks and reached 960,956 KiB peak HWM, with
+80.228 ms mean, 146 ms P95 and 615 ms maximum. These are native qualification
+measurements; final-source release gates also validate packages and both
+frameworks and must pass separately.
 
 ## Frozen v1.21.0 Port Results
 

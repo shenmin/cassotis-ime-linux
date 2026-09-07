@@ -1,0 +1,28 @@
+# Timed 40 ms acceptance varies with scheduling; exact decisions are checked
+# separately in three deterministic traces. Challenge throughput is not capped.
+format=cassotis-completion-quality-baseline-v1
+metadata.engine_baseline=windows-v1.22.0
+metadata.dictionary_schema=24
+metadata.dictionary_sha256=0ccc9bfc6c9316d072f35a86bad1e960002b60096140b05906adf9222dd4885b
+metadata.cases_sha256=3f50a9323ad798e691f86ea70c6dffa13b4a9f55b624fc3499a138258190ff0f
+metadata.validation_host=ubuntu-26.04.1-x86_64
+metadata.runtime_mode=neural
+metadata.oracle_protocol=post-sample-shared-reranker
+result_timeout_ms_exact=40
+cases_exact=16300
+opportunities_exact=16300
+prompts_min=6200
+prompts_max=6600
+hits_min=390
+full_sentence_hits_min=20
+wrong_prompts_max=6200
+saved_keys_min=930
+stability_pairs_min=700
+stable_pairs_min=25
+neural_requests_min=11000
+neural_accepted_min=4500
+neural_applied_min=3500
+mean_ms_max=60
+p50_ms_max=35
+p95_ms_max=180
+max_ms_max=1200

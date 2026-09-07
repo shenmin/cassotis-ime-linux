@@ -25,12 +25,38 @@ type
         procedure DocumentCompletionReturnsOnlySeenContinuations;
         procedure DocumentCompletionDoesNotReadFutureText;
         procedure DocumentCompletionFeedbackIsDocumentScoped;
+        procedure SemanticTailTracksLatestCaretAndKeepsSentences;
     end;
 
 implementation
 
 uses
+    SysUtils,
     nc_document_context_model;
+
+procedure TncDocumentContextModelTests.SemanticTailTracksLatestCaretAndKeepsSentences;
+var
+    model: TncDocumentContextModel;
+    previous: string;
+begin
+    model := TncDocumentContextModel.Create;
+    try
+        previous := StringOfChar('a', 280) + '. Previous topic. Current topic.';
+        model.set_snapshot('app-a/document-1', previous);
+        AssertEquals(256, Length(model.semantic_tail));
+        AssertTrue(Pos('. Previous topic.', model.semantic_tail) > 0);
+        model.set_snapshot('app-a/document-1', 'Earlier caret.');
+        AssertEquals('Earlier caret.', model.semantic_tail);
+        model.set_snapshot('app-b/document-1', 'Different application.');
+        AssertEquals('Different application.', model.semantic_tail);
+        model.set_snapshot('app-b/document-1', '');
+        AssertEquals('', model.semantic_tail);
+        model.set_snapshot('', previous);
+        AssertEquals('', model.semantic_tail);
+    finally
+        model.Free;
+    end;
+end;
 
 procedure TncDocumentContextModelTests.EmptyContextHasNoEffect;
 var
