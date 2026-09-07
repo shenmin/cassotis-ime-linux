@@ -23,29 +23,44 @@ if [[ "$destdir" == / && $EUID -ne 0 ]]; then
     exit 1
 fi
 
-while IFS= read -r relative_path; do
+mapfile -t release_paths < "$manifest"
+for relative_path in "${release_paths[@]}"; do
     [[ -n "$relative_path" && "$relative_path" != /* &&
        "$relative_path" != *'..'* ]] || {
         printf 'Error: unsafe release path: %s\n' "$relative_path" >&2
         exit 1
     }
+done
+
+declare -A directories=(
+    [usr/share/cassotis-ime]=1
+    [usr/share/doc/cassotis-ime]=1
+    [usr/libexec/cassotis-ime]=1
+)
+for relative_path in "${release_paths[@]}"; do
     rm -f -- "$destdir/$relative_path"
-done < "$manifest"
+    directory="${relative_path%/*}"
+    while :; do
+        case "$directory" in
+            usr/share/cassotis-ime|usr/share/cassotis-ime/*|\
+            usr/share/doc/cassotis-ime|usr/share/doc/cassotis-ime/*|\
+            usr/libexec/cassotis-ime|usr/libexec/cassotis-ime/*)
+                directories["$directory"]=1
+                directory="${directory%/*}"
+                ;;
+            *) break ;;
+        esac
+    done
+done
 rm -f -- \
     "$destdir/usr/share/cassotis-ime/release-manifest.txt" \
     "$destdir/usr/share/cassotis-ime/release-sha256.txt"
 
-for directory in \
-    "$destdir/usr/share/cassotis-ime" \
-    "$destdir/usr/share/doc/cassotis-ime/third-party/onnxruntime" \
-    "$destdir/usr/share/doc/cassotis-ime/third-party" \
-    "$destdir/usr/share/doc/cassotis-ime/docs" \
-    "$destdir/usr/share/doc/cassotis-ime" \
-    "$destdir/usr/libexec/cassotis-ime/local_completion" \
-    "$destdir/usr/libexec/cassotis-ime/pinyin_transformer" \
-    "$destdir/usr/libexec/cassotis-ime"; do
-    rmdir --ignore-fail-on-non-empty "$directory" 2>/dev/null || true
-done
+# Remove children before parents, only within dedicated package directories.
+# Nonempty directories containing unlisted files are deliberately retained.
+while IFS= read -r directory; do
+    rmdir --ignore-fail-on-non-empty "$destdir/$directory" 2>/dev/null || true
+done < <(printf '%s\n' "${!directories[@]}" | LC_ALL=C sort -r)
 
 if [[ "$destdir" == / ]]; then
     command -v update-desktop-database >/dev/null 2>&1 &&
