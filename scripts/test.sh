@@ -48,6 +48,7 @@ python3 "$cassotis_root/scripts/fcitx5_profile.py" self-test
 bash "$cassotis_root/tests/scripts/test_gnome_input_sources.sh"
 bash "$cassotis_root/tests/scripts/test_session_refresh.sh"
 bash "$cassotis_root/tests/scripts/test_process_stop.sh"
+bash "$cassotis_root/tests/scripts/test_portable_uninstall.sh"
 
 "$engine" --self-test
 "$cassotis_root/build/bin/cassotis-ort-precision-tests"
