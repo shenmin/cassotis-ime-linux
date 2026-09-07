@@ -13,7 +13,7 @@ import sys
 def parse_metrics(path: Path) -> dict[str, str]:
     metrics: dict[str, str] = {}
     for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
-        if not raw_line.strip():
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
             continue
         key, separator, value = raw_line.partition("=")
         if not separator:

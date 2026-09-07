@@ -35,7 +35,7 @@ SIGNATURE_PATTERN = re.compile(r"^[0-9A-Fa-f]{16}$")
 def parse_metrics(path: Path) -> dict[str, str]:
     metrics: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8-sig").splitlines():
-        if "=" not in line:
+        if line.lstrip().startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
         metrics[key.strip()] = value.strip()

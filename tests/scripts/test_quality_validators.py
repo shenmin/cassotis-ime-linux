@@ -55,6 +55,38 @@ cold_start = load_module(
 )
 
 
+def test_baseline_comments() -> None:
+    parsers = (quality, completion, completion_quality, short_completion_quality)
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "baseline.txt"
+        path.write_text(
+            "# Reviewed platform baseline\n\n  # ignored=value\n"
+            "format=cassotis-quality-baseline-v1\n long.top1_min = 100 \n",
+            encoding="utf-8-sig",
+        )
+        expected = {"format": "cassotis-quality-baseline-v1", "long.top1_min": "100"}
+        for parser in parsers:
+            if parser.parse_metrics(path) != expected:
+                raise AssertionError("baseline comments changed parsed metrics")
+        path.write_text("invalid metric line\n", encoding="utf-8")
+        for parser in (quality, short_completion_quality):
+            try:
+                parser.parse_metrics(path)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("malformed metric line was accepted")
+
+    # Exercise shipped inputs before starting the expensive native benchmarks.
+    for path in sorted((ROOT / "tests" / "baselines").glob("*quality-*.txt")):
+        for parser in parsers:
+            metrics = parser.parse_metrics(path)
+            if not metrics.get("format"):
+                raise AssertionError(f"missing baseline format: {path}")
+            if any(key.startswith("#") for key in metrics):
+                raise AssertionError(f"baseline comment became a metric: {path}")
+
+
 def test_cold_start_diagnostics() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -120,6 +152,7 @@ def test_repeatability_validator() -> None:
 
 
 def main() -> int:
+    test_baseline_comments()
     test_repeatability_validator()
     test_cold_start_diagnostics()
     release_source = (ROOT / "scripts" / "validate_release.sh").read_text(
