@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-09-07
+
+- Ported the Cassotis IME v1.22.0 engine changes while retaining the matching
+  Cassotis Lexicon v1.21.0 schema-24 dictionaries.
+- Added six-layer INT8 pinyin-constrained local sentence repair with word,
+  exact-query and user-word safeguards, plus a bounded document-context cache.
+- Improved long-sentence completion arbitration without hiding static results
+  while a background model is pending or refreshing identical completions.
+- Preserved model and character alignment across candidate selection, paging
+  and commit; added repair, context-isolation and native-runtime regressions.
+- Bundled the repair models and their Apache-2.0 attribution in both native
+  architecture packages and portable archives.
+- Kept model loading and warm-up off the input thread, with production IPC
+  regression coverage while native initialization is deliberately blocked.
+- Bounded model-session arena retention and returned unused heap pages at
+  initialization/destruction boundaries without changing candidate scores.
+
 ## 0.5.0 - 2026-09-05
 
 - Advanced the reviewed engine and dictionary baseline to Cassotis IME and

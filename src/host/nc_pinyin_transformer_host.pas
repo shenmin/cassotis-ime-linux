@@ -12,6 +12,7 @@ uses
     SyncObjs,
     Generics.Collections,
     Dynlibs,
+    nc_local_repair_host,
     nc_engine_intf;
 
 const
@@ -56,7 +57,7 @@ type
     end;
 
     TncPinyinTransformerHostReranker = class(TInterfacedObject,
-        IncLongNeuralReranker)
+        IncLongNeuralReranker, IncLongLocalRepair)
     private type
         TncPtCreate = function(const model_path: PAnsiChar;
             const intra_threads: Integer; const error_text: PAnsiChar;
@@ -82,6 +83,7 @@ type
         TncPgDestroy = procedure(const handle: Pointer); cdecl;
     private
         m_base_directory: string;
+        m_local_repair: TncLocalRepairHost;
         m_state_lock: TCriticalSection;
         m_run_lock: TCriticalSection;
         m_loader: TncPinyinTransformerLoadThread;
@@ -175,6 +177,12 @@ type
             const candidates: TncLongFinalCandidateDebugArray;
             out selected_index: Integer): Boolean;
         function ready: Boolean;
+        function local_repair_ready: Boolean;
+        procedure set_document_context(const document_key, preceding_text: string);
+        function try_repair(const query_text, draft_text: string;
+            const document_key, preceding_text: string;
+            out repaired_text, aligned_pinyin: string;
+            out minimum_word_ratio: Double): Boolean;
         function wait_until_ready(const timeout_ms: Cardinal): Boolean;
         function last_error: string;
         procedure set_audit_enabled(const value: Boolean);
@@ -783,6 +791,7 @@ begin
         ExpandFileName(base_directory));
     m_state_lock := TCriticalSection.Create;
     m_run_lock := TCriticalSection.Create;
+    m_local_repair := TncLocalRepairHost.Create(m_base_directory, result_timeout_ms);
     m_loader := nil;
     m_module := 0;
     m_session := nil;
@@ -830,11 +839,14 @@ begin
     else
     begin
         load_model;
+        if not m_local_repair.wait_until_ready(60000) then
+            raise Exception.Create('Local repair initialization timed out');
     end;
 end;
 
 destructor TncPinyinTransformerHostReranker.Destroy;
 begin
+    FreeAndNil(m_local_repair);
     if m_loader <> nil then
     begin
         m_loader.detach_owner;
@@ -890,7 +902,10 @@ procedure TncPinyinTransformerHostReranker.log_message(
     const level_text: string; const message_text: string);
 begin
     if m_profile_enabled then
+    begin
         WriteLn(StdErr, '[', level_text, '] pinyin-transformer ', message_text);
+        Flush(StdErr);
+    end;
 end;
 
 function TncPinyinTransformerHostReranker.load_vocab(
@@ -2071,6 +2086,8 @@ begin
         end;
         if Result or finished then
         begin
+            if Result and (m_local_repair <> nil) then
+                Result := m_local_repair.wait_until_ready(timeout_ms);
             Exit;
         end;
         Sleep(5);
@@ -2086,6 +2103,31 @@ begin
     finally
         m_state_lock.Release;
     end;
+end;
+
+procedure TncPinyinTransformerHostReranker.set_document_context(
+    const document_key, preceding_text: string);
+begin
+    if m_local_repair <> nil then
+        m_local_repair.set_document_context(document_key, preceding_text);
+end;
+
+function TncPinyinTransformerHostReranker.local_repair_ready: Boolean;
+begin
+    Result := (m_local_repair <> nil) and m_local_repair.ready;
+end;
+
+function TncPinyinTransformerHostReranker.try_repair(
+    const query_text, draft_text, document_key, preceding_text: string;
+    out repaired_text, aligned_pinyin: string;
+    out minimum_word_ratio: Double): Boolean;
+begin
+    repaired_text := '';
+    aligned_pinyin := '';
+    minimum_word_ratio := 1;
+    Result := (m_local_repair <> nil) and
+        m_local_repair.try_repair(query_text, draft_text, document_key,
+            preceding_text, repaired_text, aligned_pinyin, minimum_word_ratio);
 end;
 
 end.

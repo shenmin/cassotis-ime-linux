@@ -63,17 +63,22 @@ void ConfigureSessionOptions(Ort::SessionOptions& options, int intra_threads) {
     options.SetIntraOpNumThreads(EffectiveThreadCount(intra_threads));
     options.SetInterOpNumThreads(1);
     options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+    // Inference is sparse and shares a process with dictionary/search caches.
+    // Avoid retaining a separate peak-sized allocation arena for each model.
+    options.DisableMemPattern();
+    options.DisableCpuMemArena();
     // Avoid saturating U8S8 intermediates on x86 CPUs without VNNI. ORT
     // applies the exact U8U8 conversion only on affected CPUs; model files
     // and their quantization scales remain unchanged.
     options.AddConfigEntry("session.x64quantprecision", "1");
+    // Return idle worker capacity to decoding after each infrequent inference.
+    options.AddConfigEntry("session.force_spinning_stop", "1");
 }
 
 void ReleaseUnusedHeapPages() {
 #if defined(__GLIBC__)
-    // ONNX Runtime sessions own large, shape-dependent buffers. Session
-    // destruction frees them, but glibc may otherwise retain those pages and
-    // make a later runtime reload look like cumulative process growth.
+    // Model construction also releases large temporary graph buffers. Return
+    // their unused pages after loading and destruction, never on each key.
     malloc_trim(0);
 #endif
 }
@@ -220,6 +225,7 @@ extern "C" CASSOTIS_EXPORT void* nc_pt_create(
         ConfigureSessionOptions(options, intra_threads);
         auto handle = std::make_unique<SessionHandle>();
         handle->session = std::make_unique<Ort::Session>(Environment(), model_path, options);
+        ReleaseUnusedHeapPages();
         return handle.release();
     } catch (const Ort::Exception& error) {
         SetError(error_text, error_capacity, ErrorText(error.what()));
@@ -410,12 +416,9 @@ extern "C" CASSOTIS_EXPORT void* nc_pg_create(
         Ort::InitApi();
         Ort::SessionOptions options;
         ConfigureSessionOptions(options, intra_threads);
-        // Generators are sparse fallback paths. Avoid retaining a second ORT
-        // arena at its worst-case shape beside the always-on scorer session.
-        options.DisableMemPattern();
-        options.DisableCpuMemArena();
         handle->session = std::make_unique<Ort::Session>(
             Environment(), model_path, options);
+        ReleaseUnusedHeapPages();
         return handle.release();
     } catch (const Ort::Exception& error) {
         SetError(error_text, error_capacity, ErrorText(error.what()));
@@ -2399,6 +2402,7 @@ extern "C" CASSOTIS_EXPORT void* nc_lc_create(
         handle->session = std::make_unique<Ort::Session>(
             Environment(), model_path, options);
         WarmLocalCompletionSession(*handle->session, handle->index);
+        ReleaseUnusedHeapPages();
         return handle.release();
     } catch (const Ort::Exception& error) {
         SetError(error_text, error_capacity, ErrorText(error.what()));
@@ -2814,12 +2818,9 @@ extern "C" CASSOTIS_EXPORT void* nc_lcg_create(
         }
         Ort::SessionOptions options;
         ConfigureSessionOptions(options, intra_threads);
-        // Keep the optional completion generator from retaining a separate
-        // peak-shape arena for the lifetime of the engine service.
-        options.DisableMemPattern();
-        options.DisableCpuMemArena();
         handle->session = std::make_unique<Ort::Session>(
             Environment(), model_path, options);
+        ReleaseUnusedHeapPages();
         return handle.release();
     } catch (const Ort::Exception& error) {
         SetError(error_text, error_capacity, ErrorText(error.what()));
@@ -2897,3 +2898,5 @@ extern "C" CASSOTIS_EXPORT void nc_lcg_destroy(
     delete static_cast<LocalGeneratorHandle*>(opaque_handle);
     ReleaseUnusedHeapPages();
 }
+
+#include "nc_local_repair_ort.inc"

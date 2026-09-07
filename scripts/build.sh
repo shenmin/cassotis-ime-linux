@@ -77,7 +77,7 @@ install -m 0755 "$ort_arch_dir/libonnxruntime_providers_shared.so" \
 ln -sfn libonnxruntime.so.1.20.1 "$bin_dir/libonnxruntime.so.1"
 ln -sfn libonnxruntime.so.1 "$bin_dir/libonnxruntime.so"
 install -d -m 0755 "$bin_dir/pinyin_transformer" \
-    "$bin_dir/local_completion"
+    "$bin_dir/local_completion" "$bin_dir/local_repair"
 install -m 0644 \
     "$cassotis_root/data/models/pinyin_transformer/pinyin_conditional_scorer_int8.onnx" \
     "$cassotis_root/data/models/pinyin_transformer/pinyin_parallel_generator_int8.onnx" \
@@ -92,6 +92,13 @@ install -m 0644 \
     "$cassotis_root/data/models/local_completion/local_completion_index.bin" \
     "$cassotis_root/data/models/local_completion/model_manifest.json" \
     "$bin_dir/local_completion/"
+install -m 0644 \
+    "$cassotis_root/data/models/local_repair/context_int8.onnx" \
+    "$cassotis_root/data/models/local_repair/query_int8.onnx" \
+    "$cassotis_root/data/models/local_repair/readings.json" \
+    "$cassotis_root/data/models/local_repair/vocab.json" \
+    "$cassotis_root/data/models/local_repair/runtime_manifest.json" \
+    "$bin_dir/local_repair/"
 
 common_args=(
     -Mdelphiunicode
@@ -162,6 +169,7 @@ cc -std=gnu11 -O2 -g -Wall -Wextra -Werror \
     -o "$bin_dir/cassotis-control" \
     $(pkg-config --libs glib-2.0)
 cassotis_require_executable "$bin_dir/cassotis-control"
+
 
 printf '[build] libcassotis.so (Fcitx 5)\n'
 fcitx_compat_flags=()

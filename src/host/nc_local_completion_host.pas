@@ -438,6 +438,11 @@ begin
     finally
         FLock.Release;
     end;
+    if GetEnvironmentVariable('CASSOTIS_LOCAL_COMPLETION_PROFILE') = '1' then
+    begin
+        WriteLn(StdErr, '[INFO] local-completion INT8 models loaded in background');
+        Flush(StdErr);
+    end;
 end;
 
 function TncLocalCompletionHost.PopTask(

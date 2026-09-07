@@ -1,0 +1,32 @@
+{
+  "format": 2,
+  "enabled": true,
+  "model": "pinyin-constrained local correction",
+  "minimum_word_ratio": 0.01,
+  "no_context": {
+    "edit": 0.8,
+    "margin": 0,
+    "max_edits": 4,
+    "max_spans": 2
+  },
+  "document_context": {
+    "edit": 0.9,
+    "margin": 0,
+    "max_edits": 4,
+    "max_spans": 2
+  },
+  "source_model": "hfl/chinese-macbert-base",
+  "source_revision": "a986e004d2a7f2a1c2f5a3edef4e20604a974ed1",
+  "license": "Apache-2.0",
+  "teacher_url": "https://huggingface.co/hfl/chinese-macbert-base",
+  "checkpoint_sha256": "371204f81f6d82f4677b5b235afad5bb04cb8829f07cd2cf4b7d67622394556f",
+  "max_characters": 40,
+  "context_characters": 256,
+  "dictionary_constraints_sha256": "5b5f5464f07071b2cf913e0f950bd182a5552c7361487355b733755ede3c6dd8",
+  "files": {
+    "context_int8.onnx": "eb3778b116cc1000ce86e980c26c6f376b4030b24ab4675aae7466e4feecd218",
+    "query_int8.onnx": "558f6c89bfd66ebbb2217cec577cc2e62b125cd2a58bdcff10c673a0d1b8aec2",
+    "vocab.json": "43b7a1613412edbe08a35147e567f6a795f3aeba719e872096208e6905c0ea47",
+    "readings.json": "cf4021fec90600462da7bd111928326aa8037b1c471e2984d6616e1cadce3baa"
+  }
+}
