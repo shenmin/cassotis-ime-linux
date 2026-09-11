@@ -12,15 +12,17 @@
 The x86_64 release-gated host uses Ubuntu 26.04.1, Linux 7.0.0-30,
 Free Pascal 3.2.2, IBus
 1.5.34-rc2, and Fcitx 5.1.19. Its automated desktop matrix was last completed
-on 2026-09-05. Native ARM64 validation was completed on 2026-09-05
+on 2026-09-11. Native ARM64 framework validation was completed on 2026-09-10
 using Ubuntu 26.04.1, Linux 7.0.0-30, Free Pascal 3.2.2, IBus 1.5.34-rc2, and
-Fcitx 5.1.19. Package/portable validation uses the same native binaries and
-schema-24 simplified/traditional dictionaries.
+Fcitx 5.1.19. These v1.25.0 port qualification runs use the frozen schema-24
+simplified/traditional dictionaries; they do not replace final package acceptance.
 
 Both architecture qualification runs covered the core test suite, simplified/traditional
 dictionary regressions, frozen corpus quality and memory measurements, neural-runtime
-smokes, portable/Debian payload parity and integrity, package metadata,
-staged-engine checks, and all five automated IBus/Fcitx desktop matrix stages.
+smokes, blocked-model cold start, IPC stress/restart recovery, and all five
+automated IBus/Fcitx desktop matrix stages. Completion qualification exceptions
+are recorded in [BENCHMARK.md](BENCHMARK.md) and
+[BENCHMARK.CN.md](BENCHMARK.CN.md), not treated as passed gates.
 Each binary release must separately pass the full gate from its exact source
 revision. Installing the final Debian package, application focus,
 rendering, and desktop appearance remain manual checklist items on both

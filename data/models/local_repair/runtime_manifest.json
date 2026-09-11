@@ -3,6 +3,7 @@
   "enabled": true,
   "model": "pinyin-constrained local correction",
   "minimum_word_ratio": 0.01,
+  "no_context_refinement_passes": 2,
   "no_context": {
     "edit": 0.8,
     "margin": 0,

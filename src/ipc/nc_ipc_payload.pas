@@ -14,7 +14,8 @@ const
     c_ipc_payload_schema_version = 1;
     c_ipc_engine_state_fuzzy_schema_version = 2;
     c_ipc_engine_state_shortcuts_schema_version = 3;
-    c_ipc_engine_state_schema_version = 4;
+    c_ipc_engine_state_debug_schema_version = 4;
+    c_ipc_engine_state_schema_version = 5;
     c_ipc_payload_max_text_bytes = 1024 * 1024;
     c_ipc_payload_max_candidates = 256;
 
@@ -125,10 +126,10 @@ begin
         flags := flags or c_shortcut_flag_alt;
     writer.WriteUInt16(shortcut.key_code);
     writer.WriteByte(flags);
-    writer.WriteByte(0);
+    writer.WriteBoolean(shortcut.disabled);
 end;
 
-function ReadShortcut(const reader: TncIpcPayloadReader;
+function ReadShortcut(const reader: TncIpcPayloadReader; const version: Word;
     out shortcut: TncShortcut): Boolean;
 var
     flags: Byte;
@@ -139,7 +140,8 @@ begin
         reader.ReadByte(flags) and reader.ReadByte(reserved);
     if not Result then
         Exit;
-    if (reserved <> 0) or ((flags and not c_shortcut_known_flags) <> 0) then
+    if (reserved > 1) or ((version < 5) and (reserved <> 0)) or
+        ((flags and not c_shortcut_known_flags) <> 0) then
     begin
         reader.SetError('State payload contains invalid shortcut flags');
         Exit(False);
@@ -147,6 +149,7 @@ begin
     shortcut.shift_down := (flags and c_shortcut_flag_shift) <> 0;
     shortcut.ctrl_down := (flags and c_shortcut_flag_control) <> 0;
     shortcut.alt_down := (flags and c_shortcut_flag_alt) <> 0;
+    shortcut.disabled := reserved <> 0;
 end;
 
 function ShortcutConfigIsValid(const config: TncShortcutConfig): Boolean;
@@ -890,18 +893,18 @@ begin
             state.shortcuts.signature := c_nc_shortcut_config_signature;
             Result := reader.ReadByte(candidate_page_key_scheme) and
                 reader.ReadByte(one_key_completion_key);
-            if Result and (version >= c_ipc_engine_state_schema_version) then
+            if Result and (version >= c_ipc_engine_state_debug_schema_version) then
                 Result := reader.ReadByte(candidate_page_size) and
                     reader.ReadByte(reserved_byte)
             else if Result then
                 Result := reader.ReadUInt16(reserved);
             Result := Result and
-                ReadShortcut(reader, state.shortcuts.input_mode_toggle) and
-                ReadShortcut(reader, state.shortcuts.punctuation_toggle) and
-                ReadShortcut(reader,
+                ReadShortcut(reader, version, state.shortcuts.input_mode_toggle) and
+                ReadShortcut(reader, version, state.shortcuts.punctuation_toggle) and
+                ReadShortcut(reader, version,
                 state.shortcuts.dictionary_variant_toggle) and
-                ReadShortcut(reader, state.shortcuts.full_width_toggle) and
-                ReadShortcut(reader, state.shortcuts.open_settings);
+                ReadShortcut(reader, version, state.shortcuts.full_width_toggle) and
+                ReadShortcut(reader, version, state.shortcuts.open_settings);
         end;
         if Result and (input_mode > Ord(High(TncInputMode))) then
         begin
@@ -929,7 +932,7 @@ begin
             reader.SetError('State payload v1 contains invalid flags');
             Result := False;
         end;
-        if Result and (version < c_ipc_engine_state_schema_version) and
+        if Result and (version < c_ipc_engine_state_debug_schema_version) and
             ((flags and c_state_flag_debug_mode) <> 0) then
         begin
             reader.SetError('State payload contains flags unsupported by its schema');

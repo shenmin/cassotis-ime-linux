@@ -1,4 +1,4 @@
-﻿unit nc_shortcut;
+unit nc_shortcut;
 
 {$codepage utf8}
 {$mode delphiunicode}
@@ -271,6 +271,7 @@ begin
     Result.shift_down := shift_down;
     Result.ctrl_down := ctrl_down;
     Result.alt_down := alt_down;
+    Result.disabled := False;
 end;
 
 function nc_default_shortcut(const action: TncShortcutAction): TncShortcut;
@@ -343,7 +344,8 @@ begin
     Result := (normalize_key_code(left_value.key_code) = normalize_key_code(right_value.key_code)) and
         (left_value.shift_down = right_value.shift_down) and
         (left_value.ctrl_down = right_value.ctrl_down) and
-        (left_value.alt_down = right_value.alt_down);
+        (left_value.alt_down = right_value.alt_down) and
+        (left_value.disabled = right_value.disabled);
 end;
 
 function nc_shortcut_config_has_duplicates(const config: TncShortcutConfig): Boolean;
@@ -357,9 +359,11 @@ begin
     for first_index := Ord(Low(TncShortcutAction)) to Ord(High(TncShortcutAction)) - 1 do
     begin
         first_action := TncShortcutAction(first_index);
+        if nc_shortcut_for_action(config, first_action).disabled then Continue;
         for second_index := first_index + 1 to Ord(High(TncShortcutAction)) do
         begin
             second_action := TncShortcutAction(second_index);
+            if nc_shortcut_for_action(config, second_action).disabled then Continue;
             if nc_shortcut_equal(nc_shortcut_for_action(config, first_action),
                 nc_shortcut_for_action(config, second_action)) then
             begin
@@ -374,8 +378,8 @@ var
     normalized_key: Word;
 begin
     normalized_key := normalize_key_code(shortcut.key_code);
-    Result := (normalized_key = VK_SHIFT) or (normalized_key = VK_CONTROL) or
-        (normalized_key = VK_MENU);
+    Result := (not shortcut.disabled) and ((normalized_key = VK_SHIFT) or
+        (normalized_key = VK_CONTROL) or (normalized_key = VK_MENU));
 end;
 
 function nc_get_shortcut_validation_issue(const shortcut: TncShortcut): TncShortcutValidationIssue;
@@ -388,7 +392,8 @@ begin
         Exit(svi_missing_key);
     end;
 
-    if nc_shortcut_is_modifier_only(shortcut) then
+    if (normalized_key = VK_SHIFT) or (normalized_key = VK_CONTROL) or
+        (normalized_key = VK_MENU) then
     begin
         if (normalized_key = VK_SHIFT) and (not shortcut.shift_down) and
             (not shortcut.ctrl_down) and (not shortcut.alt_down) then
@@ -420,6 +425,7 @@ procedure nc_normalize_shortcut_config(var config: TncShortcutConfig);
 var
     action: TncShortcutAction;
     shortcut: TncShortcut;
+    was_disabled: Boolean;
 begin
     if config.signature <> c_nc_shortcut_config_signature then
     begin
@@ -432,13 +438,22 @@ begin
         shortcut := nc_shortcut_for_action(config, action);
         if not nc_shortcut_is_valid(shortcut) then
         begin
-            nc_set_shortcut_for_action(config, action, nc_default_shortcut(action));
+            was_disabled := shortcut.disabled;
+            shortcut := nc_default_shortcut(action);
+            shortcut.disabled := was_disabled;
+            nc_set_shortcut_for_action(config, action, shortcut);
         end;
     end;
 
     if nc_shortcut_config_has_duplicates(config) then
     begin
-        config := nc_default_shortcut_config;
+        for action := Low(TncShortcutAction) to High(TncShortcutAction) do
+        begin
+            was_disabled := nc_shortcut_for_action(config, action).disabled;
+            shortcut := nc_default_shortcut(action);
+            shortcut.disabled := was_disabled;
+            nc_set_shortcut_for_action(config, action, shortcut);
+        end;
     end;
 end;
 
@@ -451,7 +466,7 @@ var
     actual_alt_down: Boolean;
 begin
     Result := False;
-    if not nc_shortcut_is_valid(shortcut) then
+    if shortcut.disabled or (not nc_shortcut_is_valid(shortcut)) then
     begin
         Exit;
     end;
@@ -582,6 +597,8 @@ begin
         Result := Result + 'Alt+';
     end;
     Result := Result + key_name;
+    // Preserve the selected chord while disabling it in persisted settings.
+    if shortcut.disabled then Result := 'disabled:' + Result;
 end;
 
 function try_parse_key_name(const value: string; out key_code: Word): Boolean;
@@ -665,13 +682,18 @@ var
     shift_down: Boolean;
     ctrl_down: Boolean;
     alt_down: Boolean;
+    shortcut_text: string;
+    disabled: Boolean;
 begin
     shortcut := nc_make_shortcut(0);
+    shortcut_text := Trim(value);
+    disabled := SameText(Copy(shortcut_text, 1, 9), 'disabled:');
+    if disabled then Delete(shortcut_text, 1, 9);
     parts := TStringList.Create;
     try
         parts.StrictDelimiter := True;
         parts.Delimiter := '+';
-        parts.DelimitedText := Trim(value);
+        parts.DelimitedText := Trim(shortcut_text);
         has_key := False;
         shift_down := False;
         ctrl_down := False;
@@ -730,6 +752,7 @@ begin
             Exit(False);
         end;
         shortcut := nc_make_shortcut(key_code, shift_down, ctrl_down, alt_down);
+        shortcut.disabled := disabled;
         Result := nc_shortcut_is_valid(shortcut);
     finally
         parts.Free;

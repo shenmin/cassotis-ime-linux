@@ -84,6 +84,7 @@ type
     );
 
     TncShortcut = record
+        disabled: Boolean;
         key_code: Word;
         shift_down: Boolean;
         ctrl_down: Boolean;
@@ -431,6 +432,7 @@ end;
 
 procedure nc_initialize_engine_state(out value: TncEngineState);
 begin
+    value := Default(TncEngineState);
     value.input_mode := im_chinese;
     value.dictionary_variant := dv_simplified;
     value.pinyin_scheme := pis_full_pinyin;
@@ -504,7 +506,8 @@ function nc_engine_states_equal(const left_value: TncEngineState;
         Result := (left_shortcut.key_code = right_shortcut.key_code) and
             (left_shortcut.shift_down = right_shortcut.shift_down) and
             (left_shortcut.ctrl_down = right_shortcut.ctrl_down) and
-            (left_shortcut.alt_down = right_shortcut.alt_down);
+            (left_shortcut.alt_down = right_shortcut.alt_down) and
+            (left_shortcut.disabled = right_shortcut.disabled);
     end;
 begin
     Result := (left_value.input_mode = right_value.input_mode) and

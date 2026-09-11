@@ -138,7 +138,7 @@ static inline gboolean cassotis_shortcut_matches_keysym(
     guint16 key_code;
     guint32 actual_modifiers;
 
-    if (shortcut == NULL || shortcut->key_code == 0 ||
+    if (shortcut == NULL || shortcut->disabled || shortcut->key_code == 0 ||
         (modifiers & CASSOTIS_MODIFIER_SUPER) != 0)
         return FALSE;
     key_code = cassotis_shortcut_virtual_key(key_sym);

@@ -47,6 +47,7 @@ type
         m_prepare: TPrepareContext;
         m_destroy: TDestroyModel;
         m_loaded, m_finished: Boolean;
+        m_refine_no_context: Boolean;
         m_last_error: string;
         m_signature, m_context_text: string;
         m_generation, m_ready_generation: UInt64;
@@ -76,6 +77,7 @@ type
             out minimum_word_ratio: Double): Boolean;
         function wait_until_ready(const timeout_ms: Cardinal): Boolean;
         function ready: Boolean;
+        function allows_no_context_refinement: Boolean;
         function last_error: string;
     end;
 
@@ -173,7 +175,7 @@ var
     manifest, vocabulary, constraints, values: TJSONObject;
     path, key: string;
     array_value: TJSONArray;
-    char_id, py_id, index, item_index: Integer;
+    char_id, py_id, index, item_index, refinement_passes: Integer;
     create_model: TCreateModel;
     error: array[0..2047] of AnsiChar;
     function read_gate(const value: TJSONObject): TGate;
@@ -206,6 +208,10 @@ begin
             raise Exception.Create('Invalid local repair word gate');
         m_empty_gate := read_gate(manifest.Objects['no_context']);
         m_document_gate := read_gate(manifest.Objects['document_context']);
+        refinement_passes := manifest.Get('no_context_refinement_passes', 1);
+        if (refinement_passes < 1) or (refinement_passes > 2) then
+            raise Exception.Create('Invalid local repair refinement limit');
+        m_refine_no_context := refinement_passes = 2;
     finally
         manifest.Free;
     end;
@@ -624,6 +630,16 @@ function TncLocalRepairHost.last_error: string;
 begin
     m_state.Acquire;
     try Result := m_last_error; finally m_state.Release; end;
+end;
+
+function TncLocalRepairHost.allows_no_context_refinement: Boolean;
+begin
+    m_state.Acquire;
+    try
+        Result := m_loaded and m_refine_no_context;
+    finally
+        m_state.Release;
+    end;
 end;
 
 function TncLocalRepairHost.ready: Boolean;

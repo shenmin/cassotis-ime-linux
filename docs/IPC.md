@@ -121,9 +121,9 @@ ends polling, whether the model accepted a completion or abstained. Adapters
 use a bounded polling interval and discard the request after focus loss,
 context reset, generation change, timeout, or transport failure.
 
-## Engine State Schema 4
+## Engine State Schema 5
 
-The current state payload is schema 4:
+The current state payload is schema 5:
 
 | Order | Type | Field |
 | ---: | --- | --- |
@@ -138,14 +138,17 @@ The current state payload is schema 4:
 | 9 | `u8` | reserved |
 | 10 | 5 x shortcut | mode, punctuation, dictionary, width, settings |
 
-One shortcut is `u16 key_code`, `u8` Shift/Ctrl/Alt mask, and one reserved
-byte. Duplicate or unsafe shortcuts and a Tab paging/completion conflict are
-rejected.
+One shortcut is `u16 key_code`, `u8` Shift/Ctrl/Alt mask, and a `u8 disabled`
+boolean (0 or 1). A disabled shortcut retains its validated chord but neither
+matches input nor conflicts with active shortcuts. Duplicate active or unsafe
+shortcuts and a Tab paging/completion conflict are rejected.
 
 State decoders remain backward-compatible: schema 1 carries the first four
 bytes, schema 2 adds fuzzy rules, and schema 3 adds paging/completion and five
-shortcuts with a reserved `u16`. Schema 4 adds page size and debug mode. Other
-payload types remain schema 1.
+shortcuts with a reserved `u16`. Schema 4 adds page size and debug mode.
+Schema 5 uses each shortcut's formerly reserved zero byte for `disabled`;
+older schemas still reject nonzero values there. Other payload types remain
+schema 1.
 
 Pinyin ordinals are full pinyin, Microsoft, Xiaohe, Ziranma, Sogou, Ziguang,
 and Pinyin Jiajia. Persisted settings are engine-owned and shared by both

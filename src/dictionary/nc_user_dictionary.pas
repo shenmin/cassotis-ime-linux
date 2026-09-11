@@ -425,6 +425,7 @@ const
         '''setting.candidate_page_key_scheme'', ' +
         '''setting.one_key_completion_key'', ' +
         '''setting.debug_mode'', ' +
+        '''setting.shortcut_disabled_mask'', ' +
         '''setting.shortcut.input_mode.key'', ' +
         '''setting.shortcut.input_mode.modifiers'', ' +
         '''setting.shortcut.punctuation.key'', ' +
@@ -504,6 +505,15 @@ begin
                     TncOneKeyCompletionKey(setting_value)
             else if key_name = 'setting.debug_mode' then
                 state.debug_mode := setting_value <> 0
+            else if (key_name = 'setting.shortcut_disabled_mask') and
+                (setting_value >= 0) and (setting_value <= 31) then
+            begin
+                state.shortcuts.input_mode_toggle.disabled := (setting_value and 1) <> 0;
+                state.shortcuts.punctuation_toggle.disabled := (setting_value and 2) <> 0;
+                state.shortcuts.dictionary_variant_toggle.disabled := (setting_value and 4) <> 0;
+                state.shortcuts.full_width_toggle.disabled := (setting_value and 8) <> 0;
+                state.shortcuts.open_settings.disabled := (setting_value and 16) <> 0;
+            end
             else if key_name = 'setting.shortcut.input_mode.key' then
                 SetShortcutKeyCode(state.shortcuts.input_mode_toggle,
                     setting_value)
@@ -590,6 +600,13 @@ begin
         Ord(state.one_key_completion_key)))) and
         ExecutePairStatement(c_upsert_setting, 'setting.debug_mode',
         UTF8Decode(IntToStr(Ord(state.debug_mode)))) and
+        ExecutePairStatement(c_upsert_setting, 'setting.shortcut_disabled_mask',
+        UTF8Decode(IntToStr(
+        Ord(state.shortcuts.input_mode_toggle.disabled) or
+        (Ord(state.shortcuts.punctuation_toggle.disabled) shl 1) or
+        (Ord(state.shortcuts.dictionary_variant_toggle.disabled) shl 2) or
+        (Ord(state.shortcuts.full_width_toggle.disabled) shl 3) or
+        (Ord(state.shortcuts.open_settings.disabled) shl 4)))) and
         ExecutePairStatement(c_upsert_setting,
         'setting.shortcut.input_mode.key', UTF8Decode(IntToStr(
         state.shortcuts.input_mode_toggle.key_code))) and

@@ -57,7 +57,7 @@ type
     end;
 
     TncPinyinTransformerHostReranker = class(TInterfacedObject,
-        IncLongNeuralReranker, IncLongLocalRepair)
+        IncLongNeuralReranker, IncLongLocalRepair, IncLongLocalRepairPolicy)
     private type
         TncPtCreate = function(const model_path: PAnsiChar;
             const intra_threads: Integer; const error_text: PAnsiChar;
@@ -178,6 +178,7 @@ type
             out selected_index: Integer): Boolean;
         function ready: Boolean;
         function local_repair_ready: Boolean;
+        function allows_no_context_refinement: Boolean;
         procedure set_document_context(const document_key, preceding_text: string);
         function try_repair(const query_text, draft_text: string;
             const document_key, preceding_text: string;
@@ -2110,6 +2111,11 @@ procedure TncPinyinTransformerHostReranker.set_document_context(
 begin
     if m_local_repair <> nil then
         m_local_repair.set_document_context(document_key, preceding_text);
+end;
+
+function TncPinyinTransformerHostReranker.allows_no_context_refinement: Boolean;
+begin
+    Result := (m_local_repair <> nil) and m_local_repair.allows_no_context_refinement;
 end;
 
 function TncPinyinTransformerHostReranker.local_repair_ready: Boolean;
