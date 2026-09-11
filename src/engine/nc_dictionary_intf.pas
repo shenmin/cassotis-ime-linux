@@ -1,4 +1,4 @@
-﻿unit nc_dictionary_intf;
+unit nc_dictionary_intf;
 
 {$codepage utf8}
 {$mode delphiunicode}
@@ -20,6 +20,8 @@ type
             out results: TncCandidateList): Boolean; virtual;
         function lookup_full_pinyin_prefix(const pinyin_prefix: string;
             out results: TncCandidateList): Boolean; virtual;
+        function lookup_candidate_prefix_completions(const pinyin_prefix: string;
+            out results: TncOneKeyCompletionList): Boolean; virtual;
         function lookup_one_key_completions(const pinyin_prefix: string;
             out results: TncOneKeyCompletionList): Boolean; virtual;
         function lookup_long_one_key_completions(const anchor_path: string;
@@ -95,6 +97,10 @@ type
             out scores: TArray<Integer>): Boolean; virtual;
         function get_char_lm_suffix_scores(const texts: TArray<string>;
             out scores: TArray<Integer>): Boolean; virtual;
+        // Direct model entries only. Missing entries are Low(Integer), never
+        // backoff estimates; callers must not mistake them for observations.
+        function get_char_lm_attested_scores(const ngrams: TArray<string>;
+            out scores: TArray<Integer>): Boolean; virtual;
         function get_char_reverse_lm_suffix_scores(const texts: TArray<string>;
             out scores: TArray<Integer>): Boolean; virtual;
         function get_char_lm_span_scores(const texts: TArray<string>;
@@ -148,6 +154,38 @@ function TncDictionaryProvider.lookup_one_key_completions(
 begin
     SetLength(results, 0);
     Result := False;
+end;
+
+function TncDictionaryProvider.lookup_candidate_prefix_completions(
+    const pinyin_prefix: string; out results: TncOneKeyCompletionList): Boolean;
+var
+    prefixes: TncCandidateList;
+    evidence: TncOneKeyCompletionList;
+    idx, evidence_idx: Integer;
+begin
+    SetLength(results, 0);
+    if not lookup_full_pinyin_prefix(pinyin_prefix, prefixes) then Exit(False);
+    lookup_one_key_completions(pinyin_prefix, evidence);
+    SetLength(results, Length(prefixes));
+    for idx := 0 to High(prefixes) do
+    begin
+        if Trim(prefixes[idx].comment) <> '' then Continue;
+        for evidence_idx := 0 to High(evidence) do
+            if (evidence[evidence_idx].source = okcs_base_exact) and
+                SameText(evidence[evidence_idx].text, prefixes[idx].text) then
+            begin
+                results[idx] := evidence[evidence_idx];
+                Break;
+            end;
+        results[idx].text := prefixes[idx].text;
+        results[idx].weight := prefixes[idx].score;
+        if prefixes[idx].has_dict_weight then
+            results[idx].weight := prefixes[idx].dict_weight;
+        results[idx].source := okcs_base_exact;
+        if prefixes[idx].source = cs_user then
+            results[idx].source := okcs_user_exact;
+    end;
+    Result := Length(results) > 0;
 end;
 
 function TncDictionaryProvider.lookup_long_one_key_completions(
@@ -403,6 +441,15 @@ begin
     { Test and alternate providers can keep implementing the sentence scorer.
       SQLite overrides this to omit the false sentence-start context. }
     Result := get_char_lm_text_scores(texts, scores);
+end;
+
+function TncDictionaryProvider.get_char_lm_attested_scores(
+    const ngrams: TArray<string>; out scores: TArray<Integer>): Boolean;
+var idx: Integer;
+begin
+    SetLength(scores, Length(ngrams));
+    for idx := 0 to High(scores) do scores[idx] := Low(Integer);
+    Result := False;
 end;
 
 function TncDictionaryProvider.get_char_reverse_lm_suffix_scores(

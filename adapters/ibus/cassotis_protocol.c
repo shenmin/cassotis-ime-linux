@@ -7,7 +7,8 @@
 #define CASSOTIS_PAYLOAD_SCHEMA 1U
 #define CASSOTIS_ENGINE_STATE_FUZZY_SCHEMA 2U
 #define CASSOTIS_ENGINE_STATE_SHORTCUTS_SCHEMA 3U
-#define CASSOTIS_ENGINE_STATE_SCHEMA 4U
+#define CASSOTIS_ENGINE_STATE_DEBUG_SCHEMA 4U
+#define CASSOTIS_ENGINE_STATE_SCHEMA 5U
 #define CASSOTIS_MIN_PAGE_SIZE 3U
 #define CASSOTIS_DEFAULT_PAGE_SIZE 9U
 #define CASSOTIS_MAX_PAGE_SIZE 9U
@@ -106,7 +107,7 @@ static void append_shortcut(GByteArray *buffer,
 {
     append_u16(buffer, shortcut->key_code);
     append_u8(buffer, shortcut->modifiers);
-    append_u8(buffer, 0);
+    append_u8(buffer, shortcut->disabled ? 1U : 0U);
 }
 
 static void write_u16_at(GByteArray *buffer, gsize offset, guint16 value)
@@ -377,7 +378,7 @@ static gboolean reader_state_header(PayloadReader *reader, guint16 *schema)
     return TRUE;
 }
 
-static gboolean reader_shortcut(PayloadReader *reader,
+static gboolean reader_shortcut(PayloadReader *reader, guint16 schema,
                                 CassotisShortcut *shortcut)
 {
     guint8 reserved;
@@ -385,9 +386,10 @@ static gboolean reader_shortcut(PayloadReader *reader,
         !reader_u8(reader, &shortcut->modifiers) ||
         !reader_u8(reader, &reserved))
         return FALSE;
-    if (reserved != 0 ||
+    if (reserved > 1 || (schema < 5U && reserved != 0) ||
         (shortcut->modifiers & ~CASSOTIS_SHORTCUT_KNOWN_MODIFIERS) != 0)
         return set_reader_error(reader, "invalid shortcut payload");
+    shortcut->disabled = reserved != 0;
     return TRUE;
 }
 
@@ -418,8 +420,11 @@ static gboolean shortcuts_are_valid(const CassotisShortcutConfig *config)
     for (first = 0; first < G_N_ELEMENTS(items); ++first) {
         if (!shortcut_is_valid(items[first]))
             return FALSE;
+        if (items[first]->disabled)
+            continue;
         for (second = first + 1; second < G_N_ELEMENTS(items); ++second) {
-            if (items[first]->key_code == items[second]->key_code &&
+            if (!items[second]->disabled &&
+                items[first]->key_code == items[second]->key_code &&
                 items[first]->modifiers == items[second]->modifiers)
                 return FALSE;
         }
@@ -610,19 +615,19 @@ gboolean cassotis_protocol_decode_engine_state(
         if (!reader_u8(&reader, &candidate_page_key_scheme) ||
             !reader_u8(&reader, &one_key_completion_key))
             return FALSE;
-        if (schema >= CASSOTIS_ENGINE_STATE_SCHEMA) {
+        if (schema >= CASSOTIS_ENGINE_STATE_DEBUG_SCHEMA) {
             if (!reader_u8(&reader, &candidate_page_size) ||
                 !reader_u8(&reader, &reserved_byte) || reserved_byte != 0)
                 return FALSE;
         } else if (!reader_u16(&reader, &reserved) || reserved != 0) {
             return FALSE;
         }
-        if (!reader_shortcut(&reader, &state->shortcuts.input_mode_toggle) ||
-            !reader_shortcut(&reader, &state->shortcuts.punctuation_toggle) ||
+        if (!reader_shortcut(&reader, schema, &state->shortcuts.input_mode_toggle) ||
+            !reader_shortcut(&reader, schema, &state->shortcuts.punctuation_toggle) ||
             !reader_shortcut(
-                &reader, &state->shortcuts.dictionary_variant_toggle) ||
-            !reader_shortcut(&reader, &state->shortcuts.full_width_toggle) ||
-            !reader_shortcut(&reader, &state->shortcuts.open_settings))
+                &reader, schema, &state->shortcuts.dictionary_variant_toggle) ||
+            !reader_shortcut(&reader, schema, &state->shortcuts.full_width_toggle) ||
+            !reader_shortcut(&reader, schema, &state->shortcuts.open_settings))
             return FALSE;
     }
     if (input_mode > CASSOTIS_INPUT_ENGLISH ||
@@ -631,7 +636,7 @@ gboolean cassotis_protocol_decode_engine_state(
         (flags & ~CASSOTIS_STATE_KNOWN_FLAGS) != 0 ||
         (schema == CASSOTIS_PAYLOAD_SCHEMA &&
          (flags & CASSOTIS_STATE_FLAG_FUZZY_PINYIN_ENABLED) != 0) ||
-        (schema < CASSOTIS_ENGINE_STATE_SCHEMA &&
+        (schema < CASSOTIS_ENGINE_STATE_DEBUG_SCHEMA &&
          (flags & CASSOTIS_STATE_FLAG_DEBUG_MODE) != 0) ||
         (fuzzy_rules & ~CASSOTIS_FUZZY_RULE_MASK) != 0 ||
         candidate_page_size < CASSOTIS_MIN_PAGE_SIZE ||

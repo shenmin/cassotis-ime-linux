@@ -25,8 +25,8 @@ uses
 const
     c_runtime_timeout_ms = 30000;
     c_task_timeout_ms = 5000;
-    // Match the production host and the Windows completion benchmark.
-    c_default_result_timeout_ms = 40;
+    // Production cutoff; pass 0 for the Windows deadline-free comparison.
+    c_default_result_timeout_ms = c_nc_local_completion_result_timeout_ms;
     c_fnv1a_offset_basis: QWord = 14695981039346656037;
     c_fnv1a_prime: QWord = 1099511628211;
 
@@ -45,6 +45,7 @@ type
         neural_accepted: Integer;
         neural_applied: Integer;
         completion_signature: QWord;
+        decode_ms, final_candidates_ms, completion_ms: QWord;
     end;
 
 procedure update_signature(var signature: QWord; const value: string);
@@ -55,6 +56,22 @@ begin
     bytes := UTF8Encode(value);
     for index := 1 to Length(bytes) do
         signature := (signature xor Byte(bytes[index])) * c_fnv1a_prime;
+end;
+
+procedure write_trace_line(const stream: TStream; const line: string);
+var
+    bytes: UTF8String;
+begin
+    if stream = nil then Exit;
+    bytes := UTF8Encode(line + #10);
+    stream.WriteBuffer(bytes[1], Length(bytes));
+end;
+
+function trace_text(const value: string): string;
+begin
+    Result := StringReplace(value, #9, ' ', [rfReplaceAll]);
+    Result := StringReplace(Result, #13, ' ', [rfReplaceAll]);
+    Result := StringReplace(Result, #10, ' ', [rfReplaceAll]);
 end;
 
 function read_utf8_file(const file_path: string): string;
@@ -150,13 +167,24 @@ procedure resolve_completion(const engine: TncEngine;
     const completion_host: TncLocalCompletionHost;
     var generation: QWord; const latency_started_at: QWord;
     out completion: TncOneKeyCompletion; out visible_latency_ms: QWord;
-    out has_neural_request, neural_accepted, neural_applied: Boolean);
+    out has_neural_request, neural_accepted, neural_applied: Boolean;
+    out decode_ms, final_candidates_ms: QWord; out static_text: string);
 var
     request: TncLongNeuralCompletionRequest;
     task: TncLocalCompletionTask;
     finished: TncLocalCompletionFinished;
+    visible_candidates: TncCandidateList;
 begin
+    decode_ms := 0;
+    final_candidates_ms := 0;
+    if latency_started_at <> 0 then
+        decode_ms := GetTickCount64 - latency_started_at;
+    // The response settles the final candidate/repair path before reading Tab.
+    visible_candidates := engine.get_candidates;
+    if latency_started_at <> 0 then
+        final_candidates_ms := GetTickCount64 - latency_started_at - decode_ms;
     completion := engine.get_one_key_completion;
+    static_text := completion.text;
     if latency_started_at <> 0 then
         visible_latency_ms := GetTickCount64 - latency_started_at
     else
@@ -207,7 +235,7 @@ procedure evaluate_case(const engine, oracle_engine: TncEngine;
     const completion_host: TncLocalCompletionHost;
     const parser: TncPinyinParser; const sentence, full_pinyin: string;
     var generation: QWord; var totals: TncCompletionTotals;
-    const latencies: TList<QWord>);
+    const latencies: TList<QWord>; const trace: TStream);
 var
     syllables: TncPinyinParseResult;
     typed_units: Integer;
@@ -225,6 +253,9 @@ var
     accepted: Boolean;
     applied: Boolean;
     visible_latency_ms: QWord;
+    decode_ms, final_candidates_ms: QWord;
+    static_text: string;
+    saved_keys: Integer;
     compatible_previous: Boolean;
     prompted: Boolean;
     hit: Boolean;
@@ -254,14 +285,19 @@ begin
         engine.debug_set_composition_text(previous_prefix);
         resolve_completion(engine, completion_host, generation, 0,
             previous_completion, previous_visible_latency_ms,
-            previous_has_request, previous_accepted, previous_applied);
+            previous_has_request, previous_accepted, previous_applied,
+            decode_ms, final_candidates_ms, static_text);
     end;
 
     started_at := GetTickCount64;
     engine.debug_set_composition_text(typed_prefix);
     resolve_completion(engine, completion_host, generation, started_at,
-        completion, visible_latency_ms, has_request, accepted, applied);
+        completion, visible_latency_ms, has_request, accepted, applied,
+        decode_ms, final_candidates_ms, static_text);
     latencies.Add(visible_latency_ms);
+    Inc(totals.decode_ms, decode_ms);
+    Inc(totals.final_candidates_ms, final_candidates_ms);
+    Inc(totals.completion_ms, visible_latency_ms - decode_ms - final_candidates_ms);
 
     // Match the Windows release benchmark: oracle instrumentation runs after
     // the timed sample and warms the shared model/runtime state for the next
@@ -286,6 +322,7 @@ begin
     prompted := Trim(completion.text) <> '';
     hit := prompted and is_target_completion(completion.text, target_prefix,
         sentence);
+    saved_keys := 0;
     if prompted then
     begin
         Inc(totals.prompts);
@@ -294,8 +331,9 @@ begin
             Inc(totals.hits);
             completion_pinyin := StringReplace(completion.full_pinyin, '''',
                 '', [rfReplaceAll]);
-            Inc(totals.saved_keys, Max(0, Length(completion_pinyin) -
-                Length(typed_prefix) - 1));
+            saved_keys := Max(0, Length(completion_pinyin) -
+                Length(typed_prefix) - 1);
+            Inc(totals.saved_keys, saved_keys);
         end
         else
             Inc(totals.wrong_prompts);
@@ -316,6 +354,16 @@ begin
     update_signature(totals.completion_signature,
         IntToStr(totals.opportunities) + #9 + completion.text + #9 +
         completion.full_pinyin + #9 + IntToStr(Ord(hit)) + #10);
+    // Written after timing and oracle work; never fed back into engine state.
+    if trace <> nil then
+        write_trace_line(trace, IntToStr(totals.cases) + #9 + trace_text(sentence) +
+            #9 + full_pinyin + #9 + typed_prefix + #9 + target_prefix +
+            #9 + trace_text(static_text) + #9 + trace_text(completion.text) +
+            #9 + completion.full_pinyin + #9 + IntToStr(Ord(hit)) +
+            #9 + IntToStr(saved_keys) + #9 + IntToStr(Ord(has_request)) +
+            #9 + IntToStr(Ord(accepted)) + #9 + IntToStr(Ord(applied)) +
+            #9 + UIntToStr(visible_latency_ms) + #9 + UIntToStr(decode_ms) +
+            #9 + UIntToStr(final_candidates_ms));
 end;
 
 procedure write_summary(const totals: TncCompletionTotals;
@@ -332,6 +380,7 @@ begin
         Inc(total_latency, latency);
 
     WriteLn('format=cassotis-completion-quality-v1');
+    WriteLn('latency_scope=decode_final_candidates_visible_completion_v1');
     WriteLn('result_timeout_ms=', result_timeout_ms);
     WriteLn('cases=', totals.cases);
     WriteLn('opportunities=', totals.opportunities);
@@ -349,6 +398,9 @@ begin
         totals.completion_signature, 16));
     if latencies.Count > 0 then
     begin
+        WriteLn('decode_mean_ms=', FormatFloat('0.000', totals.decode_ms / latencies.Count));
+        WriteLn('final_candidates_mean_ms=', FormatFloat('0.000', totals.final_candidates_ms / latencies.Count));
+        WriteLn('completion_mean_ms=', FormatFloat('0.000', totals.completion_ms / latencies.Count));
         p50_index := EnsureRange(Ceil(latencies.Count * 0.50) - 1, 0,
             latencies.Count - 1);
         p95_index := EnsureRange(Ceil(latencies.Count * 0.95) - 1, 0,
@@ -386,12 +438,13 @@ var
     fields: TArray<string>;
     generation: QWord;
     totals: TncCompletionTotals;
+    trace: TFileStream;
 begin
     if ParamCount < 2 then
     begin
         WriteLn(StdErr, 'Usage: cassotis-completion-benchmark DICTIONARY ' +
             'CASES [LIMIT] [RESULT_TIMEOUT_MS] [PROGRESS_EVERY] ' +
-            '[neural|static]');
+            '[neural|static] [TRACE_TSV]');
         Halt(2);
     end;
     dictionary_path := ExpandFileName(ParamStr(1));
@@ -428,7 +481,18 @@ begin
     reranker_reference := nil;
     completion_host := nil;
     latencies := TList<QWord>.Create;
+    trace := nil;
     try
+        if ParamCount >= 7 then
+        begin
+            if FileExists(ParamStr(7)) then
+                raise Exception.Create('completion trace already exists');
+            trace := TFileStream.Create(UTF8Encode(ExpandFileName(ParamStr(7))), fmCreate);
+            write_trace_line(trace, 'index'#9'expected'#9'pinyin'#9'typed_prefix'#9 +
+                'target_prefix'#9'static_completion'#9'completion'#9'full_pinyin'#9 +
+                'hit'#9'saved_keys'#9'request'#9'accepted'#9'applied'#9 +
+                'latency_ms'#9'decode_ms'#9'final_candidates_ms');
+        end;
         if not dictionary.Open then
             raise Exception.Create('dictionary could not be opened');
         engine.set_dictionary_provider(dictionary);
@@ -481,7 +545,7 @@ begin
             Inc(totals.cases);
             evaluate_case(engine, oracle_engine, completion_host, parser,
                 fields[3],
-                fields[4], generation, totals, latencies);
+                fields[4], generation, totals, latencies, trace);
             if (progress_every > 0) and
                 ((totals.cases mod progress_every) = 0) then
             begin
@@ -491,6 +555,7 @@ begin
         end;
         write_summary(totals, latencies, result_timeout_ms);
     finally
+        trace.Free;
         completion_host.Free;
         oracle_engine.Free;
         engine.Free;

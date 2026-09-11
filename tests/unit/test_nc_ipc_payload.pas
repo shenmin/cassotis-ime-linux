@@ -18,6 +18,7 @@ type
         procedure RoundTripsCompleteEngineResult;
         procedure RoundTripsAllEngineStateFields;
         procedure DecodesLegacyEngineStateWithFuzzyDefaults;
+        procedure DisabledShortcutsRoundTripAndRejectLegacyFlags;
         procedure RoundTripsStructuredError;
         procedure RejectsTruncationTrailingBytesAndNewerSchema;
         procedure RejectsInvalidUtf8AndEnums;
@@ -155,6 +156,7 @@ var
     payload: TBytes;
     error_text: string;
 begin
+    FillChar(source, SizeOf(source), $FF);
     nc_initialize_engine_state(source);
     source.input_mode := im_english;
     source.dictionary_variant := dv_traditional;
@@ -188,6 +190,34 @@ begin
         Ord(decoded.one_key_completion_key));
     AssertTrue(decoded.debug_mode);
     AssertTrue(nc_engine_states_equal(source, decoded));
+end;
+
+procedure TncIpcPayloadTests.DisabledShortcutsRoundTripAndRejectLegacyFlags;
+var
+    source, decoded: TncIpcEngineState;
+    payload: TBytes;
+    error_text: string;
+begin
+    nc_initialize_engine_state(source);
+    source.shortcuts.input_mode_toggle.disabled := True;
+    source.shortcuts.punctuation_toggle := source.shortcuts.input_mode_toggle;
+    payload := nc_encode_engine_state_payload(source);
+    AssertTrue(nc_try_decode_engine_state_payload(payload, decoded, error_text));
+    AssertTrue(decoded.shortcuts.input_mode_toggle.disabled);
+    AssertTrue(decoded.shortcuts.punctuation_toggle.disabled);
+    AssertFalse(decoded.shortcuts.open_settings.disabled);
+    AssertTrue(nc_engine_states_equal(source, decoded));
+    payload[0] := 4;
+    AssertFalse(nc_try_decode_engine_state_payload(payload, decoded, error_text));
+    nc_initialize_engine_state(source);
+    source.debug_mode := True;
+    source.candidate_page_size := 3;
+    payload := nc_encode_engine_state_payload(source);
+    payload[0] := 4;
+    AssertTrue(nc_try_decode_engine_state_payload(payload, decoded, error_text));
+    AssertTrue(decoded.debug_mode);
+    AssertEquals(3, decoded.candidate_page_size);
+    AssertFalse(decoded.shortcuts.input_mode_toggle.disabled);
 end;
 
 procedure TncIpcPayloadTests.DecodesLegacyEngineStateWithFuzzyDefaults;

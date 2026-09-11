@@ -19,7 +19,7 @@
 本项目源自
 [言泉输入法 Windows 版](https://github.com/shenmin/cassotis-ime)，并使用
 [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon) 生成的词库。
-共享的 Free Pascal 引擎以言泉输入法 v1.22.0 为行为基线，移植了候选召回、
+共享的 Free Pascal 引擎以言泉输入法 v1.25.0 为行为基线，移植了候选召回、
 短词排序、长句排序、一键补全、用户学习、模糊拼音与双拼逻辑，并接入语料训练
 的多阶段排序链、用于歧义长句的拼音条件 Transformer 评分器、文档局部自适应与
 复制补全、受约束的拼音对齐候选生成、同时具有词库与读音修复和生成式后备召回的
@@ -31,7 +31,10 @@
 - 使用 [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon)
   生成的简体、繁体词库。
 - 支持全拼及微软、小鹤、自然码、搜狗、紫光、拼音加加六套双拼方案。
-- 移植言泉输入法 v1.22.0 的短词、上下文候选和长句本地统计排序模型链；
+- 全拼支持 `lue`/`nue` 与 `lve`/`nve` 两种写法，也支持 `jv`/`qv`/`xv` 音节
+  对应的规范 `ju`/`qu`/`xu` 拼写；显式隔音符仍严格分隔音节，
+  音节边界有歧义或已确认部分词语时，仍可选择完整前缀词及相应单字。
+- 移植言泉输入法 v1.25.0 的短词、上下文候选和长句本地统计排序模型链；
   歧义长句比较可以使用与 Windows 版相同的宿主侧条件评分器和受约束候选生成器，
   并由学习式门控决定是否采用模型结果；短词 exact 查询仍使用独立的确定性排序路径。
 - 六层 INT8 本地修复模型可改进拼音完整对齐的简体长句中的同音字错误，保留短词、
@@ -44,29 +47,32 @@
 - 受控的一键补全和可配置快捷键；exact 词库、转移、多级后缀、读音修复及文档
   局部召回会先统一选择，受限后台模型随后才可能给出一个受约束续写，置信不足
   则主动放弃。
+- 功能快捷键可单独启用或禁用，关闭后仍保留原有按键绑定。
 - IBus 与 Fcitx 5 使用各自的原生适配层，共享同一引擎、设置状态和用户
   词库；候选窗口外观与位置由当前框架及桌面主题负责。
 - 提供 GTK 3 设置程序，配置 Linux 版支持的跨平台输入选项。
 
 ## 已验证发行环境
 
-v0.6.0 源码以言泉输入法 v1.22.0 和 Cassotis Lexicon v1.21.0 为行为和数据
-基线，使用与该 Windows 版本相同的 schema 24 词库。相比 v0.5.0，新版加入
-受约束的本地长句修复、后台文档上下文缓存，并改进长句补全的选择机制。
-等待模型结果时保留已有的静态补全，结果相同时不做多余刷新；模型不可用或
-置信不足时，保持原有候选。
+v0.7.0 源码以言泉输入法和 Cassotis Lexicon v1.25.0 为行为和数据基线，
+重新构建 schema 24 词库，包含 213,290 条简体词条及 216,505 条繁体词条。
+相比 v0.6.0，新版改进 ü 的拼写兼容、歧义音节边界的前缀召回，以及确认部分
+词语后的前缀选择。短查询不再仅凭专业词权重优先展示长预测词。前缀排序综合
+词频和匹配长度，同时保留完整匹配；短语组合依据实际语料和上下文证据判断。
+后台词库加载完成时，翻页中的候选与选择保持稳定。本地长句修复
+会验证词边界，并进行有界细化，避免撤销已接受的修改；用户词库刷新不再重新
+加载基础模型。等待后台结果时保留静态补全，模型置信不足时保持原有候选。
 模型加载与预热在后台完成，就绪前仍可通过词库和原有排序正常输入、上屏及
 使用静态补全，不让首次输入等待神经模型加载。
 
-x86_64 与 aarch64 的原生测量使用
-[BENCHMARK.CN.md](BENCHMARK.CN.md) 中的基准。16,300 条长句的 Top1/Top2
-分别为 11,671/12,810 和 11,669/12,810，Windows v1.22.0 为
-11,672/12,809，长句结果并非完全一致。两个架构的完整短词结果均与 Windows
-完全一致。发行检查还覆盖原生核心与词库测试、安装包内容和自动化 IBus/Fcitx
+x86_64 与 aarch64 使用与 Windows 相同的 16,300 条长句和 65,000 条短词
+进行原生测量，准确度、延迟、内存及跨平台差异记录在
+[BENCHMARK.CN.md](BENCHMARK.CN.md)，不假定不同 CPU 的神经模型决策完全相同。
+发行检查还覆盖原生核心与词库测试、安装包内容、冷启动响应和自动化 IBus/Fcitx
 桌面矩阵。桌面与输入框架的具体测试范围见
 [COMPATIBILITY.md](COMPATIBILITY.md)。
 
-v0.6.0 面向 amd64 与 arm64 提供 `.deb` 安装包和便携二进制包。验证环境为
+v0.7.0 面向 amd64 与 arm64 提供 `.deb` 安装包和便携二进制包。验证环境为
 两个架构的 Ubuntu 26.04.1 GNOME Wayland，结果记录在
 [BENCHMARK.CN.md](BENCHMARK.CN.md)。已发布安装包及校验信息请以
 [GitHub Releases](https://github.com/shenmin/cassotis-ime-linux/releases) 为准。
@@ -88,7 +94,7 @@ v0.6.0 面向 amd64 与 arm64 提供 `.deb` 安装包和便携二进制包。验
 
 ```bash
 arch="$(dpkg --print-architecture)"  # 输出 amd64 或 arm64
-package="cassotis-ime_0.6.0_${arch}.deb"
+package="cassotis-ime_0.7.0_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -111,10 +117,10 @@ sudo apt install "./${package}"
 
 ```bash
 arch="$(uname -m)"  # 输出 x86_64 或 aarch64
-archive="cassotis-ime-linux-0.6.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-0.7.0-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-0.6.0-${arch}"
+cd "cassotis-ime-linux-0.7.0-${arch}"
 sudo ./install.sh
 ```
 

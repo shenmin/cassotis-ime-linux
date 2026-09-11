@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import sys
@@ -30,6 +32,7 @@ INTEGER_FIELDS = (
     "max_ms",
 )
 SIGNATURE_PATTERN = re.compile(r"^[0-9A-Fa-f]{16}$")
+LATENCY_SCOPE = "decode_final_candidates_visible_completion_v1"
 
 
 def parse_metrics(path: Path) -> dict[str, str]:
@@ -142,8 +145,22 @@ def validate_invariants(metrics: dict[str, str]) -> list[str]:
         <= values["max_ms"]
     ):
         failures.append("completion latency percentiles are not ordered")
-    if mean_ms < 0 or mean_ms > values["max_ms"]:
+    if not math.isfinite(mean_ms) or mean_ms < 0 or mean_ms > values["max_ms"]:
         failures.append("completion mean latency is outside the measured range")
+    if "latency_scope" in metrics:
+        if metrics["latency_scope"] != LATENCY_SCOPE:
+            failures.append("unsupported completion latency scope")
+        try:
+            phases = [float(metrics[field]) for field in (
+                "decode_mean_ms", "final_candidates_mean_ms", "completion_mean_ms"
+            )]
+        except (KeyError, ValueError):
+            failures.append("missing or invalid completion latency phases")
+        else:
+            if any(not math.isfinite(value) or value < 0 for value in phases):
+                failures.append("completion latency phases must be finite and nonnegative")
+            elif not math.isclose(sum(phases), mean_ms, rel_tol=0, abs_tol=0.01):
+                failures.append("completion latency phases do not sum to mean_ms")
     return failures
 
 
@@ -151,6 +168,21 @@ def compare_baseline(
     metrics: dict[str, str], baseline: dict[str, str]
 ) -> list[str]:
     failures: list[str] = []
+    metrics = dict(metrics)
+    # Keep the earlier decode-plus-completion mean budget independently of
+    # the newly measured final-candidate readback/repair phase.
+    if metrics.get("latency_scope") == LATENCY_SCOPE and \
+            "decode_and_completion_mean_ms" not in metrics:
+        try:
+            earlier_phases = (
+                float(metrics["decode_mean_ms"]),
+                float(metrics["completion_mean_ms"]),
+            )
+        except (KeyError, ValueError):
+            pass
+        else:
+            if all(math.isfinite(value) and value >= 0 for value in earlier_phases):
+                metrics["decode_and_completion_mean_ms"] = str(sum(earlier_phases))
     for key, expected_text in baseline.items():
         if key == "format" or key.startswith("metadata."):
             continue
@@ -169,10 +201,10 @@ def compare_baseline(
             failures.append(f"baseline completion metric is missing: {metric_key}")
             continue
         actual_text = metrics[metric_key]
-        if comparison == "exact" and metric_key == "completion_signature":
+        if comparison == "exact" and metric_key in ("completion_signature", "latency_scope"):
             if actual_text.lower() != expected_text.lower():
                 failures.append(
-                    f"completion_signature={actual_text} does not equal "
+                    f"{metric_key}={actual_text} does not equal "
                     f"baseline {expected_text}"
                 )
             continue
@@ -197,17 +229,113 @@ def compare_baseline(
     return failures
 
 
+def validate_trace(
+    path: Path, metrics: dict[str, str], cases_path: Path | None = None
+) -> tuple[dict[str, str], list[str]]:
+    """Bind aggregate results and both latency budgets to measured samples."""
+    failures: list[str] = []
+    derived: dict[str, str] = {}
+    try:
+        with path.open(encoding="utf-8-sig", newline="") as stream:
+            rows = list(csv.DictReader(stream, delimiter="\t"))
+        cases = None
+        if cases_path is not None:
+            with cases_path.open(encoding="utf-8-sig", newline="") as stream:
+                reader = csv.reader(stream, delimiter="\t")
+                next(reader)
+                cases = [row for row in reader if row]
+        totals = dict.fromkeys(("prompts", "hits", "full_sentence_hits",
+                               "wrong_prompts", "saved_keys", "neural_requests",
+                               "neural_accepted", "neural_applied"), 0)
+        samples: dict[str, list[int]] = {
+            "": [], "decode_": [], "final_candidates_": [],
+            "completion_": [], "decode_and_completion_": [],
+        }
+        signature = 14695981039346656037
+        previous_index = 0
+        for opportunity, row in enumerate(rows, 1):
+            index = int(row["index"])
+            if not previous_index < index <= int(metrics["cases"]):
+                raise ValueError("trace case indexes are duplicated or out of order")
+            previous_index = index
+            if cases is not None and (
+                index > len(cases) or cases[index - 1][3:5] !=
+                    [row["expected"], row["pinyin"]]
+            ):
+                raise ValueError(f"trace case {index} differs from the frozen input")
+            flags = [int(row[key]) for key in ("request", "accepted", "applied", "hit")]
+            request, accepted, applied, hit = flags
+            if any(value not in (0, 1) for value in flags) or not applied <= accepted <= request:
+                raise ValueError(f"trace case {index} has invalid pipeline flags")
+            text = row["completion"].strip().casefold()
+            target = row["target_prefix"].casefold()
+            expected = row["expected"].strip().casefold()
+            actual_hit = bool(text) and len(text) > len(target) and \
+                text.startswith(target) and expected.startswith(text)
+            if hit != int(actual_hit):
+                raise ValueError(f"trace case {index} has an inconsistent hit flag")
+            saved = max(0, len(row["full_pinyin"].replace("'", "")) -
+                        len(row["typed_prefix"]) - 1) if hit else 0
+            if int(row["saved_keys"]) != saved:
+                raise ValueError(f"trace case {index} has inconsistent key savings")
+            totals["prompts"] += bool(text)
+            totals["hits"] += hit
+            totals["full_sentence_hits"] += bool(text) and text == expected
+            totals["wrong_prompts"] += bool(text) and not hit
+            totals["saved_keys"] += saved
+            totals["neural_requests"] += request
+            totals["neural_accepted"] += accepted
+            totals["neural_applied"] += applied
+            total, decode, final = [int(row[key]) for key in (
+                "latency_ms", "decode_ms", "final_candidates_ms")]
+            completion = total - decode - final
+            if min(total, decode, final, completion) < 0:
+                raise ValueError(f"trace case {index} has invalid latency phases")
+            for name, value in (("", total), ("decode_", decode),
+                                ("final_candidates_", final), ("completion_", completion),
+                                ("decode_and_completion_", total - final)):
+                samples[name].append(value)
+            payload = f"{opportunity}\t{row['completion']}\t{row['full_pinyin']}\t{hit}\n"
+            for byte in payload.encode("utf-8"):
+                signature = ((signature ^ byte) * 1099511628211) & ((1 << 64) - 1)
+        if len(rows) != int(metrics["opportunities"]):
+            failures.append("completion trace does not cover every opportunity")
+        for key, value in totals.items():
+            if value != int(metrics[key]):
+                failures.append(f"completion trace {key} differs from the summary")
+        if f"{signature:016X}" != metrics["completion_signature"].upper():
+            failures.append("completion trace signature differs from the summary")
+        for prefix, values in samples.items():
+            values.sort()
+            derived[prefix + "mean_ms"] = f"{sum(values) / len(values) if values else 0:.3f}"
+            for name, quantile in (("p50_ms", 0.50), ("p95_ms", 0.95), ("max_ms", 1)):
+                derived[prefix + name] = str(values[math.ceil(len(values) * quantile) - 1]
+                                             if values else 0)
+        for key, value in derived.items():
+            if key in metrics and not math.isclose(float(value), float(metrics[key]),
+                                                    rel_tol=0, abs_tol=0.002):
+                failures.append(f"completion trace {key} differs from the summary")
+    except (OSError, KeyError, ValueError, TypeError, IndexError, StopIteration) as error:
+        failures.append(f"invalid completion trace: {error}")
+    return derived, failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--log", required=True, type=Path)
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--dictionary", type=Path)
     parser.add_argument("--cases", type=Path)
+    parser.add_argument("--trace", type=Path)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
 
     metrics = parse_metrics(args.log)
     failures = validate_invariants(metrics)
+    trace_metrics: dict[str, str] = {}
+    if args.trace:
+        trace_metrics, trace_failures = validate_trace(args.trace, metrics, args.cases)
+        failures.extend(trace_failures)
     baseline_metrics: dict[str, str] | None = None
     frozen_inputs: dict[str, dict[str, object]] = {}
     if args.baseline:
@@ -216,7 +344,9 @@ def main() -> int:
             "cassotis-completion-quality-baseline-v1"
         ):
             failures.append("unsupported completion baseline format")
-        failures.extend(compare_baseline(metrics, baseline_metrics))
+        if baseline_metrics.get("metadata.trace_required") == "true" and not args.trace:
+            failures.append("baseline requires a per-case completion trace")
+        failures.extend(compare_baseline(dict(metrics, **trace_metrics), baseline_metrics))
         frozen_inputs, input_failures = validate_frozen_inputs(
             baseline_metrics, args.dictionary, args.cases
         )
@@ -228,6 +358,9 @@ def main() -> int:
         "metrics": metrics,
         "baseline_metrics": baseline_metrics,
         "frozen_inputs": frozen_inputs,
+        "trace": str(args.trace) if args.trace else None,
+        "trace_sha256": sha256_file(args.trace) if args.trace and args.trace.is_file() else None,
+        "trace_metrics": trace_metrics,
         "failures": failures,
         "ok": not failures,
     }

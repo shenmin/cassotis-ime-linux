@@ -45,6 +45,7 @@ type
         procedure TogglesInputModeAndConvertsPunctuation;
         procedure DefersAndCancelsModifierOnlyShortcuts;
         procedure SupportsFunctionKeyModeShortcuts;
+        procedure DisabledShortcutsPersistWithoutConsumingInput;
         procedure SupportsDefaultModeShortcuts;
         procedure SupportsNumpadModeShortcuts;
         procedure SwitchesAndPersistsDictionaryVariant;
@@ -1196,6 +1197,49 @@ begin
         shortcut_event.is_repeat := False;
         shortcut_event.is_release := True;
         VerifyIgnored(im_chinese);
+    finally
+        service.Free;
+    end;
+end;
+
+procedure TncEngineServiceTests.DisabledShortcutsPersistWithoutConsumingInput;
+var
+    service: TncEngineService;
+    state: TncEngineState;
+    event: TncKeyEvent;
+    result: TncEngineResult;
+    parsed: TncShortcut;
+begin
+    service := TncEngineService.Create(FDatabasePath, FUserDatabasePath);
+    try
+        AssertTrue(service.GetState(state));
+        state.shortcuts.input_mode_toggle.disabled := True;
+        AssertTrue(service.SetState(state));
+        AssertTrue(service.CreateContext(38));
+        event := SpecialEvent(sk_shift);
+        event.modifiers := [km_shift];
+        result := service.ProcessKey(38, 1, event);
+        AssertFalse(result.handled);
+        event.is_release := True;
+        result := service.ProcessKey(38, 2, event);
+        AssertFalse(result.handled);
+        AssertTrue(service.GetState(state));
+        AssertEquals(Ord(im_chinese), Ord(state.input_mode));
+        AssertTrue(nc_try_parse_shortcut(nc_shortcut_to_text(
+            state.shortcuts.input_mode_toggle), parsed));
+        AssertTrue(parsed.disabled);
+        AssertEquals($10, parsed.key_code);
+    finally
+        service.Free;
+    end;
+    service := TncEngineService.Create(FDatabasePath, FUserDatabasePath);
+    try
+        AssertTrue(service.GetState(state));
+        AssertTrue(state.shortcuts.input_mode_toggle.disabled);
+        state.shortcuts.input_mode_toggle.disabled := False;
+        AssertTrue(service.SetState(state));
+        AssertTrue(service.GetState(state));
+        AssertFalse(state.shortcuts.input_mode_toggle.disabled);
     finally
         service.Free;
     end;

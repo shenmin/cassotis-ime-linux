@@ -132,6 +132,9 @@ begin
     source.shortcuts.input_mode_toggle.key_code := Ord('I');
     source.shortcuts.input_mode_toggle.shift_down := True;
     source.shortcuts.input_mode_toggle.ctrl_down := True;
+    source.shortcuts.input_mode_toggle.disabled := True;
+    source.shortcuts.dictionary_variant_toggle.disabled := True;
+    source.shortcuts.open_settings.disabled := True;
 
     dictionary := TncUserDictionary.Create(FDatabasePath);
     try

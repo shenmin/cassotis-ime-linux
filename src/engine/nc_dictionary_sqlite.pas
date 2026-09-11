@@ -1,4 +1,4 @@
-﻿unit nc_dictionary_sqlite;
+unit nc_dictionary_sqlite;
 
 {$codepage utf8}
 {$mode delphiunicode}
@@ -140,6 +140,8 @@ type
         m_base_exact_pinyin_bloom: TBytes;
         m_base_exact_pinyin_bloom_ready: Boolean;
         m_prefix_lookup_result_cache: TDictionary<string, TncCandidateList>;
+        m_candidate_prefix_completion_cache:
+            TDictionary<string, TncOneKeyCompletionList>;
         m_one_key_completion_cache:
             TDictionary<string, TncOneKeyCompletionList>;
         m_long_one_key_completion_cache:
@@ -173,6 +175,7 @@ type
         m_contains_popularity_index_ready: Boolean;
         function ensure_open: Boolean;
         function open_internal(const defer_optional_model_loads: Boolean): Boolean;
+        procedure open_user_connection;
         function get_module_dir: string;
         function find_schema_path: string;
         function load_schema_text(out schema_text: string): Boolean;
@@ -284,6 +287,7 @@ type
         destructor Destroy; override;
         function open: Boolean;
         function open_deferred: Boolean;
+        function reload_user_dictionary: Boolean;
         procedure close;
         procedure prewarm_short_lookup_caches;
         function get_prefix_popularity_hint(const prefix: string): Integer;
@@ -295,6 +299,8 @@ type
             out results: TncCandidateList): Boolean; override;
         function lookup_full_pinyin_prefix(const pinyin_prefix: string;
             out results: TncCandidateList): Boolean; override;
+        function lookup_candidate_prefix_completions(const pinyin_prefix: string;
+            out results: TncOneKeyCompletionList): Boolean; override;
         function lookup_one_key_completions(const pinyin_prefix: string;
             out results: TncOneKeyCompletionList): Boolean; override;
         function lookup_long_one_key_completions(const anchor_path: string;
@@ -372,6 +378,8 @@ type
         function get_char_lm_text_scores(const texts: TArray<string>;
             out scores: TArray<Integer>): Boolean; override;
         function get_char_lm_suffix_scores(const texts: TArray<string>;
+            out scores: TArray<Integer>): Boolean; override;
+        function get_char_lm_attested_scores(const ngrams: TArray<string>;
             out scores: TArray<Integer>): Boolean; override;
         function get_char_reverse_lm_suffix_scores(const texts: TArray<string>;
             out scores: TArray<Integer>): Boolean; override;
@@ -1986,11 +1994,13 @@ function normalize_compact_pinyin_key(const value: string): string;
 var
     i: Integer;
     ch: Char;
+    spelling: string;
 begin
+    spelling := nc_normalize_umlaut_spelling(value);
     Result := '';
-    for i := 1 to Length(value) do
+    for i := 1 to Length(spelling) do
     begin
-        ch := value[i];
+        ch := spelling[i];
         if CharInSet(ch, ['A' .. 'Z']) then
         begin
             ch := Chr(Ord(ch) + 32);
@@ -2006,11 +2016,13 @@ function normalize_canonical_pinyin_key(const value: string): string;
 var
     i: Integer;
     ch: Char;
+    spelling: string;
 begin
+    spelling := nc_normalize_umlaut_spelling(value);
     Result := '';
-    for i := 1 to Length(value) do
+    for i := 1 to Length(spelling) do
     begin
-        ch := value[i];
+        ch := spelling[i];
         if CharInSet(ch, ['A' .. 'Z']) then
         begin
             ch := Chr(Ord(ch) + 32);
@@ -2582,6 +2594,8 @@ begin
     SetLength(m_base_exact_pinyin_bloom, 0);
     m_base_exact_pinyin_bloom_ready := False;
     m_prefix_lookup_result_cache := TDictionary<string, TncCandidateList>.Create;
+    m_candidate_prefix_completion_cache :=
+        TDictionary<string, TncOneKeyCompletionList>.Create;
     m_one_key_completion_cache :=
         TDictionary<string, TncOneKeyCompletionList>.Create;
     m_long_one_key_completion_cache :=
@@ -2828,6 +2842,7 @@ begin
         m_one_key_completion_cache.Free;
         m_one_key_completion_cache := nil;
     end;
+    FreeAndNil(m_candidate_prefix_completion_cache);
     if m_long_one_key_completion_cache <> nil then
     begin
         m_long_one_key_completion_cache.Free;
@@ -3470,6 +3485,85 @@ begin
         m_prefix_lookup_result_cache.AddOrSetValue(normalized_prefix,
             Copy(results, 0, Length(results)));
     end;
+end;
+
+function TncSqliteDictionary.lookup_candidate_prefix_completions(
+    const pinyin_prefix: string; out results: TncOneKeyCompletionList): Boolean;
+const
+    c_probe_limit = 96;
+    c_cache_limit = 128;
+    select_sql =
+        'SELECT b.pinyin, b.text, b.weight, ' +
+        'COALESCE(p.popularity_prior, -1), COALESCE(p.corpus_score, 0), ' +
+        'COALESCE(p.document_score, 0), COALESCE(p.source_count, 0), ' +
+        'COALESCE(p.path_score, 0), COALESCE(p.vertical_penalty, 0), ' +
+        'COALESCE(p.layer_kind, 0) FROM dict_base b ' +
+        'LEFT JOIN dict_base_completion_prior p ON p.pinyin=b.pinyin AND p.text=b.text ';
+    query_sql = 'WITH prefix_probe AS (' + select_sql +
+        'WHERE b.pinyin > ?1 AND b.pinyin < ?2 AND b.weight > 0 AND b.comment='''' ' +
+        'ORDER BY CASE WHEN p.corpus_score > 0 OR p.path_score >= 120 ' +
+        'THEN 1 ELSE 0 END DESC, ' +
+        '(COALESCE(p.popularity_prior,0) + b.weight) DESC, b.pinyin, b.text LIMIT ?3) ' +
+        select_sql + 'WHERE b.pinyin = ?1 AND b.comment='''' ' +
+        'UNION ALL SELECT * FROM prefix_probe';
+var
+    key, upper: string;
+    stmt: Psqlite3_stmt;
+    item: TncOneKeyCompletion;
+    step_result: Integer;
+begin
+    Result := False;
+    SetLength(results, 0);
+    key := LowerCase(Trim(pinyin_prefix));
+    if (Length(key) < 2) or (not ensure_open) or (not m_base_ready) then Exit;
+    if m_candidate_prefix_completion_cache.TryGetValue(key, results) then
+    begin
+        results := Copy(results);
+        Exit(Length(results) > 0);
+    end;
+    upper := build_prefix_upper_bound(key);
+    if upper = '' then Exit;
+    stmt := nil;
+    try
+        // This display-only probe is independent of Tab's Top-K and of the
+        // unrestricted exact lookup. Rank before LIMIT, not by pinyin spelling.
+        if not m_base_connection.prepare(query_sql, stmt) then
+            Exit(inherited lookup_candidate_prefix_completions(key, results));
+        if (not m_base_connection.BindText(stmt, 1, key)) or
+            (not m_base_connection.BindText(stmt, 2, upper)) or
+            (not m_base_connection.BindInt(stmt, 3, c_probe_limit)) then Exit;
+        step_result := m_base_connection.step(stmt);
+        while step_result = SQLITE_ROW do
+        begin
+            item := Default(TncOneKeyCompletion);
+            item.full_pinyin := m_base_connection.ColumnText(stmt, 0);
+            item.text := m_base_connection.ColumnText(stmt, 1);
+            item.weight := m_base_connection.ColumnInt(stmt, 2);
+            item.popularity_prior := m_base_connection.ColumnInt(stmt, 3);
+            item.has_popularity_prior := item.popularity_prior >= 0;
+            item.corpus_score := m_base_connection.ColumnInt(stmt, 4);
+            item.document_score := m_base_connection.ColumnInt(stmt, 5);
+            item.source_count := m_base_connection.ColumnInt(stmt, 6);
+            item.path_score := m_base_connection.ColumnInt(stmt, 7);
+            item.vertical_penalty := m_base_connection.ColumnInt(stmt, 8);
+            item.vertical_layer_kind := m_base_connection.ColumnInt(stmt, 9);
+            item.source := okcs_base_exact;
+            SetLength(results, Length(results) + 1);
+            results[High(results)] := item;
+            step_result := m_base_connection.step(stmt);
+        end;
+        if step_result <> SQLITE_DONE then
+        begin
+            SetLength(results, 0);
+            Exit;
+        end;
+    finally
+        if stmt <> nil then m_base_connection.finalize(stmt);
+    end;
+    if m_candidate_prefix_completion_cache.Count >= c_cache_limit then
+        m_candidate_prefix_completion_cache.Clear;
+    m_candidate_prefix_completion_cache.AddOrSetValue(key, Copy(results));
+    Result := Length(results) > 0;
 end;
 
 function TncSqliteDictionary.lookup_one_key_completions(
@@ -9965,6 +10059,31 @@ begin
         end;
     end;
 
+    open_user_connection;
+
+    if m_base_ready and m_user_ready and m_prune_user_entries_on_open and
+        (not m_defer_optional_model_loads) then
+    begin
+        migrate_user_entries;
+        prune_user_entries_existing_in_base;
+        prune_suspicious_user_entries;
+    end;
+
+    if m_user_ready then
+    begin
+        m_user_data_version := 0;
+        m_last_user_data_version_check_tick := 0;
+        refresh_user_data_version_if_changed(True);
+    end;
+
+    m_ready := m_base_ready or m_user_ready;
+    Result := m_ready;
+end;
+
+procedure TncSqliteDictionary.open_user_connection;
+begin
+    m_user_ready := False;
+    m_user_initialization_deferred := False;
     if m_user_db_path <> '' then
     begin
         if m_defer_optional_model_loads and
@@ -10001,24 +10120,6 @@ begin
             end;
         end;
     end;
-
-    if m_base_ready and m_user_ready and m_prune_user_entries_on_open and
-        (not m_defer_optional_model_loads) then
-    begin
-        migrate_user_entries;
-        prune_user_entries_existing_in_base;
-        prune_suspicious_user_entries;
-    end;
-
-    if m_user_ready then
-    begin
-        m_user_data_version := 0;
-        m_last_user_data_version_check_tick := 0;
-        refresh_user_data_version_if_changed(True);
-    end;
-
-    m_ready := m_base_ready or m_user_ready;
-    Result := m_ready;
 end;
 
 function TncSqliteDictionary.open: Boolean;
@@ -10029,6 +10130,33 @@ end;
 function TncSqliteDictionary.open_deferred: Boolean;
 begin
     Result := open_internal(True);
+end;
+
+function TncSqliteDictionary.reload_user_dictionary: Boolean;
+begin
+    Result := False;
+    if m_write_batch_depth > 0 then
+    begin
+        Exit;
+    end;
+
+    // User learning/checkpoints must not discard the immutable base models.
+    // Reopen only this connection, also supporting restored user databases.
+    clear_cached_user_statements;
+    m_user_ready := False;
+    if m_user_connection <> nil then
+    begin
+        m_user_connection.close;
+    end;
+    clear_user_read_caches;
+    m_literal_user_words_available := -1;
+    m_user_data_version := 0;
+    m_last_user_data_version_check_tick := 0;
+    open_user_connection;
+    refresh_user_data_version_if_changed(True);
+    m_ready := m_base_ready or m_user_ready;
+    Result := m_user_ready or m_user_initialization_deferred or
+        (m_user_db_path = '');
 end;
 
 procedure TncSqliteDictionary.close;
@@ -10503,6 +10631,8 @@ begin
     begin
         m_prefix_lookup_result_cache.Clear;
     end;
+    if m_candidate_prefix_completion_cache <> nil then
+        m_candidate_prefix_completion_cache.Clear;
     if m_one_key_completion_cache <> nil then
     begin
         m_one_key_completion_cache.Clear;
@@ -13732,7 +13862,7 @@ begin
     // Same-process writes clear these caches synchronously. Cross-process
     // updates only need the bounded check performed by ensure_open.
     refresh_user_data_version_if_changed(False);
-    query_key := LowerCase(pinyin);
+    query_key := LowerCase(nc_normalize_umlaut_spelling(pinyin));
     if (m_lookup_result_cache <> nil) and
         m_lookup_result_cache.TryGetValue(query_key, results) then
     begin
@@ -16650,6 +16780,37 @@ function TncSqliteDictionary.get_char_lm_text_scores(const texts: TArray<string>
     out scores: TArray<Integer>): Boolean;
 begin
     Result := get_char_lm_text_scores_internal(texts, scores, True, '', True);
+end;
+
+function TncSqliteDictionary.get_char_lm_attested_scores(
+    const ngrams: TArray<string>; out scores: TArray<Integer>): Boolean;
+var
+    wanted: TDictionary<string, Boolean>;
+    entries: TDictionary<string, TncCharLmCacheEntry>;
+    entry: TncCharLmCacheEntry;
+    idx: Integer;
+begin
+    Result := False;
+    SetLength(scores, Length(ngrams));
+    for idx := 0 to High(scores) do scores[idx] := Low(Integer);
+    if (Length(ngrams) = 0) or (not ensure_char_lm_available) then Exit;
+    wanted := TDictionary<string, Boolean>.Create;
+    entries := TDictionary<string, TncCharLmCacheEntry>.Create;
+    try
+        for idx := 0 to High(ngrams) do
+            if Trim(ngrams[idx]) <> '' then
+                wanted.AddOrSetValue(Trim(ngrams[idx]), True);
+        if not load_char_lm_entries(wanted.Keys.ToArray, entries) then Exit;
+        for idx := 0 to High(ngrams) do
+            if entries.TryGetValue(Trim(ngrams[idx]), entry) and entry.found then
+            begin
+                scores[idx] := entry.score;
+                Result := True;
+            end;
+    finally
+        entries.Free;
+        wanted.Free;
+    end;
 end;
 
 function TncSqliteDictionary.get_char_lm_suffix_scores(const texts: TArray<string>;

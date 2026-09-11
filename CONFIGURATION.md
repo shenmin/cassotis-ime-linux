@@ -20,6 +20,13 @@ Changing the input mode, pinyin scheme, or fuzzy-pinyin rules clears an active
 composition so existing keystrokes are never reinterpreted under another
 scheme.
 
+Full pinyin accepts `lue`/`nue` as aliases of `lve`/`nve`, and complete
+`jv`/`qv`/`xv`, `jve`/`qve`/`xve`, `jvan`/`qvan`/`xvan` and
+`jvn`/`qvn`/`xvn` syllables as aliases of their canonical `u` spelling.
+An explicit apostrophe keeps syllables separate (`lu'e` is not `lve`). Partial-prefix
+candidates still refer to the original keystrokes, and Enter commits that
+original spelling unchanged.
+
 ## Candidates
 
 The candidate page size can be set from 3 through 9; the default is 9. The
@@ -59,8 +66,11 @@ their order.
 | Half/full width | `Shift+Space` |
 | Open settings | `Ctrl+Shift+F10` |
 
-Shortcuts must be unique. A shortcut without Ctrl or Alt is limited to Shift
-or an F1-F24 key so ordinary text input cannot be captured accidentally.
+Each function shortcut can be enabled or disabled independently. Disabling
+one preserves its configured key combination without consuming those keys;
+the setting is shared by both frameworks and survives restart. Only enabled
+shortcuts must be unique. An unmodified key is limited to Shift or F1-F24 so
+ordinary text input cannot be captured accidentally.
 
 ## User Data And Diagnostics
 

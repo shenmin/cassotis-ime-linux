@@ -15,6 +15,7 @@ type
         procedure WordRatioAndUserWordAreProtected;
         procedure InvalidAlignmentAndExcessSpansAreRejected;
         procedure MissingAndMalformedModelFailClosed;
+        procedure RefinementCannotReverseEditsOrExpandBudget;
     end;
 
 implementation
@@ -112,6 +113,16 @@ begin
     finally
         dictionary.Free;
     end;
+end;
+
+procedure TncLocalRepairTests.RefinementCannotReverseEditsOrExpandBudget;
+begin
+    AssertTrue(valid_local_repair_refinement('ABCDEF', 'XBCDEF', 'XYCZEF'));
+    AssertFalse(valid_local_repair_refinement('ABCDEF', 'XBCDEF', 'ABCYEF'));
+    AssertFalse(valid_local_repair_refinement('ABCDEF', 'XBCDEF', 'YBCDEF'));
+    AssertFalse(valid_local_repair_refinement('ABCDEF', 'XBCDEF', 'XYZQER'));
+    AssertFalse(valid_local_repair_refinement('ABCDEF', 'XBCDEF', 'XBYDZF'));
+    AssertFalse(valid_local_repair_refinement('ABCDEF', 'XBCDEF', 'XBCDE'));
 end;
 
 procedure TncLocalRepairTests.MissingAndMalformedModelFailClosed;

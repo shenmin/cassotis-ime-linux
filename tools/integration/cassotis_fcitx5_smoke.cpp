@@ -55,7 +55,7 @@ public:
             !verifyContextIsolation(main, standardFlags) ||
             !verifyModeShortcuts(main) || !verifyPinyinSchemes(main) ||
             !verifyFuzzyActions(main) || !verifySensitiveContext() ||
-            !verifyUserCandidateDeletion(main)) {
+            !verifyUserCandidateDeletion(main) || !verifyDisabledShortcuts(main)) {
             destroyContexts();
             return false;
         }
@@ -562,6 +562,68 @@ private:
         auto *inputContext = context(password);
         return require(inputContext->inputPanel().empty(),
                        "password context exposed composition UI");
+    }
+
+    bool setDefaultShortcutMask(unsigned mask) {
+        const char *controlPath = std::getenv("CASSOTIS_CONTROL_PATH");
+        if (!require(controlPath && *controlPath,
+                     "CASSOTIS_CONTROL_PATH is not set")) {
+            return false;
+        }
+        std::vector<std::string> values = {
+            controlPath, "set-state", "0", "0", "0", "0", "0", "0", "1",
+            "0", "0", "9", "0", "16", "0", "190", "2", "84", "3",
+            "32", "1", "121", "3", std::to_string(mask)};
+        std::vector<gchar *> arguments;
+        for (auto &value : values) {
+            arguments.push_back(value.data());
+        }
+        arguments.push_back(nullptr);
+        GError *error = nullptr;
+        gint status = 0;
+        const gboolean spawned = g_spawn_sync(
+            nullptr, arguments.data(), nullptr, G_SPAWN_STDOUT_TO_DEV_NULL,
+            nullptr, nullptr, nullptr, nullptr, &status, &error);
+        const bool success = spawned && g_spawn_check_wait_status(status, &error);
+        if (!success) {
+            require(false, std::string("unable to set shortcut mask: ") +
+                               (error ? error->message : "unknown error"));
+        }
+        g_clear_error(&error);
+        return success;
+    }
+
+    bool verifyDisabledShortcuts(const fcitx::ICUUID &uuid) {
+        reset(uuid);
+        if (!setDefaultShortcutMask(31)) {
+            return false;
+        }
+        context(uuid)->focusOut();
+        context(uuid)->focusIn();
+        const auto ctrlShift = fcitx::KeyStates(fcitx::KeyState::Ctrl) |
+                               fcitx::KeyState::Shift;
+        const std::array<fcitx::Key, 4> keys = {
+            fcitx::Key(FcitxKey_period, fcitx::KeyState::Ctrl),
+            fcitx::Key(FcitxKey_t, ctrlShift),
+            fcitx::Key(FcitxKey_space, fcitx::KeyState::Shift),
+            fcitx::Key(FcitxKey_F10, ctrlShift)};
+        bool success = true;
+        for (const auto &key : keys) {
+            success = require(!send(uuid, key),
+                              "disabled function shortcut was consumed") && success;
+        }
+        success = success && type(uuid, "ni") && tapBareShift(uuid) &&
+                  type(uuid, "hao") &&
+                  require(preedit(uuid) == "nihao",
+                          "disabled Shift changed mode or committed composition");
+        reset(uuid);
+        const bool restored = setDefaultShortcutMask(0);
+        context(uuid)->focusOut();
+        context(uuid)->focusIn();
+        if (success && restored) {
+            std::cout << "disabled_shortcuts=ok\n";
+        }
+        return success && restored;
     }
 
     bool stopEngine() {

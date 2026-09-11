@@ -136,17 +136,21 @@ NO_AT_BRIDGE=1 "$settings_binary" --check
 mapfile -t original_engine_state < <(
     "$control_binary" get-state | sed -n 's/^[^=]*=//p'
 )
-[[ ${#original_engine_state[@]} -eq 21 ]] ||
+[[ ${#original_engine_state[@]} -eq 22 ]] ||
     cassotis_die "could not capture the complete Cassotis engine state"
 restore_engine_state=1
 "$control_binary" set-state \
     0 0 0 0 0 0 1 0 0 9 0 \
-    16 0 190 2 84 3 32 1 121 3 >/dev/null
+    16 0 190 2 84 3 32 1 121 3 0 >/dev/null
 "$smoke_binary"
 "$control_binary" set-state \
     0 0 0 0 0 0 1 0 0 9 1 \
-    16 0 190 2 84 3 32 1 121 3 >/dev/null
+    16 0 190 2 84 3 32 1 121 3 0 >/dev/null
 "$smoke_binary" --debug-weight
+"$control_binary" set-state \
+    0 0 0 0 0 0 1 0 0 9 0 \
+    16 0 190 2 84 3 32 1 121 3 31 >/dev/null
+"$smoke_binary" --disabled-shortcuts
 "$control_binary" set-state "${original_engine_state[@]}" >/dev/null
 restore_engine_state=0
 if [[ $restore_gnome_sources -eq 1 ]]; then

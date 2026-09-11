@@ -21,13 +21,13 @@ corresponding model-training data.
 
 The current Linux engine is reviewed against:
 
-- Cassotis IME v1.22.0 (`93e50b4a7185c12b9b0c0ad54ed5ad45a6f511bc`)
-- Cassotis Lexicon v1.21.0 (`63f4df366f3b62d4ebad2e3192811d5d1e4e3f2b`)
+- Cassotis IME v1.25.0 (`d72f2d024f257f8699851da276dad8dbdc0371c7`)
+- Cassotis Lexicon v1.25.0 (`cd8aed88e86ff0377cc6accd1881d93e25253d50`)
 - Simplified dictionary schema 24, SHA-256
-  `0ccc9bfc6c9316d072f35a86bad1e960002b60096140b05906adf9222dd4885b`
+  `ddec15f2015c3182d971e90656a568d9ec434794dadcf822f3abd77ff0d91acd`
 - Traditional dictionary schema 24, SHA-256
-  `845d7c63de2d03ba6bacac66c699b99c5256afe58332eacb2326ca42a9682681`
-- Simplified/traditional base entries: 213,233 / 216,385
+  `f310600f824c062c875b73e19a982f0e129730907d10ef20f0455c4de19bb6a3`
+- Simplified/traditional base entries: 213,290 / 216,505
 - Simplified/traditional completion competition rows: 42,453 / 42,448
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379
 - Simplified long-completion tables: 35,423 visible paths and 97,589 total
@@ -78,7 +78,7 @@ It then releases the barrier and verifies input again after real background
 loading. A separate new-process trial records startup and key latency without
 the barrier. This is process-cold testing, not a claim that OS file caches were
 dropped. The test interposer is never included in installable packages.
-An aarch64 qualification repeat measured 14.701 ms for the first key and
+A v0.6.0 aarch64 qualification repeat measured 14.701 ms for the first key and
 48.448 ms maximum across 34 key events with initialization held. The independent
 process-cold trial measured 12.296 ms / 55.269 ms. These key timings exclude
 the separately recorded service startup (about 1.45 s, including dictionary
@@ -114,7 +114,7 @@ python3 tools/parity/validate_quality_report.py \
   --dictionary /path/to/dict_sc.db \
   --long-cases /path/to/long_sentence_16300.tsv \
   --short-cases /path/to/word_input_yhwd_context.tsv \
-  --baseline tests/baselines/quality-v1.22.0-linux-x86_64.txt
+  --baseline tests/baselines/quality-v1.25.0-linux-x86_64.txt
 ```
 
 The long-sentence accuracy pass uses deterministic work limits, single-threaded
@@ -129,14 +129,229 @@ cutoff in the accuracy pass. Both passes use the same models and bounded
 search. The separation reduces concurrency-related accuracy variation while
 retaining realistic production latency. The repeated-process check above guards
 same-platform stability; bitwise-identical neural decisions across CPU
-architectures are not assumed. The separate asynchronous completion
-benchmark still uses its deployed 40 ms result-acceptance deadline.
+architectures are not assumed.
+
+Long completion has two full 16,300-case tracks. The production track uses
+the deployed 50 ms result-acceptance deadline, increased from 40 ms for Linux
+v0.7.0, without relaxing quality floors or latency budgets. This is an
+asynchronous result cutoff, not a synchronous wait for each keystroke; model
+loading remains asynchronous too. The accuracy track uses deadline 0, matching
+the Windows completion runner's deterministic-benchmark mode, and compares hits and saved
+keys with the Windows reference. Both request four completion inference threads;
+the Linux runtime caps this at the available CPU count (two on the qualification
+VMs).
+Deadline-free accuracy does not replace the production check or change the
+input method's runtime settings. In both tracks the conditional reranker and
+local-repair stage retain their normal configuration; the completion deadline
+argument does not change the separate local-repair timeout.
+
+Since the v1.24.0 port, long-completion timing includes decoding and resolving
+the final visible candidate list before resolving the Tab result, matching the
+updated Windows benchmark. Reports identify this scope as
+`decode_final_candidates_visible_completion_v1` and break out all three stages.
+Older completion timings omitted final-candidate work and are not directly
+comparable. The post-sample oracle remains outside the measured interval.
+The gate validates the scope, per-case trace signature, counts, and timing
+totals. It recomputes decoding-plus-visible-completion mean/median/P95/maximum
+from each sample and retains their previous budgets. The new final-candidate
+phase uses the existing long-query mean/P95/maximum budgets. The prior total
+maximum is also retained, so adding a phase cannot hide a slowdown in the
+previously measured work or silently admit a larger worst-case delay.
 
 The runner reports Top1/Top2/Top5/Top9 counts, mean/P50/P95/maximum query
 latency, and Linux process RSS/high-water marks. Memory events contain only
 the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
+
+## v1.25.0 Port Results
+
+Qualification on 2026-09-10/11 uses the exact v1.25.0 sources, models,
+newly built dictionaries and unchanged frozen corpora listed above. The
+Windows reference is compiled with Delphi from the exact tag and replayed
+against the same database and cases, without user learning. Its long-accuracy
+totals reproduce the published Windows table:
+
+| Platform | Long Top1 / 16,300 | Long Top2 / 16,300 | Short Top1, context off / 65,000 | Short Top1, context on / 65,000 |
+| --- | ---: | ---: | ---: | ---: |
+| Windows v1.25.0 published and same-input replay | 11,698 | 12,830 | 60,378 | 61,859 |
+| Linux x86_64 | 11,696 | 12,831 | 60,378 | 61,859 |
+| Linux aarch64 | 11,696 | 12,833 | 60,378 | 61,859 |
+
+Both complete short tracks match the Windows target ranks and first candidates
+case by case. Their combined 7,763-row failure signature is
+`86a271df3a5b6b97bb510ad39d3c9f3f81eeda412181183dd02f6e211519573a`.
+Top2 is 63,194 without context and 63,549 with context. The context-on
+competition subset remains 9,596 Top1 / 10,775 Top2 out of 11,728 cases.
+Short completion also matches the replayed Windows visible-result signature,
+`0F85F09476081967`: 9,420 hits, 12,775 prompts, 24,006 saved keys, and
+1,691 stable pairs out of 1,749. The previously published Windows short-
+completion table reports 9,419 hits; the exact-tag replay with these frozen
+inputs reports 9,420. This distinction is retained rather than rewriting the
+published table.
+
+Long results are not case-identical. x86_64 has eight target-rank differences
+(three Top1 gains, five losses); aarch64 has 97 (39 gains, 41 losses). Complete
+per-case reports are retained. The Linux span-cache correction, stable ordering
+and quantized-runtime precision policy remain enabled. Not every individual
+cross-platform difference has been attributed to a single cause.
+
+Production-mode long-query latency is measured separately from accuracy:
+
+| Architecture | Mean | P50 | P95 | Max | Quality-process peak HWM |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 193.402 ms | 202 ms | 354 ms | 1,050 ms | 973,480 KiB |
+| aarch64 | 84.179 ms | 78 ms | 156 ms | 604 ms | 933,716 KiB |
+
+These different hosts are not a compiler-performance comparison. Existing
+memory and long/short-query latency ceilings are unchanged. A separate
+eight-second Windows diagnostic build overlapped the exploratory x86_64 short
+track; final release measurements must run without competing benchmark/build
+processes. Both native suites pass 335 FPCUnit tests, 23 simplified and nine
+traditional candidate assertions, and all five IBus/Fcitx matrix stages.
+Three fresh-process 500-case candidate/completion trials agree per architecture.
+
+With model initialization blocked, first/max key latencies are 15.042/77.040 ms
+on x86_64 and 12.973/50.969 ms on aarch64. Independent process-cold trials
+measure 33.054/160.753 ms and 15.985/58.672 ms. Service startup is measured
+separately at approximately 2.7 s and 1.6 s; these are not disk-cold tests.
+Eight-context, 8,300-key transport checks report RSS growth of 8 KiB on x86_64
+and 0 KiB on aarch64, with restart recovery passing.
+
+Full long-completion results, each covering all 16,300 cases:
+
+| Platform and completion deadline | Prompts | Hits | Saved keys | Stable / eligible pairs |
+| --- | ---: | ---: | ---: | ---: |
+| Windows v1.25.0 replay, no deadline | 6,489 | 409 | 959 | 28 / 740 |
+| Linux x86_64, no deadline | 6,488 | 408 | 956 | 28 / 740 |
+| Linux aarch64, no deadline | 6,491 | 412 | 946 | 26 / 738 |
+| Linux x86_64, production 40 ms | 6,266 | 398 | 934 | 22 / 710 |
+| Linux aarch64, production 40 ms | 6,491 | 412 | 946 | 26 / 738 |
+| Linux x86_64, production 50 ms | 6,478 | 407 | 955 | 28 / 735 |
+| Linux aarch64, production 50 ms | 6,492 | 412 | 945 | 26 / 738 |
+
+The deadline-free x86_64 trace has six differing suggestions and one lost hit.
+The aarch64 trace has 441 differing suggestions, 15 hit gains and 12 losses.
+More hits can still save fewer keys because correct continuations have
+different lengths. Production mean/P95/max completion times are
+110.424/280/860 ms on x86_64 and 51.937/116/565 ms on aarch64, including all
+three measured phases.
+
+These initial 40 ms trials identified two qualification gaps: aarch64 saves
+13 fewer keys than Windows, beyond the original nine-key allowance, and
+x86_64 stability is 22 pairs against the old minimum of 25. The eligible
+denominator changes with available prompts; the no-deadline x86_64 result
+matches Windows at 28/740. Fresh 50 ms production measurements on 2026-09-11
+pass every existing production quality floor and latency budget on both
+architectures. x86_64 stability is now 28 pairs, exceeding the retained
+minimum of 25. Total mean/P95/max is 110.252/275/862 ms on x86_64 and
+52.031/117/580 ms on aarch64. The earlier 40 ms results remain as a comparison;
+timed measurements can also vary with scheduling and earlier pipeline stages.
+The separate deadline-free aarch64 thirteen-key deficit was accepted for this
+release on 2026-09-11: its saved-key floor is 946 against Windows' 959. This
+architecture-specific exception does not change the nine-hit allowance, the
+x86_64 accuracy comparison, or any production quality or latency requirement.
+
+Both native 50 ms builds pass 335 FPCUnit cases and the executable-default
+check. With model initialization deliberately blocked, first/max key times
+are 27.285/76.910 ms on x86_64 and 12.983/42.879 ms on aarch64. Independent
+process-cold input measures 18.163/142.836 ms and 11.436/58.004 ms respectively;
+the system file cache was not dropped. Input completes while initialization
+is still blocked, then real model loading recovers successfully.
+These measurements do not replace the final exact-commit release gate,
+package installation or application UI acceptance.
+
+## v1.24.0 Port Results
+
+The earlier v1.24.0 qualification used the same frozen 16,300 long and 65,000
+short cases, that version's schema-24 dictionaries (213,315 simplified and
+216,467 traditional base entries), and its reviewed model files.
+Native measurements on Ubuntu 26.04.1 on 2026-09-09 produced:
+
+| Platform | Long Top1 / 16,300 | Long Top2 / 16,300 | Short Top1, context off / 65,000 | Short Top1, context on / 65,000 |
+| --- | ---: | ---: | ---: | ---: |
+| Windows v1.24.0 published table | 11,679 | 12,813 | 60,346 | 61,827 |
+| Windows v1.24.0 same-input accuracy replay, timeout 0 | 11,696 | 12,829 | - | - |
+| Linux x86_64 | 11,696 | 12,831 | 60,346 | 61,827 |
+| Linux aarch64 | 11,696 | 12,833 | 60,346 | 61,827 |
+
+The replay builds the Windows v1.24.0 tag with Delphi and uses exactly the
+same fresh simplified database, frozen corpus and matching runtime/model
+assets, with user learning and external context disabled and
+`--neural-result-timeout-ms=0`, matching the Linux accuracy track. This also
+removes the local-repair time cutoff; the difference from the published table
+has not been attributed solely to the new dictionary. The replay must not be
+confused with the earlier published result. Both Linux Top1 totals
+equal this replay; Top2 is two/four cases higher. This is aggregate parity,
+not per-case identity: x86_64 has six target-rank differences (three Top1
+gains and three losses), and aarch64 has 95 (39 Top1 gains and 39 losses).
+All differences are retained for diagnosis. The earlier Linux span-cache-miss
+correctness fix, stable sorting and quantized-runtime precision policy remain
+enabled; they are not reverted to reproduce another platform's output.
+
+Both complete short tracks keep the exact Windows failure signature:
+7,827 rows, SHA-256
+`18cad226349cbfd1451c35c25f9572b3e004f121c79c5c22658fe47b970b207b`.
+Top2 is 63,163 without context and 63,517 with context. The context-on
+competition subset remains 9,596 Top1 / 10,775 Top2 out of 11,728 cases.
+Short completion remains 9,420 hits out of 12,831 opportunities, 24,006 saved
+keys and exact signature `D33AC07C1551CAA1` on both architectures.
+
+Production-mode long-query latency is measured separately from accuracy:
+
+| Architecture | Mean | P50 | P95 | Max | Quality-process peak HWM |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 188.170 ms | 200 ms | 338 ms | 1,019 ms | 961,140 KiB |
+| aarch64 | 82.259 ms | 77 ms | 151 ms | 642 ms | 948,724 KiB |
+
+These are measurements on different machines, not a compiler speed comparison.
+The 1 GiB memory ceiling and existing long/short-query latency ceilings are
+unchanged. Both native builds pass 200 FPCUnit tests. Three fresh-process
+500-case trials produce identical candidate/completion traces per architecture;
+the deadline-free completion signatures remain `B8AADBA2B20D3B4F` on x86_64
+and `CC52A67DE3040900` on aarch64.
+
+With model initialization deliberately blocked, first-key/max key latencies
+are 21.992/73.923 ms on x86_64 and 11.438/47.057 ms on aarch64. Independent
+process-cold trials measure 36.922/181.999 ms and 19.113/54.056 ms. These key
+timings exclude service startup, approximately 2.4-2.5 seconds and 1.4 seconds
+respectively, and do not imply that the OS file cache was dropped. Final
+release packages must additionally pass the complete gate from their exact
+source revision, including both input frameworks and package validation.
+
+The optional seventh argument to `cassotis-completion-benchmark` writes a
+per-case TSV after each sample's timed work. It records the static and final
+suggestions, request/accept/apply decisions, hits, saved keys and timing phases.
+It is diagnostic output, not an input to candidate selection, and is retained
+with validation reports rather than shipped in binary packages.
+
+Full long-completion qualification uses all 16,300 cases. With the completion
+deadline disabled, the same-input comparison is:
+
+| Platform | Prompts | Hits | Saved keys |
+| --- | ---: | ---: | ---: |
+| Windows v1.24.0 replay | 6,474 | 407 | 953 |
+| Linux x86_64 | 6,473 | 406 | 950 |
+| Linux aarch64 | 6,480 | 411 | 942 |
+
+x86_64 has six differing suggestions and one lost hit; aarch64 has 445 differing
+suggestions, 16 hit gains and 12 losses. More hits do not necessarily save more
+keys: each correct suggestion can complete a different suffix length. The
+aarch64 eleven-key deficit exceeded the original nine-key comparison allowance.
+It was subsequently accepted for that baseline; the v1.25.0 comparison is
+measured independently and does not inherit that exception.
+
+The separate 40 ms production trials yielded 396 hits / 925 saved keys and
+394 / 933 on x86_64, and 409 / 937 and 410 / 939 on aarch64. The first x86_64
+trial missed the unchanged 930-key floor. The traced x86_64 trial met the count
+floors but failed the 1,200 ms overall maximum with one 1,748 ms sample
+(14 ms decoding, 1,734 ms final candidates). Its other phase budgets passed;
+mean/P95 were 109.696/272 ms. The traced aarch64 production trial passed all
+existing floors, with mean/P95/max 50.817/114/563 ms. All runs are retained;
+a diagnostic replay or a better repeat does not replace the final full gate.
+The fixed window around the x86_64 spike was then replayed in three fresh
+processes: the affected sample took 170/179/215 ms, and the window maxima were
+274/298/282 ms. The spike was not reproduced; its cause remains unconfirmed.
 
 ## v1.22.0 Port Results
 

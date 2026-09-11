@@ -1,8 +1,8 @@
 schema_version: 2
-windows_tag: v1.22.0
-windows_baseline: 93e50b4a7185c12b9b0c0ad54ed5ad45a6f511bc
-lexicon_tag: v1.21.0
-lexicon_baseline: 63f4df366f3b62d4ebad2e3192811d5d1e4e3f2b
+windows_tag: v1.25.0
+windows_baseline: d72f2d024f257f8699851da276dad8dbdc0371c7
+lexicon_tag: v1.25.0
+lexicon_baseline: cd8aed88e86ff0377cc6accd1881d93e25253d50
 dictionary_schema: 24
 units:
   - windows: src/common/nc_types.pas
@@ -12,7 +12,7 @@ units:
   - windows: src/engine/nc_pinyin_parser.pas
     linux: src/engine/nc_pinyin_parser.pas
     status: ported-baseline
-    notes: Algorithm preserved; Delphi RTL names and dynamic-array types adapted for FPC 3.2.2.
+    notes: Algorithm preserved; Delphi RTL names and dynamic-array types adapted for FPC 3.2.2. Complete-syllable lue/nue and jv/qv/xv aliases preserve explicit boundaries, partial input, and raw-input offsets.
   - windows: src/engine/nc_shuangpin_decoder.pas
     linux: src/engine/nc_shuangpin_decoder.pas
     status: ported-baseline
@@ -32,7 +32,11 @@ units:
   - windows: src/engine/nc_engine_intf.pas
     linux: src/engine/nc_engine_intf.pas
     status: ported-production-engine
-    notes: Candidate recall, short/long ranking, document-local adaptation and copy completion, Pinyin-conditioned Transformer reranking and generation, constrained asynchronous local completion, context, user learning, deletion, completion, all seven pinyin schemes, fuzzy recall, and input-state behavior follow the Windows v1.22.0 source. Local repair runs on the final visible long-sentence pool with exact/user/word protection and coherent paging. Exact-anchor recall does not independently override final Top1, and asynchronous completion can challenge static transition evidence without hiding it while pending. Deterministic work budgets and stable explicit FPC sorts are retained. Subspan cache readiness and exact-edge probe flags remain initialized before early/fast paths.
+    notes: Candidate recall, short/long ranking, context, learning, completion, fuzzy recall and all seven input schemes follow Windows v1.25.0. Umlaut aliases, ambiguous n/g boundaries and confirmed-suffix recall retain exact/user ranking and coherent paging. Unified short-compound admission uses direct observed LM/context evidence and preserves exact user choices. Long predictions for short input require bounded general-use evidence. Final local repair validates aligned paths, permits a guarded second no-context pass and forbids reversals or increased edit budgets. User-only reload keeps base models and live composition intact. Linux deterministic budgets, stable FPC sorts, cache-miss fetching and initialized fast paths are retained.
+  - windows: src/engine/nc_candidate_presentation.pas, src/engine/nc_prefix_completion_policy.pas
+    linux: src/engine/nc_candidate_presentation.pas, src/engine/nc_prefix_completion_policy.pas
+    status: ported-baseline
+    notes: Owned candidate/source page snapshots, overflow-safe page counts, stable prefix tiers and bounded evidence-ranked predictive recall are shared. Exact matching and Tab completion are not filtered by the predictive-prefix policy. Windows-only host upgrade and TSF paging preflight are excluded; Linux already owns candidate snapshots at the service boundary.
   - windows: src/engine/nc_document_context_model.pas
     linux: src/engine/nc_document_context_model.pas
     status: ported-baseline
@@ -44,7 +48,7 @@ units:
   - windows: src/host/nc_pinyin_transformer_host.pas, src/host/nc_local_completion_host.pas, src/host/native/nc_pinyin_transformer_ort.cpp
     linux: src/host/nc_pinyin_transformer_host.pas, src/host/nc_local_completion_host.pas, src/host/native/nc_pinyin_transformer_ort.cpp
     status: ported-platform-adaptation
-    notes: Windows DLL loading, UTF-16 paths, file mapping, and main-thread callbacks were replaced by ELF loading, UTF-8 paths, mmap, and a bounded Linux worker queue. The v1.22.0 conditional sequence scorer, constrained Pinyin and completion generators, learned invocation/runtime/fusion gates, multi-level completion index, lexical/combined/phonetic native recall selectors, confidence checks, completed-inference timeout semantics, and fail-closed behavior are retained for x86_64 and aarch64. Sparse generator arenas and glibc heap reclamation are Linux lifecycle adaptations and do not alter model inputs or decisions. All six sessions share ONNX Runtime x64 quantized precision mode and force_spinning_stop; an exact integer-arithmetic regression guards affected non-VNNI CPUs without changing model files or scales.
+    notes: Windows DLL loading, UTF-16 paths, file mapping, and main-thread callbacks were replaced by ELF loading, UTF-8 paths, mmap, and a bounded Linux worker queue. The v1.25.0 conditional sequence scorer, constrained Pinyin and completion generators, learned invocation/runtime/fusion gates, multi-level completion index, lexical/combined/phonetic native recall selectors, confidence checks, completed-inference timeout semantics, and fail-closed behavior are retained for x86_64 and aarch64. Sparse generator arenas and glibc heap reclamation are Linux lifecycle adaptations and do not alter model inputs or decisions. All six sessions share ONNX Runtime x64 quantized precision mode and force_spinning_stop; an exact integer-arithmetic regression guards affected non-VNNI CPUs without changing model files or scales.
   - windows: src/engine/nc_local_repair_guard.pas, src/host/nc_local_repair_host.pas, src/host/native/nc_local_repair_ort.inc
     linux: src/engine/nc_local_repair_guard.pas, src/host/nc_local_repair_host.pas, src/host/native/nc_local_repair_ort.inc
     status: ported-platform-adaptation
@@ -56,4 +60,4 @@ units:
   - windows: src/ui
     linux: native framework UI and adapters/ibus/cassotis_settings.py
     status: redesigned-native-ui
-    notes: Candidate/preedit placement is delegated to each framework with shared overflow geometry; completion is below candidates, and a GTK settings client controls engine-owned schema-4 state through IPC while preserving schema-1/2/3 compatibility.
+    notes: Candidate/preedit placement is delegated to each framework with shared overflow geometry; completion is below candidates. GTK settings controls engine-owned schema-5 state with optional function shortcuts, preserving schema-1/2/3/4 decoding. Disabled bindings retain their keys, do not consume input, and do not conflict with enabled bindings.

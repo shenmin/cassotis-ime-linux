@@ -25,7 +25,7 @@ uses
 
 const
     c_default_case_limit = 500;
-    c_default_result_timeout_ms = 40;
+    c_default_result_timeout_ms = c_nc_local_completion_result_timeout_ms;
     c_runtime_timeout_ms = 30000;
     c_task_timeout_ms = 5000;
     c_fnv1a_offset_basis: QWord = 14695981039346656037;

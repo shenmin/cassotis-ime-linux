@@ -1,0 +1,34 @@
+# Linux v0.7.0 uses a 50 ms asynchronous completion result deadline.
+# All v1.24.0 quality floors and latency budgets remain unchanged.
+format=cassotis-completion-quality-baseline-v1
+metadata.engine_baseline=windows-v1.25.0
+metadata.dictionary_schema=24
+metadata.dictionary_sha256=ddec15f2015c3182d971e90656a568d9ec434794dadcf822f3abd77ff0d91acd
+metadata.cases_sha256=3f50a9323ad798e691f86ea70c6dffa13b4a9f55b624fc3499a138258190ff0f
+metadata.validation_host=ubuntu-26.04.1-aarch64
+metadata.runtime_mode=neural
+metadata.oracle_protocol=post-sample-shared-reranker
+metadata.trace_required=true
+latency_scope_exact=decode_final_candidates_visible_completion_v1
+result_timeout_ms_exact=50
+cases_exact=16300
+opportunities_exact=16300
+prompts_min=6300
+prompts_max=6600
+hits_min=400
+full_sentence_hits_min=20
+wrong_prompts_max=6200
+saved_keys_min=930
+stability_pairs_min=700
+stable_pairs_min=25
+neural_requests_min=11000
+neural_accepted_min=4500
+neural_applied_min=3500
+decode_and_completion_mean_ms_max=45
+decode_and_completion_p50_ms_max=25
+decode_and_completion_p95_ms_max=130
+decode_and_completion_max_ms_max=900
+final_candidates_mean_ms_max=160
+final_candidates_p95_ms_max=400
+final_candidates_max_ms_max=3000
+max_ms_max=900

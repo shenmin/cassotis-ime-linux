@@ -709,11 +709,14 @@ int main(int argc, char **argv)
         argc == 2 && g_strcmp0(argv[1], "--settings-shortcut") == 0;
     gboolean debug_weight_test =
         argc == 2 && g_strcmp0(argv[1], "--debug-weight") == 0;
+    gboolean disabled_shortcuts_test =
+        argc == 2 && g_strcmp0(argv[1], "--disabled-shortcuts") == 0;
     int result = 1;
 
     if (argc > 2 ||
-        (argc == 2 && !settings_shortcut_test && !debug_weight_test)) {
-        g_printerr("Usage: %s [--settings-shortcut|--debug-weight]\n",
+        (argc == 2 && !settings_shortcut_test && !debug_weight_test &&
+         !disabled_shortcuts_test)) {
+        g_printerr("Usage: %s [--settings-shortcut|--debug-weight|--disabled-shortcuts]\n",
                    argv[0]);
         return 2;
     }
@@ -781,6 +784,33 @@ int main(int argc, char **argv)
         }
         wait_one_step();
         g_print("settings_shortcut=ok\n");
+        result = 0;
+        goto done;
+    }
+
+    if (disabled_shortcuts_test) {
+        static const guint keys[] = {
+            IBUS_KEY_period, IBUS_KEY_t, IBUS_KEY_space, IBUS_KEY_F10};
+        static const guint masks[] = {
+            IBUS_CONTROL_MASK, IBUS_CONTROL_MASK | IBUS_SHIFT_MASK,
+            IBUS_SHIFT_MASK, IBUS_CONTROL_MASK | IBUS_SHIFT_MASK};
+        for (guint i = 0; i < G_N_ELEMENTS(keys); ++i) {
+            if (ibus_input_context_process_key_event(context, keys[i], 0,
+                                                       masks[i])) {
+                g_printerr("Disabled shortcut %u was consumed.\n", i);
+                goto done;
+            }
+        }
+        if (!type_ascii(context, "ni") || !tap_bare_shift(context) ||
+            !type_ascii(context, "hao"))
+            goto done;
+        wait_one_step();
+        if (g_strcmp0(observation.preedit, "nihao") != 0 ||
+            (observation.commit != NULL && *observation.commit != '\0')) {
+            g_printerr("Disabled Shift changed mode or committed composition.\n");
+            goto done;
+        }
+        g_print("disabled_shortcuts=ok\n");
         result = 0;
         goto done;
     }

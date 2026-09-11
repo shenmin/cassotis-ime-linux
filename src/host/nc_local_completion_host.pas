@@ -13,6 +13,10 @@ uses
     Dynlibs,
     nc_engine_intf;
 
+const
+    // Completed background results beyond this deadline are discarded.
+    c_nc_local_completion_result_timeout_ms = 50;
+
 type
     TncLocalCompletionHost = class;
 
@@ -129,7 +133,7 @@ type
         procedure Disable(const error_text: string);
     public
         constructor Create(const base_directory: string;
-            const result_timeout_ms: QWord = 40;
+            const result_timeout_ms: QWord = c_nc_local_completion_result_timeout_ms;
             const model_threads: Integer = 0;
             const capture_candidate_pool: Boolean = False);
         destructor Destroy; override;

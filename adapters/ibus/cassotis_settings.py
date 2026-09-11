@@ -49,7 +49,7 @@ SHORTCUT_STATE_KEYS = (
     "shortcut_settings_modifiers",
 )
 
-STATE_KEYS = BASE_STATE_KEYS + SHORTCUT_STATE_KEYS
+STATE_KEYS = BASE_STATE_KEYS + SHORTCUT_STATE_KEYS + ("shortcut_disabled_mask",)
 
 SCHEME_NAMES = (
     "全拼",
@@ -171,6 +171,7 @@ DEFAULT_STATE = {
     "shortcut_full_width_modifiers": 1,
     "shortcut_settings_key": 0x79,
     "shortcut_settings_modifiers": 3,
+    "shortcut_disabled_mask": 0,
 }
 
 PAGE_DEFAULT_KEYS = (
@@ -187,6 +188,7 @@ PAGE_DEFAULT_KEYS = (
         "candidate_page_key_scheme",
         "one_key_completion_key",
         *SHORTCUT_STATE_KEYS,
+        "shortcut_disabled_mask",
     ),
     ("debug_mode",),
 )
@@ -288,13 +290,16 @@ def validate_state(state):
             state["one_key_completion_key"] == 0:
         raise ControlError("Tab 用于一键补全时，不能同时用于候选翻页")
 
+    if not 0 <= state["shortcut_disabled_mask"] <= 31:
+        raise ControlError("快捷键开关超出范围")
     shortcuts = []
-    for prefix, _caption in SHORTCUTS:
+    for index, (prefix, _caption) in enumerate(SHORTCUTS):
         key_code = state[f"shortcut_{prefix}_key"]
         modifiers = state[f"shortcut_{prefix}_modifiers"]
         if not shortcut_is_valid(key_code, modifiers):
             raise ControlError(f"“{_caption}”快捷键无效")
-        shortcuts.append((key_code, modifiers, _caption))
+        if not state["shortcut_disabled_mask"] & (1 << index):
+            shortcuts.append((key_code, modifiers, _caption))
     seen = {}
     for key_code, modifiers, caption in shortcuts:
         signature = (key_code, modifiers)
@@ -564,6 +569,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         shortcuts = self._new_section("功能快捷键")
         content.pack_start(shortcuts, False, False, 0)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header.pack_start(Gtk.Label(label="启用"), False, False, 0)
         modifier_header = Gtk.Label(label="修饰键")
         modifier_header.set_xalign(0)
         key_header = Gtk.Label(label="按键")
@@ -575,18 +581,25 @@ class SettingsWindow(Gtk.ApplicationWindow):
             editor = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             modifier = self._choice_combo(MODIFIER_CHOICES)
             key = self._choice_combo(KEY_CHOICES)
+            enabled = Gtk.CheckButton()
+            enabled.connect("toggled", self._shortcut_enabled_changed, modifier, key)
+            editor.pack_start(enabled, False, False, 0)
             editor.pack_start(modifier, True, True, 0)
             editor.pack_start(key, True, True, 0)
-            self.shortcut_widgets[prefix] = (modifier, key)
+            self.shortcut_widgets[prefix] = (modifier, key, enabled)
             self._add_row(shortcuts, row, caption, editor)
         shortcut_hint = Gtk.Label(
-            label="快捷键不可重复。无修饰键时仅支持 Shift 或 F1-F24，以免占用正常输入。"
+            label="启用的快捷键不可重复。取消启用会保留原按键配置。无修饰键时仅支持 Shift 或 F1-F24，以免占用正常输入。"
         )
         shortcut_hint.set_xalign(0)
         shortcut_hint.set_line_wrap(True)
         shortcut_hint.get_style_context().add_class("dim-label")
         content.pack_start(shortcut_hint, False, False, 0)
         return page
+
+    def _shortcut_enabled_changed(self, enabled, modifier, key):
+        modifier.set_sensitive(enabled.get_active())
+        key.set_sensitive(enabled.get_active())
 
     def _build_advanced_page(self):
         page, content = self._new_page()
@@ -674,12 +687,14 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.completion_key, state["one_key_completion_key"]
         )
         self.debug_mode.set_active(bool(state["debug_mode"]))
-        for prefix, _caption in SHORTCUTS:
-            modifier, key = self.shortcut_widgets[prefix]
+        for index, (prefix, _caption) in enumerate(SHORTCUTS):
+            modifier, key, enabled = self.shortcut_widgets[prefix]
             self._set_combo_value(
                 modifier, state[f"shortcut_{prefix}_modifiers"]
             )
             self._set_combo_value(key, state[f"shortcut_{prefix}_key"])
+            enabled.set_active(not state["shortcut_disabled_mask"] & (1 << index))
+            self._shortcut_enabled_changed(enabled, modifier, key)
         self._update_fuzzy_sensitivity()
 
     def _collect_state(self):
@@ -716,8 +731,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
             ),
             "debug_mode": int(self.debug_mode.get_active()),
         }
-        for prefix, _caption in SHORTCUTS:
-            modifier, key = self.shortcut_widgets[prefix]
+        changes["shortcut_disabled_mask"] = 0
+        for index, (prefix, _caption) in enumerate(SHORTCUTS):
+            modifier, key, enabled = self.shortcut_widgets[prefix]
+            if not enabled.get_active():
+                changes["shortcut_disabled_mask"] |= 1 << index
             changes[f"shortcut_{prefix}_modifiers"] = self._combo_value(modifier)
             changes[f"shortcut_{prefix}_key"] = self._combo_value(key)
         return merge_visible_state(self.loaded_state, changes)
@@ -934,6 +952,18 @@ def main():
         numpad_state["shortcut_settings_key"] = 0x6B
         numpad_state["shortcut_settings_modifiers"] = 7
         validate_state(numpad_state)
+        disabled_state = dict(DEFAULT_STATE)
+        disabled_state["shortcut_settings_key"] = 0x10
+        disabled_state["shortcut_settings_modifiers"] = 0
+        disabled_state["shortcut_disabled_mask"] = 16
+        validate_state(disabled_state)
+        disabled_state["shortcut_disabled_mask"] = 0
+        try:
+            validate_state(disabled_state)
+        except ControlError:
+            pass
+        else:
+            raise ControlError("重新启用重复快捷键未被拒绝")
         print(f"settings_ui=ok version={version}")
         return 0
     if options.check:

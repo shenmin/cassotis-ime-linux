@@ -272,6 +272,7 @@ cc -std=gnu11 -O2 -g -Wall -Wextra -Werror \
     -I"$cassotis_root/adapters/ibus" \
     $(pkg-config --cflags glib-2.0) \
     "$cassotis_root/tests/native/test_shortcut_match.c" \
+    "$cassotis_root/adapters/ibus/cassotis_protocol.c" \
     -o "$bin_dir/cassotis-shortcut-match-tests" \
     $(pkg-config --libs glib-2.0)
 cassotis_require_executable "$bin_dir/cassotis-shortcut-match-tests"

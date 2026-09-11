@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-09-11
+
+- Updated the engine and dictionaries to Cassotis IME and Cassotis Lexicon
+  v1.25.0, with freshly generated simplified and traditional schema-24 databases.
+- Accepted `lue`/`nue` as aliases of `lve`/`nve` while preserving explicit
+  apostrophes, raw input, selection offsets, and ordinary `lu`/`nu` prefixes.
+- Accepted `jv`/`qv`/`xv` aliases for canonical `ju`/`qu`/`xu` spelling,
+  including compound syllables, without changing raw Enter commits or explicit
+  syllable boundaries.
+- Unified evidence-backed short-compound admission, retained strong contextual
+  evidence, and ranked prefixes using effective word weight and matched length.
+- Preserved candidate identity and selection across pages and deferred dictionary
+  handoff; predictive-prefix recall remains separate from exact and Tab recall.
+- Improved exact-prefix recall across ambiguous nasal boundaries and after
+  partial selection; kept alternative single characters available across pages.
+- Restricted short-query long predictions to bounded, evidence-supported
+  completions without filtering full exact words or Tab recall.
+- Added bounded local-repair refinement with aligned-path validation and
+  protection against reversing edits or breaking trusted word spans.
+- Kept base models loaded during user-dictionary refreshes and retained
+  asynchronous model loading and warm-up for responsive cold-start input.
+- Increased the asynchronous completion result deadline from 40 ms to 50 ms;
+  keystrokes still do not wait for background completion or model loading.
+- Added individual enable switches for function shortcuts, retaining their
+  saved bindings when disabled in both IBus and Fcitx 5.
+- Matched completion benchmark timing to the final visible candidate path.
+
 ## 0.6.0 - 2026-09-07
 
 - Ported the Cassotis IME v1.22.0 engine changes while retaining the matching

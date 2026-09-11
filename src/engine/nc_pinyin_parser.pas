@@ -27,6 +27,7 @@ type
 function nc_is_pinyin_spelling_helper_compatible(const initial_value: string;
     const final_value: string): Boolean;
 function nc_is_canonical_pinyin_syllable(const value: string): Boolean;
+function nc_normalize_umlaut_spelling(const value: string): string;
 
 implementation
 
@@ -518,6 +519,41 @@ begin
     end;
 
     Result := result_list;
+end;
+
+function nc_normalize_umlaut_spelling(const value: string): string;
+var
+    lower_value: string;
+    parser: TncPinyinParser;
+    syllables: TncPinyinParseResult;
+    syllable: TncPinyinSyllable;
+begin
+    Result := value;
+    if (Pos('v', value) = 0) and (Pos('V', value) = 0) and
+        (Pos('ue', value) = 0) and (Pos('UE', value) = 0) and
+        (Pos('uE', value) = 0) and (Pos('Ue', value) = 0) then Exit;
+    lower_value := LowerCase(value);
+    if (Pos('lue', lower_value) = 0) and (Pos('nue', lower_value) = 0) and
+        (Pos('jv', lower_value) = 0) and (Pos('qv', lower_value) = 0) and
+        (Pos('xv', lower_value) = 0) then Exit;
+    // Normalize complete syllables only, never join explicit boundaries.
+    // Equal-length aliases preserve raw key offsets for partial commits.
+    parser := TncPinyinParser.Create;
+    try
+        syllables := parser.parse(lower_value);
+    finally
+        parser.Free;
+    end;
+    for syllable in syllables do
+        if (syllable.text = 'lue') or (syllable.text = 'nue') then
+            Result[syllable.start_index + 2] := 'v'
+        else if (Length(syllable.text) >= 2) and
+            CharInSet(syllable.text[1], ['j', 'q', 'x']) and
+            ((Copy(syllable.text, 2, MaxInt) = 'v') or
+             (Copy(syllable.text, 2, MaxInt) = 've') or
+             (Copy(syllable.text, 2, MaxInt) = 'van') or
+             (Copy(syllable.text, 2, MaxInt) = 'vn')) then
+            Result[syllable.start_index + 2] := 'u';
 end;
 
 end.

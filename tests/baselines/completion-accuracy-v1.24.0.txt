@@ -1,0 +1,19 @@
+# Same-input Windows v1.24.0 replay: 407 hits and 953 saved keys.
+# Allow no more than nine lost hits/keys; production 40 ms gates are separate.
+format=cassotis-completion-quality-baseline-v1
+metadata.engine_baseline=windows-v1.24.0
+metadata.dictionary_schema=24
+metadata.dictionary_sha256=c08727e617747d53472da63316f38f264746b2feb27df72f12e1c3798c2f0342
+metadata.cases_sha256=3f50a9323ad798e691f86ea70c6dffa13b4a9f55b624fc3499a138258190ff0f
+metadata.runtime_mode=neural
+metadata.oracle_protocol=post-sample-shared-reranker
+metadata.trace_required=true
+metadata.windows_hits=407
+metadata.windows_saved_keys=953
+metadata.allowed_loss=9
+latency_scope_exact=decode_final_candidates_visible_completion_v1
+result_timeout_ms_exact=0
+cases_exact=16300
+opportunities_exact=16300
+hits_min=398
+saved_keys_min=944

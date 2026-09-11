@@ -143,6 +143,7 @@ typedef enum {
 typedef struct {
     guint16 key_code;
     guint8 modifiers;
+    gboolean disabled;
 } CassotisShortcut;
 
 typedef struct {

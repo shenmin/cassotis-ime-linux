@@ -11,6 +11,7 @@ short_cases=''
 source_parity_report=''
 quality_baseline=''
 completion_baseline=''
+completion_accuracy_baseline=''
 short_completion_baseline=''
 report_dir="$cassotis_root/release-validation"
 skip_build=0
@@ -27,10 +28,12 @@ Options:
   --report-dir DIR              Validation output directory.
   --quality-baseline FILE       Quality/latency release thresholds.
   --completion-baseline FILE    Full completion release thresholds.
+  --completion-accuracy-baseline FILE
+                                Deadline-free Windows completion comparison.
   --short-completion-baseline FILE
                                 Short completion release thresholds.
   --skip-build                  Reuse build/bin.
-  --skip-benchmark              Reuse all three saved benchmark reports.
+  --skip-benchmark              Reuse all four saved benchmark reports.
   --skip-desktop                Skip Fcitx desktop discovery/reload.
 EOF
 }
@@ -64,6 +67,10 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] ||
                 cassotis_die '--completion-baseline requires a path'
             completion_baseline="$2"; shift ;;
+        --completion-accuracy-baseline)
+            [[ $# -ge 2 ]] ||
+                cassotis_die '--completion-accuracy-baseline requires a path'
+            completion_accuracy_baseline="$2"; shift ;;
         --short-completion-baseline)
             [[ $# -ge 2 ]] ||
                 cassotis_die '--short-completion-baseline requires a path'
@@ -86,17 +93,23 @@ cassotis_require_command desktop-file-validate
 cassotis_require_command python3
 cassotis_require_command realpath
 if [[ -z "$quality_baseline" ]]; then
-    quality_baseline="$cassotis_root/tests/baselines/quality-v1.22.0-linux-$(uname -m).txt"
+    quality_baseline="$cassotis_root/tests/baselines/quality-v1.25.0-linux-$(uname -m).txt"
 fi
 if [[ -z "$completion_baseline" ]]; then
-    completion_baseline="$cassotis_root/tests/baselines/completion-quality-v1.22.0-linux-$(uname -m).txt"
+    completion_baseline="$cassotis_root/tests/baselines/completion-quality-v1.25.0-linux-$(uname -m).txt"
+fi
+if [[ -z "$completion_accuracy_baseline" ]]; then
+    completion_accuracy_baseline="$cassotis_root/tests/baselines/completion-accuracy-v1.25.0.txt"
+    if [[ "$(uname -m)" == aarch64 ]]; then
+        completion_accuracy_baseline="$cassotis_root/tests/baselines/completion-accuracy-v1.25.0-linux-aarch64.txt"
+    fi
 fi
 if [[ -z "$short_completion_baseline" ]]; then
-    short_completion_baseline="$cassotis_root/tests/baselines/short-completion-quality-v1.22.0-linux-$(uname -m).txt"
+    short_completion_baseline="$cassotis_root/tests/baselines/short-completion-quality-v1.25.0-linux-$(uname -m).txt"
 fi
 for required in dictionary_path traditional_dictionary_path long_cases \
                 short_cases source_parity_report quality_baseline \
-                completion_baseline short_completion_baseline; do
+                completion_baseline completion_accuracy_baseline short_completion_baseline; do
     [[ -n "${!required}" && -r "${!required}" ]] ||
         cassotis_die "required input is missing: $required=${!required}"
 done
@@ -202,7 +215,7 @@ python3 "$cassotis_root/tools/parity/validate_neural_engine_smoke.py" \
     --report "$report_dir/neural-engine-smoke-deterministic-validation.json" \
     >"$report_dir/logs/neural-engine-smoke-deterministic-validation.log"
 "$cassotis_root/build/bin/cassotis-neural-engine-smoke" \
-    "$dictionary_path" "$long_cases" 500 40 \
+    "$dictionary_path" "$long_cases" 500 \
     >"$report_dir/logs/neural-engine-smoke-production.log" 2>&1
 python3 "$cassotis_root/tools/parity/validate_neural_engine_smoke.py" \
     --log "$report_dir/logs/neural-engine-smoke-production.log" \
@@ -311,15 +324,34 @@ python3 "$cassotis_root/tools/parity/validate_quality_report.py" \
 completion_log="$report_dir/benchmarks/completion-quality.txt"
 if [[ $skip_benchmark -eq 0 ]]; then
     "$cassotis_root/build/bin/cassotis-completion-benchmark" \
-        "$dictionary_path" "$long_cases" 16300 40 500 \
+        "$dictionary_path" "$long_cases" 16300 50 500 neural \
+        "$report_dir/benchmarks/completion-cases.tsv" \
         >"$completion_log" \
         2>"$report_dir/logs/completion-quality-progress.log"
 fi
 python3 "$cassotis_root/tools/parity/validate_completion_quality_report.py" \
     --log "$completion_log" --baseline "$completion_baseline" \
     --dictionary "$dictionary_path" --cases "$long_cases" \
+    --trace "$report_dir/benchmarks/completion-cases.tsv" \
     --report "$report_dir/completion-quality-validation.json" \
     >"$report_dir/logs/completion-quality-validation.log"
+
+# The Windows published completion runner disables its result deadline. Keep
+# that comparison separate from the deployed 50 ms run and its quality gate.
+completion_accuracy_log="$report_dir/benchmarks/completion-accuracy.txt"
+if [[ $skip_benchmark -eq 0 ]]; then
+    "$cassotis_root/build/bin/cassotis-completion-benchmark" \
+        "$dictionary_path" "$long_cases" 16300 0 500 neural \
+        "$report_dir/benchmarks/completion-accuracy-cases.tsv" \
+        >"$completion_accuracy_log" \
+        2>"$report_dir/logs/completion-accuracy-progress.log"
+fi
+python3 "$cassotis_root/tools/parity/validate_completion_quality_report.py" \
+    --log "$completion_accuracy_log" --baseline "$completion_accuracy_baseline" \
+    --dictionary "$dictionary_path" --cases "$long_cases" \
+    --trace "$report_dir/benchmarks/completion-accuracy-cases.tsv" \
+    --report "$report_dir/completion-accuracy-validation.json" \
+    >"$report_dir/logs/completion-accuracy-validation.log"
 
 short_completion_log="$report_dir/benchmarks/short-completion-quality.txt"
 if [[ $skip_benchmark -eq 0 ]]; then
@@ -369,6 +401,11 @@ quality = json.loads((root / "quality-validation.json").read_text(encoding="utf-
 completion_quality = json.loads(
     (root / "completion-quality-validation.json").read_text(encoding="utf-8")
 )
+completion_accuracy = json.loads(
+    (root / "completion-accuracy-validation.json").read_text(encoding="utf-8")
+)
+if not completion_accuracy["ok"]:
+    raise SystemExit("completion accuracy validation failed")
 short_completion_quality = json.loads(
     (root / "short-completion-quality-validation.json").read_text(
         encoding="utf-8"
@@ -430,6 +467,7 @@ summary = {
     },
     "quality": quality["metrics"],
     "completion_quality": completion_quality["metrics"],
+    "completion_accuracy": completion_accuracy["metrics"],
     "short_completion_quality": short_completion_quality["metrics"],
     "neural_engine_smoke": completion_deterministic["metrics"],
     "neural_engine_smoke_production": completion_production["metrics"],
@@ -442,6 +480,7 @@ summary = {
     "cold_start_input": cold_start,
     "neural_engine_smoke_validation": "passed",
     "completion_quality_validation": "passed",
+    "completion_accuracy_validation": "passed",
     "short_completion_quality_validation": "passed",
     "neural_engine_smoke_deterministic_validation": "passed",
     "neural_engine_smoke_production_validation": "passed",

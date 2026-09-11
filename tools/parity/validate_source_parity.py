@@ -299,7 +299,7 @@ def validate_deployed_assets(
         original_bytes = git_file(windows_root, windows_revision, repair_path)
         original = json.loads(original_bytes)
         packaged = json.loads((ROOT / repair_path).read_bytes())
-        for key in ("word_calibration", "independent_calibration"):
+        for key in ("word_calibration", "independent_calibration", "refinement_validation"):
             original.pop(key, None)
         repair_hash = sha256_file(ROOT / repair_path)
         original_hash = hashlib.sha256(original_bytes).hexdigest()

@@ -15,7 +15,8 @@ weishenme	为什么	1	direct-path
 youxiangdizhi	邮箱地址	1	direct-path
 youjiandizhi	邮件地址	1	direct-path
 gengxinhaole	更新好了	1	segmented-path
-kaishichifan	开始	1	windows-v117-prefix
+kaishichifan	开始吃	1	windows-v125-attested-prefix
+kaishichifan	开始	2	windows-v125-prefix-retention
 yanxikaishi	演习	1	windows-v117-prefix
 womenzaichifan	我们在吃饭	1	segmented-path
 woxiangchifanle	我想吃反了	1	windows-v117-path

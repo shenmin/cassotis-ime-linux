@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from contextlib import closing
+import csv
 import importlib.util
 import json
 from pathlib import Path
@@ -151,10 +152,217 @@ def test_repeatability_validator() -> None:
                 raise AssertionError("incomplete or invalid trace was accepted")
 
 
+def test_completion_trace() -> None:
+    fields = ("index", "expected", "pinyin", "typed_prefix", "target_prefix",
+              "static_completion", "completion", "full_pinyin", "hit", "saved_keys",
+              "request", "accepted", "applied", "latency_ms", "decode_ms",
+              "final_candidates_ms")
+    rows = [dict(zip(fields, values)) for values in (
+        (1, "abcde", "abcdef", "abc", "abc", "abcde", "abcde", "abcdef",
+         1, 2, 0, 0, 0, 10, 2, 6),
+        (2, "abcdf", "abcdfg", "abc", "abc", "", "abcxy", "abcxyz",
+         0, 0, 1, 1, 1, 20, 3, 15),
+        (3, "xyzabc", "xyzabcd", "xyz", "xyz", "", "", "",
+         0, 0, 1, 0, 0, 30, 4, 24),
+    )]
+    signature = 14695981039346656037
+    for row in rows:
+        text = f"{row['index']}\t{row['completion']}\t{row['full_pinyin']}\t{row['hit']}\n"
+        for value in text.encode():
+            signature = ((signature ^ value) * 1099511628211) % (1 << 64)
+    metrics = {key: str(value) for key, value in {
+        "cases": 3, "opportunities": 3, "prompts": 2, "hits": 1,
+        "full_sentence_hits": 1, "wrong_prompts": 1, "saved_keys": 2,
+        "neural_requests": 2, "neural_accepted": 1, "neural_applied": 1,
+        "mean_ms": 20, "p50_ms": 20, "p95_ms": 30, "max_ms": 30,
+        "decode_mean_ms": 3, "final_candidates_mean_ms": 15, "completion_mean_ms": 2,
+        "completion_signature": f"{signature:016X}",
+    }.items()}
+    with tempfile.TemporaryDirectory() as directory:
+        trace = Path(directory) / "trace.tsv"
+        cases = Path(directory) / "cases.tsv"
+        cases.write_text("index\tfile\tline\tsentence\tpinyin\n" + "".join(
+            f"{row['index']}\tcase\t1\t{row['expected']}\t{row['pinyin']}\n"
+            for row in rows), encoding="utf-8")
+
+        def write_trace(values):
+            with trace.open("w", encoding="utf-8", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=fields, delimiter="\t")
+                writer.writeheader()
+                writer.writerows(values)
+
+        write_trace(rows)
+        derived, failures = completion_quality.validate_trace(trace, metrics, cases)
+        if failures or derived["decode_and_completion_mean_ms"] != "5.000" or \
+                derived["decode_and_completion_p95_ms"] != "6" or \
+                derived["final_candidates_p95_ms"] != "24":
+            raise AssertionError(f"valid completion trace rejected: {failures}")
+        for change in ({"hit": 0}, {"saved_keys": 3}, {"applied": 1},
+                       {"final_candidates_ms": 11}, {"index": 2},
+                       {"expected": "other"}, {"pinyin": "other"}):
+            write_trace([dict(rows[0], **change), *rows[1:]])
+            if not completion_quality.validate_trace(trace, metrics, cases)[1]:
+                raise AssertionError(f"invalid completion trace accepted: {change}")
+        write_trace(rows[:-1])
+        if not completion_quality.validate_trace(trace, metrics, cases)[1]:
+            raise AssertionError("truncated completion trace accepted")
+        write_trace(rows)
+        for change in ({"hits": "2"}, {"mean_ms": "nan"}, {"p50_ms": "9"},
+                       {"completion_signature": "0000000000000000"}):
+            if not completion_quality.validate_trace(trace, dict(metrics, **change), cases)[1]:
+                raise AssertionError(f"inconsistent completion summary accepted: {change}")
+        if "decode_and_completion_mean_ms" in metrics:
+            raise AssertionError("trace validation mutated measured metrics")
+
+
+def test_completion_phase_baselines() -> None:
+    root = ROOT / "tests" / "baselines"
+    accuracy = completion_quality.parse_metrics(root / "completion-accuracy-v1.24.0.txt")
+    if accuracy.get("result_timeout_ms_exact") != "0":
+        raise AssertionError("Windows completion comparison must disable the result cutoff")
+    for name in ("hits", "saved_keys"):
+        reference = int(accuracy[f"metadata.windows_{name}"])
+        if int(accuracy[f"{name}_min"]) != reference - 9:
+            raise AssertionError("completion comparison exceeded the agreed single-digit tolerance")
+    for architecture in ("x86_64", "aarch64"):
+        prior = completion_quality.parse_metrics(
+            root / f"completion-quality-v1.22.0-linux-{architecture}.txt")
+        current = completion_quality.parse_metrics(
+            root / f"completion-quality-v1.24.0-linux-{architecture}.txt")
+        for key, value in prior.items():
+            if key == "format" or key.startswith("metadata."):
+                continue
+            new_key = "decode_and_completion_" + key if key in (
+                "mean_ms_max", "p50_ms_max", "p95_ms_max", "max_ms_max"
+            ) else key
+            if current.get(new_key) != value:
+                raise AssertionError(f"existing completion budget changed: {new_key}")
+        if current.get("metadata.trace_required") != "true" or \
+                current.get("latency_scope_exact") != completion_quality.LATENCY_SCOPE:
+            raise AssertionError("scoped completion budget must require a trace")
+
+
+def test_v125_deterministic_baselines() -> None:
+    root = ROOT / "tests" / "baselines"
+    baseline = quality.parse_metrics(ROOT / "porting/windows-baseline.txt")
+    version_source = (ROOT / "src/common/nc_version.pas").read_text(encoding="utf-8")
+    for key in ("reviewed_through", "lexicon_reviewed_through"):
+        if f"'{baseline[key]}'" not in version_source:
+            raise AssertionError(f"runtime diagnostic baseline differs: {key}")
+    dictionary_hash = "ddec15f2015c3182d971e90656a568d9ec434794dadcf822f3abd77ff0d91acd"
+    short_hash = "86a271df3a5b6b97bb510ad39d3c9f3f81eeda412181183dd02f6e211519573a"
+    for architecture in ("x86_64", "aarch64"):
+        prior = quality.parse_metrics(root / f"quality-v1.24.0-linux-{architecture}.txt")
+        current = quality.parse_metrics(root / f"quality-v1.25.0-linux-{architecture}.txt")
+        if current.get("metadata.engine_baseline") != "windows-v1.25.0" or \
+                current.get("metadata.dictionary_sha256") != dictionary_hash:
+            raise AssertionError("v1.25 quality gate is not bound to the reviewed inputs")
+        if current.get("signature.short.rows_exact") != "7763" or \
+                current.get("signature.short.sha256") != short_hash:
+            raise AssertionError("v1.25 short-query per-case parity changed")
+        for key, value in prior.items():
+            if key.endswith("_max") and current.get(key) != value:
+                raise AssertionError(f"quality latency/memory budget changed: {key}")
+            if key.endswith("_min") and float(current[key]) < float(value):
+                raise AssertionError(f"quality floor was lowered: {key}")
+        short_prior = short_completion_quality.parse_metrics(
+            root / f"short-completion-quality-v1.24.0-linux-{architecture}.txt")
+        short_current = short_completion_quality.parse_metrics(
+            root / f"short-completion-quality-v1.25.0-linux-{architecture}.txt")
+        for key, value in short_prior.items():
+            if key == "format" or key.startswith("metadata.") or \
+                    key == "completion_signature_exact":
+                continue
+            if short_current.get(key) != value:
+                raise AssertionError(f"short-completion count/budget changed: {key}")
+        if short_current.get("metadata.dictionary_sha256") != dictionary_hash or \
+                short_current.get("completion_signature_exact") != "0F85F09476081967":
+            raise AssertionError("v1.25 short completion differs from the Windows trace")
+
+
+def test_completion_default_deadline() -> None:
+    constant = "c_nc_local_completion_result_timeout_ms"
+    host = (ROOT / "src/host/nc_local_completion_host.pas").read_text(encoding="utf-8")
+    normalized_host = " ".join(host.split())
+    if f"{constant} = 50;" not in normalized_host or \
+            f"const result_timeout_ms: QWord = {constant};" not in normalized_host:
+        raise AssertionError("runtime completion default must be 50 ms")
+    if "if Result and (FResultTimeoutMs > 0) and (elapsed_ms > FResultTimeoutMs) then" \
+            not in normalized_host:
+        raise AssertionError("deadline-free mode or inclusive acceptance boundary changed")
+    service = (ROOT / "src/service/nc_engine_service.pas").read_text(encoding="utf-8")
+    if "TncLocalCompletionHost.Create( runtime_directory)" not in " ".join(service.split()):
+        raise AssertionError("engine service must inherit the runtime completion deadline")
+    for path in ("tools/benchmark/cassotis_completion_benchmark.lpr",
+                 "tools/integration/cassotis_neural_engine_smoke.lpr"):
+        text = " ".join((ROOT / path).read_text(encoding="utf-8").split())
+        if f"c_default_result_timeout_ms = {constant};" not in text:
+            raise AssertionError(f"test entry point has a separate deadline: {path}")
+    release = " ".join((ROOT / "scripts/validate_release.sh").read_text(
+        encoding="utf-8").replace("\\\n", " ").split())
+    if '"$dictionary_path" "$long_cases" 16300 50 500 neural' not in release or \
+            '"$dictionary_path" "$long_cases" 16300 0 500 neural' not in release:
+        raise AssertionError("release must test both production 50 ms and deadline-free modes")
+    root = ROOT / "tests/baselines"
+    accuracy = completion_quality.parse_metrics(root / "completion-accuracy-v1.25.0.txt")
+    if accuracy.get("result_timeout_ms_exact") != "0" or \
+            accuracy.get("metadata.allowed_loss") != "9":
+        raise AssertionError("production deadline change must not relax accuracy comparison")
+    for name in ("hits", "saved_keys"):
+        if int(accuracy[f"{name}_min"]) != int(accuracy[f"metadata.windows_{name}"]) - 9:
+            raise AssertionError("Windows accuracy reference tolerance changed")
+    arm_accuracy = completion_quality.parse_metrics(
+        root / "completion-accuracy-v1.25.0-linux-aarch64.txt")
+    for key, value in accuracy.items():
+        if key != "saved_keys_min" and arm_accuracy.get(key) != value:
+            raise AssertionError(f"ARM exception changed an unrelated accuracy gate: {key}")
+    if arm_accuracy.get("metadata.allowed_saved_keys_loss") != "13" or \
+            arm_accuracy.get("metadata.accepted_saved_keys_exception_date") != "2026-09-11" or \
+            int(arm_accuracy["saved_keys_min"]) != int(accuracy["metadata.windows_saved_keys"]) - 13:
+        raise AssertionError("ARM saved-key exception exceeds the accepted thirteen-key loss")
+    if 'if [[ "$(uname -m)" == aarch64 ]]; then completion_accuracy_baseline=' not in release:
+        raise AssertionError("ARM accuracy exception must not apply to other architectures")
+    for architecture in ("x86_64", "aarch64"):
+        old = completion_quality.parse_metrics(
+            root / f"completion-quality-v1.24.0-linux-{architecture}.txt")
+        new = completion_quality.parse_metrics(
+            root / f"completion-quality-v1.25.0-linux-{architecture}.txt")
+        if new.get("result_timeout_ms_exact") != "50":
+            raise AssertionError("production completion baseline must require 50 ms")
+        for key, value in old.items():
+            if key.startswith("metadata.") or key == "result_timeout_ms_exact":
+                continue
+            if new.get(key) != value:
+                raise AssertionError(f"deadline change relaxed a quality/latency gate: {key}")
+        for timeout in (0, 40):
+            if not completion_quality.compare_baseline(
+                    {"result_timeout_ms": str(timeout)}, {"result_timeout_ms_exact": "50"}):
+                raise AssertionError("non-production report passed the 50 ms gate")
+
+
 def main() -> int:
     test_baseline_comments()
     test_repeatability_validator()
     test_cold_start_diagnostics()
+    test_completion_trace()
+    test_completion_phase_baselines()
+    test_v125_deterministic_baselines()
+    test_completion_default_deadline()
+    phase_metrics = {
+        "latency_scope": completion_quality.LATENCY_SCOPE,
+        "decode_mean_ms": "25.000", "completion_mean_ms": "10.000",
+    }
+    if completion_quality.compare_baseline(phase_metrics, {
+            "decode_and_completion_mean_ms_max": "35"}):
+        raise AssertionError("valid earlier-phase latency budget was rejected")
+    if not completion_quality.compare_baseline(phase_metrics, {
+            "decode_and_completion_mean_ms_max": "34"}):
+        raise AssertionError("earlier-phase latency regression was hidden")
+    if not completion_quality.compare_baseline({}, {
+            "decode_and_completion_mean_ms_max": "35"}):
+        raise AssertionError("missing latency phases satisfied the phase budget")
+    if "decode_and_completion_mean_ms" in phase_metrics:
+        raise AssertionError("baseline comparison changed the measured report")
     release_source = (ROOT / "scripts" / "validate_release.sh").read_text(
         encoding="utf-8"
     )
@@ -341,6 +549,36 @@ def main() -> int:
             "full completion validator rejected valid release floors: "
             + repr(baseline_failures)
         )
+    scoped_metrics = dict(
+        completion_quality_metrics,
+        latency_scope=completion_quality.LATENCY_SCOPE,
+        decode_mean_ms="2.000", final_candidates_mean_ms="10.000",
+        completion_mean_ms="8.500",
+    )
+    scoped_baseline = dict(full_completion_baseline,
+                           latency_scope_exact=completion_quality.LATENCY_SCOPE)
+    accuracy_metrics = dict(scoped_metrics, result_timeout_ms="0")
+    accuracy_baseline = dict(scoped_baseline, result_timeout_ms_exact="0")
+    if completion_quality.compare_baseline(accuracy_metrics, accuracy_baseline):
+        raise AssertionError("valid deadline-free completion report was rejected")
+    if not completion_quality.compare_baseline(accuracy_metrics, scoped_baseline) or \
+            not completion_quality.compare_baseline(scoped_metrics, accuracy_baseline):
+        raise AssertionError("production and deadline-free completion reports were mixed")
+    if completion_quality.validate_invariants(scoped_metrics) or \
+            completion_quality.compare_baseline(scoped_metrics, scoped_baseline):
+        raise AssertionError("valid end-to-end completion timing was rejected")
+    if not completion_quality.compare_baseline(completion_quality_metrics,
+                                               scoped_baseline):
+        raise AssertionError("old completion timing scope passed the new baseline")
+    for changes in ({"latency_scope": "completion_only"},
+                    {"final_candidates_mean_ms": "0.000"},
+                    {"completion_mean_ms": "nan"}, {"mean_ms": "nan"}):
+        if not completion_quality.validate_invariants(dict(scoped_metrics, **changes)):
+            raise AssertionError("invalid completion timing phases were accepted")
+    missing_phase = dict(scoped_metrics)
+    del missing_phase["decode_mean_ms"]
+    if not completion_quality.validate_invariants(missing_phase):
+        raise AssertionError("missing completion timing phase was accepted")
     regressed_completion = dict(completion_quality_metrics)
     regressed_completion["hits"] = "199"
     regressed_completion["wrong_prompts"] = "3635"
