@@ -1032,6 +1032,11 @@ int main(int argc, char **argv)
     gboolean shutdown_engine =
         argc == 2 && strcmp(argv[1], "--shutdown-engine") == 0;
 
+    if (argc > 1 && !(argc == 2 && strcmp(argv[1], "--ibus") == 0) &&
+        !shutdown_engine) {
+        g_printerr("Usage: %s [--ibus|--shutdown-engine]\n", argv[0]);
+        return 2;
+    }
     ibus_init();
     socket_path = resolve_socket_path();
     adapter_path = resolve_executable_path(argv[0]);

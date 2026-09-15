@@ -81,6 +81,12 @@ The shared Free Pascal engine owns the complete candidate pipeline:
 7. Return one final ordered list plus a separate one-key completion, keeping
    paging, candidate source indices, and committed text consistent after repair.
 
+The generated model units and expanded evidence are mechanically compared
+against the frozen Windows source by
+source and runtime-asset consistency checks. Corpus-scale behavior is measured by
+the native Linux evaluation described in [../BENCHMARK.md](../BENCHMARK.md)
+([简体中文](../BENCHMARK.CN.md)).
+
 ## User Database
 
 The user database records learned exact/literal candidates, aggregate usage,

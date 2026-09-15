@@ -75,6 +75,7 @@ end;
 procedure print_usage;
 begin
     WriteLn(c_product_name, ' ', c_engine_version);
+    WriteLn('Usage: cassotis-engine --version');
     WriteLn('       cassotis-engine --serve [--dictionary DB]');
     WriteLn('           [--dictionary-traditional DB]');
     WriteLn('           [--user-dictionary DB] [--socket PATH]');

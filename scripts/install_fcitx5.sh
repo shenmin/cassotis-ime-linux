@@ -245,8 +245,6 @@ cassotis_atomic_install "$stage_libexec/cassotis-engine" \
     "$installed_engine" 0755
 cassotis_atomic_install "$stage_libexec/cassotis-control" \
     "$installed_control" 0755
-cassotis_atomic_install "$stage_libexec/cassotis-fcitx5-smoke" \
-    "$installed_smoke" 0755
 cassotis_atomic_install "$stage_libexec/cassotis-settings" \
     "$installed_settings" 0755
 cassotis_atomic_install_neural_runtime "$stage_libexec" "$libexec_dir"

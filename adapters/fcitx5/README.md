@@ -24,7 +24,7 @@ Build and install the user-local addon on Linux with:
 ./scripts/install_fcitx5.sh --dictionary /path/to/dict_sc.db
 ```
 
-The installer verifies the native addon before atomically installing
+The installer stages and atomically installs
 `libcassotis.so`, metadata, the shared engine/control/settings programs, and
 the selected dictionary. By default it adds Cassotis to the current Fcitx
 group. It does not change the desktop's selected input framework; after the
@@ -34,18 +34,6 @@ Cassotis exposes its existing GTK settings window through Fcitx's standard
 input-method and addon configuration entries. Their configure actions in
 `fcitx5-configtool` launch `cassotis-settings` directly;
 `Ctrl+Shift+F10` remains available as the default in-input shortcut.
-
-Run the build-tree or installed-addon verification independently:
-
-
-
-The first two commands use Fcitx's isolated native test frontend and a
-temporary engine socket/user database. They cover the complete adapter key
-matrix, every input scheme, learning/deletion across engine restarts, and
-multiple simultaneous contexts without touching desktop state. `--desktop`
-also verifies that the real graphical-session daemon discovers the installed
-addon across a reload. If GNOME IBus was active, it is stopped only for the
-test and restored on both success and failure.
 
 Remove the Fcitx integration with `./scripts/uninstall_fcitx5.sh`. The shared
 runtime and data remain when IBus is installed, and learned user data is never

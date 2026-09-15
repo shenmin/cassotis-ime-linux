@@ -35,6 +35,11 @@ The current Linux engine is reviewed against:
 - Traditional long-completion tables: 32,481 visible paths and 92,457 total
   text-recall rows
 
+Source and data consistency checks cover the engine, parsers, input schemes,
+models, and dictionaries, distinguishing platform adaptations from candidate
+behavior differences.
+
+
 The native runtime also has an exact integer-arithmetic regression for
 quantized inference. All six model sessions enable ONNX Runtime's x86
 quantization precision mode to avoid saturating intermediate products on CPUs

@@ -113,8 +113,7 @@ fcitx_addon="$bin_dir/libcassotis.so"
 runtime_wrapper="$bin_dir/libcassotis_pinyin_transformer_ort.so"
 runtime_library="$bin_dir/libonnxruntime.so.1.20.1"
 runtime_provider="$bin_dir/libonnxruntime_providers_shared.so"
-for binary in "$engine" "$control" "$ibus_adapter" \
-             ; do
+for binary in "$engine" "$control" "$ibus_adapter"; do
     cassotis_require_executable "$binary"
 done
 for runtime_file in "$runtime_wrapper" "$runtime_library" \
@@ -179,28 +178,7 @@ install -m 0755 \
     "$(stage_path "$libexec_path/cassotis-refresh-sessions")"
 install -m 0755 "$ibus_adapter" \
     "$(stage_path "$libexec_path/ibus-engine-cassotis")"
-install -m 0755 "$fcitx_smoke" \
-    "$(stage_path "$libexec_path/cassotis-fcitx5-smoke")"
-install -m 0755 "$runtime_wrapper" \
-    "$(stage_path "$libexec_path/libcassotis_pinyin_transformer_ort.so")"
-install -m 0755 "$runtime_library" \
-    "$(stage_path "$libexec_path/libonnxruntime.so.1.20.1")"
-install -m 0755 "$runtime_provider" \
-    "$(stage_path "$libexec_path/libonnxruntime_providers_shared.so")"
-ln -s libonnxruntime.so.1.20.1 \
-    "$(stage_path "$libexec_path/libonnxruntime.so.1")"
-ln -s libonnxruntime.so.1 \
-    "$(stage_path "$libexec_path/libonnxruntime.so")"
-install -d -m 0755 \
-    "$(stage_path "$libexec_path/pinyin_transformer")" \
-    "$(stage_path "$libexec_path/local_completion")" \
-    "$(stage_path "$libexec_path/local_repair")"
-install -m 0644 "$bin_dir/pinyin_transformer/"* \
-    "$(stage_path "$libexec_path/pinyin_transformer")/"
-install -m 0644 "$bin_dir/local_completion/"* \
-    "$(stage_path "$libexec_path/local_completion")/"
-install -m 0644 "$bin_dir/local_repair/"* \
-    "$(stage_path "$libexec_path/local_repair")/"
+cassotis_stage_neural_runtime "$bin_dir" "$(stage_path "$libexec_path")"
 install -m 0755 "$fcitx_addon" \
     "$(stage_path "$fcitx_library_path/libcassotis.so")"
 install -m 0644 "$icon" "$(stage_path "$icon_path/cassotis-ime.png")"

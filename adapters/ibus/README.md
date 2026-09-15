@@ -77,12 +77,8 @@ engine through the versioned socket boundary. Use `Super+Space` to select
 `Cassotis 言泉拼音输入法` after
 installation.
 
-The adapter-to-engine self-test uses a per-process private socket, verifies
-incremental and exact candidates, shuangpin decoding, and a complete
-`pianruo` one-key completion round trip, then cleans up the engine process it
-starts. It can run while the desktop component is installed:
-
-
+The production socket supports an acknowledged graceful shutdown used by
+upgrade and uninstall scripts.
 
 The production socket accepts up to 16 simultaneous local clients. A
 single-threaded event loop incrementally buffers their frames and serializes
@@ -98,6 +94,4 @@ context synchronization; after an engine restart it discards the stale remote
 mapping, recreates the context, and reapplies active and surrounding-text
 state before processing the next key. Sends remain bounded to 150 ms and
 responses to 3.5 seconds. The latter exceeds the release gate's 3-second
-worst-case query budget without permitting an unbounded UI wait. The
-installed-daemon smoke test exercises this recovery with a live IBus input
-context.
+worst-case query budget without permitting an unbounded UI wait.

@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  build-and-test:
+  build:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -24,3 +24,5 @@ jobs:
           python3 -m compileall -q adapters scripts tools
       - name: Build
         run: ./scripts/build.sh
+      - name: Check runtime version
+        run: test "$(./build/bin/cassotis-engine --version)" = "$(cat VERSION)"

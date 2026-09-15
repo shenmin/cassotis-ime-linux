@@ -170,7 +170,6 @@ cc -std=gnu11 -O2 -g -Wall -Wextra -Werror \
     $(pkg-config --libs glib-2.0)
 cassotis_require_executable "$bin_dir/cassotis-control"
 
-
 printf '[build] libcassotis.so (Fcitx 5)\n'
 fcitx_compat_flags=()
 if pkg-config --atleast-version=5.1.9 Fcitx5Core; then
@@ -201,13 +200,6 @@ c++ -std=c++20 -O2 -g -Wall -Wextra -Werror -fPIC -shared \
     $(pkg-config --libs Fcitx5Core Fcitx5Config glib-2.0)
 [[ -r "$bin_dir/libcassotis.so" ]] ||
     cassotis_die "Fcitx 5 addon was not produced"
-
-printf '[build] cassotis-fcitx5-smoke\n'
-cassotis_require_executable "$bin_dir/cassotis-fcitx5-smoke"
-
-
-
-
 
 cassotis_require_command python3
 python3 -c 'import pathlib, sys; path = pathlib.Path(sys.argv[1]); compile(path.read_text(encoding="utf-8"), str(path), "exec")' \

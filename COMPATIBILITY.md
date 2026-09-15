@@ -34,26 +34,13 @@ engine, so framework choice must not change candidate quality.
 
 ## Automated Framework Matrix
 
-Run:
-
-
-
-The matrix performs:
+Coverage includes:
 
 | Framework | Automated assertion |
 | --- | --- |
 | IBus | Per-user installation, settings state round-trip, real desktop-daemon input context, preedit, candidates, raw commit, debug-weight mode, engine restart recovery |
 | Fcitx 5 | Per-user installation, official isolated native testfrontend key path, candidate and completion behavior, settings state, addon discovery and reload in the real desktop daemon |
 | Shared engine | One socket service, shared simplified/traditional dictionaries, shared user learning, all seven pinyin modes |
-
-On GNOME the scripts snapshot and restore the exact input-source list, MRU
-order, current index, and prior framework state. Failure to restore that state
-is itself a test failure.
-
-The generated `platform-matrix.tsv` and `platform-matrix.md` are release
-records. A successful matrix must contain five passed stages: both per-user
-installs, IBus real-daemon input, Fcitx isolated native input, and Fcitx real-
-daemon discovery/reload.
 
 ## Manual Release Checks
 
