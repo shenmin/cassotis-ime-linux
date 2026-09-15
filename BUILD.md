@@ -61,7 +61,7 @@ This performs the following deterministic sequence:
 2. Safely remove only the repository's `build/` directory.
 3. Build the C++20 ONNX Runtime bridge and stage the architecture-matched
    runtime and model assets.
-4. Force-rebuild the engine CLI, tests, benchmarks, neural runtime smokes,
+4. Force-rebuild the engine CLI, tests, neural runtime smokes,
    IBus adapter, and native Fcitx 5 addon.
 5. Run CLI and neural-runtime smoke tests, including all six shuangpin schemes.
 6. Run the complete FPCUnit suite.
@@ -70,32 +70,7 @@ Options:
 
 ```bash
 ./rebuild_all.sh --skip-tests
-./rebuild_all.sh --benchmarks
-./rebuild_all.sh --dictionary /path/to/dict_sc.db
 ```
-
-The last command benchmarks both raw exact queries and the complete candidate
-pipeline against a generated Cassotis Lexicon database.
-
-Validate the frozen candidate-quality set against a final dictionary without
-loading any user data:
-
-
-
-The runner reports the observed rank for every expected phrase, grouped by
-case category, plus mean, P50, P95, and maximum query latency. It exits with a
-nonzero status when a phrase is missing or falls below its frozen rank bound.
-Use `--cases FILE` to evaluate a separate UTF-8 TSV set with the same
-`query`, `expected_text`, `maximum_rank`, and `category` columns.
-
-For ranking diagnostics, invoke the runner directly with `--candidates`:
-
-
-
-This optional mode prints the final score, original dictionary/path weight,
-candidate source, display kind, and raw character-language-model score. Normal
-regression runs do not open the additional diagnostic reader and retain their
-ordinary latency measurement path.
 
 ## Incremental Commands
 
@@ -105,13 +80,19 @@ ordinary latency measurement path.
 removing `build/`. `build_all.sh --clean` performs a safe clean before that
 forced build.
 
-`--iterations` controls the parser, six-scheme shuangpin, and raw exact-query
-loops. `--candidate-iterations` independently controls the more expensive
-complete candidate pipeline, whose default is 100 iterations over 12 queries.
-
 ## Outputs
 
 Current binaries are written to `build/bin/`:
+
+- `cassotis-engine`
+- `cassotis-core-tests`
+- `cassotis-neural-runtime-smoke`
+- `cassotis-local-repair-integration`
+- `ibus-engine-cassotis`
+- `libcassotis.so`
+- `cassotis-control`
+- `cassotis-ibus-smoke`
+- `cassotis-fcitx5-smoke`
 
 Compiled Pascal units are isolated under `build/units/`. Both directories are
 ignored by Git.
@@ -142,7 +123,7 @@ inference runtime.
 The release builder does not produce RPM or Arch packages from Debian-built
 binaries. Other distributions should build both native adapters from source.
 See [BENCHMARK.md](BENCHMARK.md) / [简体中文](BENCHMARK.CN.md) for benchmark
-instructions and results, and [COMPATIBILITY.md](COMPATIBILITY.md) for desktop
+methodology and results, and [COMPATIBILITY.md](COMPATIBILITY.md) for desktop
 and framework test coverage.
 
 End-user settings and persistent data behavior are documented in

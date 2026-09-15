@@ -137,7 +137,7 @@ sudo ./install.sh
 ./rebuild_all.sh
 ```
 
-完整的构建、框架安装、基准测试和发行验收命令见：
+构建与框架安装说明、基准测试结果和兼容性信息见：
 
 - [BUILD.md](BUILD.md)
 - [配置说明](CONFIGURATION.CN.md)

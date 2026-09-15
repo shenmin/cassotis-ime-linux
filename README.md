@@ -171,8 +171,8 @@ not both desktop daemons.
 ./rebuild_all.sh
 ```
 
-Detailed build, framework-install, benchmark, and release-validation commands
-are documented in:
+Build and framework-install instructions, benchmark results, and compatibility
+information are documented in:
 
 - [BUILD.md](BUILD.md)
 - [CONFIGURATION.md](CONFIGURATION.md)

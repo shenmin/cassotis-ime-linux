@@ -141,10 +141,5 @@ Inspect a final database without starting an input framework:
 
 
 
-Run frozen candidate parity:
-
-
-
-Run the full native quality benchmark and validate its case counts/invariants:
-
-
+See [benchmark results](../BENCHMARK.md) / [简体中文](../BENCHMARK.CN.md)
+for the published quality measurements and evaluation methodology.

@@ -62,13 +62,15 @@ application context cannot silently influence the frozen aggregate result.
 
 ## Full Linux Benchmark
 
+Evaluation runs natively on Linux against the same final dictionary and frozen
+case sets used by the Windows project:
+
 - 16,300 long-sentence cases
 - 65,000 short-word cases without context
 - The same 65,000 short-word cases with their frozen left context
 
-Build and run it directly:
-
-
+This document publishes the methodology and aggregate results. Evaluation
+tools, corpora, and per-case reports are not distributed with the project.
 
 The long-sentence accuracy pass uses deterministic work limits, single-threaded
 ONNX inference, and accepts a completed Transformer decision without a
@@ -271,6 +273,12 @@ timings exclude service startup, approximately 2.4-2.5 seconds and 1.4 seconds
 respectively, and do not imply that the OS file cache was dropped. Final
 release packages must additionally pass the complete gate from their exact
 source revision, including both input frameworks and package validation.
+
+Per-case diagnostic reports are recorded after each sample's timed work.
+They record the static and final
+suggestions, request/accept/apply decisions, hits, saved keys and timing phases.
+It is diagnostic output, not an input to candidate selection, and is retained
+with validation reports rather than shipped in binary packages.
 
 Full long-completion qualification uses all 16,300 cases. With the completion
 deadline disabled, the same-input comparison is:
@@ -526,13 +534,11 @@ passed all 132 FPCUnit tests. Host-specific latency must not be interpreted as
 a direct implementation-speed comparison between different machines.
 
 The complete one-key-completion measurement uses the same omitted-four-
-syllable protocol as Windows and includes both static and neural completion:
+syllable protocol as Windows and includes both static and neural completion.
 
-
-
-The fourth argument applies the same 40 ms local-result acceptance limit as the
-production host and the Windows benchmark; the fifth prints progress every 500
-cases. The runner performs the same post-sample, read-only oracle pass as the
+The measurement applies the same 40 ms local-result acceptance limit as the
+production host and the Windows benchmark. It performs the same post-sample,
+read-only oracle pass as the
 Windows benchmark so its cache-warming order is comparable without changing
 the timed production result.
 
@@ -548,6 +554,14 @@ disabled, while its production track accepts fewer background results because
 inference crosses the 40 ms boundary more often. The gate therefore preserves
 the production timeout and records the measured difference instead of raising
 the timeout to manufacture equal counts.
+
+This full production-mode track is intentionally governed by quality and
+latency ranges rather than an exact completion signature. Host scheduling can
+change whether a background result crosses the 40 ms boundary and can then
+change the cache state seen by a later case. The separate 500-case deterministic
+The deterministic neural check disables both neural wall-clock cutoffs, isolates
+the neural fallback lifecycle, and requires the same exact
+`DCB3F73CD5277B97` signature on x86_64 and aarch64.
 
 ## Frozen v1.18.0 Port Results
 
@@ -608,19 +622,12 @@ growth. Both runs passed engine-restart recovery.
 
 ## Complete Release Gate
 
-First create a source-parity report on a machine with the Windows and lexicon
-checkouts:
+Release qualification combines source/data parity, native unit and integration
+tests, the IBus/Fcitx 5 platform matrix, corpus-scale quality and latency
+measurements, and package checks. Results are retained with the package
+checksums for each release.
 
-
-
-Then run the Linux release gate inside the target desktop session:
-
-
-
-The resulting `release-validation.json`, platform matrix, logs, benchmark
-files, package checksums, and packages form one auditable release record.
-
-The checked-in x86_64 and aarch64 baselines are release floors, not targets to
+The x86_64 and aarch64 acceptance baselines are release floors, not targets to
 train against. They require complete case counts, bounded mean/P95/maximum
 latency and peak memory, an exact short-word failure signature, the exact
 deterministic 500-case neural-completion signature, aggregate neural
