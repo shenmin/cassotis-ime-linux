@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-09-16
+
+- Updated the engine and fresh simplified/traditional dictionaries to the
+  Cassotis IME and Cassotis Lexicon v1.26.1 baseline.
+- Added joint local sentence repair with bilateral context verification,
+  retaining existing candidates when model or dictionary evidence is insufficient.
+- Preserved corrected text through one-key completion and added bounded
+  background prefetch with exact request identity checks.
+- Improved incremental retroflex-initial handling and exact-component ordering;
+  fixed Ziguang shuangpin initial/final boundaries.
+- Used OpenCC for user-word display across simplified/traditional modes while
+  keeping learning, frequency and deletion tied to the original word.
+- Applied consistent quantized inference precision to joint repair heads on
+  x86 CPUs without VNNI. Models still load and warm up asynchronously, and
+  ordinary input does not wait for neural initialization.
+
 ## 0.7.0 - 2026-09-11
 
 - Updated the engine and dictionaries to Cassotis IME and Cassotis Lexicon

@@ -7,7 +7,8 @@ unit nc_local_repair_host;
 interface
 
 uses
-    SysUtils, Classes, SyncObjs, Generics.Collections, Dynlibs;
+    SysUtils, Classes, SyncObjs, Generics.Collections, Dynlibs,
+    nc_dictionary_intf, nc_local_repair_guard, nc_joint_repair_host;
 
 type
     TncLocalRepairHost = class;
@@ -62,6 +63,7 @@ type
         m_profile_enabled: Boolean;
         m_profile_frequency, m_profile_ticks: Int64;
         m_profile_calls, m_profile_runs: Integer;
+        m_joint: TncJointRepairChooser;
         procedure execute_worker;
         function load_model: Boolean;
         function align(const query_text, draft_text: string;
@@ -79,11 +81,70 @@ type
         function ready: Boolean;
         function allows_no_context_refinement: Boolean;
         function last_error: string;
+        function joint_ready: Boolean;
+        function try_finalize(const dictionary: TncDictionaryProvider;
+            const query_text, draft, path, current, second, aligned_pinyin: string;
+            const document_key, preceding_text: string;
+            out selected: TncValidatedRepairPath): Boolean;
     end;
 
 implementation
 
-uses Math, fpjson, jsonparser;
+uses Math, fpjson, jsonparser, nc_types;
+
+function TncLocalRepairHost.joint_ready: Boolean;
+begin
+    m_state.Acquire;
+    try Result := m_loaded and (m_joint <> nil);
+    finally m_state.Release; end;
+end;
+
+function TncLocalRepairHost.try_finalize(const dictionary: TncDictionaryProvider;
+    const query_text, draft, path, current, second, aligned_pinyin: string;
+    const document_key, preceding_text: string;
+    out selected: TncValidatedRepairPath): Boolean;
+var
+    value: TncJointRepairResult;
+    generation, started: UInt64;
+    signature: string;
+begin
+    Result := False;
+    selected := Default(TncValidatedRepairPath);
+    if (preceding_text <> '') or not joint_ready or
+        (Length(draft) < 6) or (Length(draft) > 40) or
+        (Length(current) <> Length(draft)) then Exit;
+    signature := document_key + #0;
+    m_state.Acquire;
+    try
+        if (m_signature <> signature) or (m_context_text <> '') or
+            (m_ready_generation <> m_generation) then Exit;
+        generation := m_generation;
+    finally m_state.Release; end;
+    if not m_run_lock.TryEnter then Exit;
+    try
+        m_state.Acquire;
+        try
+            if (generation <> m_generation) or (m_signature <> signature) then Exit;
+        finally m_state.Release; end;
+        started := GetTickCount64;
+        try
+            value := m_joint.run(dictionary, draft, path, current, second,
+                aligned_pinyin.Split([#3], TStringSplitOptions.ExcludeEmpty));
+        except
+            // Never apply an unvalidated or stale correction.
+            Exit;
+        end;
+        if (m_timeout > 0) and (GetTickCount64 - started > m_timeout) then Exit;
+        if (value.audited_selected <= 0) or not value.path.exact_path or
+            (value.path.text = current) or (value.path.aligned_pinyin <> aligned_pinyin) then Exit;
+        m_state.Acquire;
+        try
+            if (generation <> m_generation) or (m_signature <> signature) then Exit;
+            selected := value.path;
+            Result := True;
+        finally m_state.Release; end;
+    finally m_run_lock.Release; end;
+end;
 
 function join_path(const base, name: string): string;
 begin
@@ -161,6 +222,7 @@ begin
             '[INFO] local-repair profile calls=%d runs=%d native_total_ms=%.3f',
             [m_profile_calls, m_profile_runs, m_profile_ticks * 1000.0 / m_profile_frequency])));
     // The worker has joined; this also handles partially constructed objects.
+    m_joint.Free;
     if (m_handle <> nil) and Assigned(m_destroy) then m_destroy(m_handle);
     if m_module <> 0 then FreeLibrary(m_module);
     m_vocab.Free;
@@ -171,12 +233,24 @@ begin
 end;
 
 function TncLocalRepairHost.load_model: Boolean;
+const
+    // Compare binary64 policy values, not FPC's extended-precision literal.
+    joint_word_ratio: Double = 0.01;
+type
+    TAttachJoint = function(handle: Pointer; head, audit: PAnsiChar;
+        error: PAnsiChar; capacity: Integer): Integer; cdecl;
 var
     manifest, vocabulary, constraints, values: TJSONObject;
     path, key: string;
     array_value: TJSONArray;
     char_id, py_id, index, item_index, refinement_passes: Integer;
     create_model: TCreateModel;
+    joint_requested, score_agreement: Boolean;
+    query_file: string;
+    attach_joint: TAttachJoint;
+    joint_query: TncJointRepairChooser.TQuery;
+    joint_score: TncJointRepairChooser.TScore;
+    joint_audit: TncJointRepairChooser.TAudit;
     error: array[0..2047] of AnsiChar;
     function read_gate(const value: TJSONObject): TGate;
     begin
@@ -212,6 +286,9 @@ begin
         if (refinement_passes < 1) or (refinement_passes > 2) then
             raise Exception.Create('Invalid local repair refinement limit');
         m_refine_no_context := refinement_passes = 2;
+        joint_requested := manifest.Get('joint_bilateral', False) and
+            (GetEnvironmentVariable('CASSOTIS_DISABLE_JOINT_REPAIR') <> '1');
+        score_agreement := manifest.Get('joint_score_agreement', False);
     finally
         manifest.Free;
     end;
@@ -280,12 +357,54 @@ begin
         (not Assigned(m_prepare)) or (not Assigned(m_destroy)) then
         raise Exception.Create('Local repair bridge exports are missing');
     error[0] := #0;
+    query_file := join_path(path, 'query_int8.onnx');
+    if joint_requested and
+        ((not FileExists(join_path(path, 'joint_query_int8.onnx'))) or
+         (not FileExists(join_path(path, 'joint_head_int8.onnx'))) or
+         (not FileExists(join_path(path, 'bilateral_head_int8.onnx'))) or
+         (m_word_ratio <> joint_word_ratio)) then
+    begin
+        joint_requested := False;
+        log_message('[WARN] Joint repair files/policy unavailable; retaining original repair');
+    end;
+    if joint_requested then query_file := join_path(path, 'joint_query_int8.onnx');
     m_handle := create_model(PAnsiChar(UTF8Encode(join_path(path, 'context_int8.onnx'))),
-        PAnsiChar(UTF8Encode(join_path(path, 'query_int8.onnx'))),
+        PAnsiChar(UTF8Encode(query_file)),
         2, @error[0], Length(error));
+    if (m_handle = nil) and joint_requested then
+    begin
+        joint_requested := False;
+        m_handle := create_model(PAnsiChar(UTF8Encode(join_path(path, 'context_int8.onnx'))),
+            PAnsiChar(UTF8Encode(join_path(path, 'query_int8.onnx'))),
+            2, @error[0], Length(error));
+    end;
     Result := m_handle <> nil;
     if not Result then raise Exception.Create(UTF8Encode('Local repair initialization: ' +
         UTF8Decode(UTF8String(PAnsiChar(@error[0])))));
+    if joint_requested then
+    begin
+        attach_joint := TAttachJoint(GetProcedureAddress(m_module, 'cassotis_lr_joint_attach'));
+        joint_query := TncJointRepairChooser.TQuery(GetProcedureAddress(m_module, 'cassotis_lr_joint_query'));
+        joint_score := TncJointRepairChooser.TScore(GetProcedureAddress(m_module, 'cassotis_lr_joint_score'));
+        joint_audit := TncJointRepairChooser.TAudit(GetProcedureAddress(m_module, 'cassotis_lr_joint_audit'));
+        try
+            if not Assigned(attach_joint) or not Assigned(joint_query) or
+                not Assigned(joint_score) or not Assigned(joint_audit) then
+                raise Exception.Create('Joint repair exports are missing');
+            if attach_joint(m_handle,
+                PAnsiChar(UTF8Encode(join_path(path, 'joint_head_int8.onnx'))),
+                PAnsiChar(UTF8Encode(join_path(path, 'bilateral_head_int8.onnx'))),
+                @error[0], Length(error)) <> 1 then
+                raise Exception.Create(AnsiString(PAnsiChar(@error[0])));
+            m_joint := TncJointRepairChooser.Create(m_base, m_handle,
+                joint_query, joint_score, joint_audit, score_agreement);
+            log_message('[INFO] Joint repair INT8 chooser and bilateral audit ready');
+        except
+            on problem: Exception do
+                log_message('[WARN] Joint repair unavailable; retaining original repair: ' +
+                    UTF8Decode(problem.Message));
+        end;
+    end;
 end;
 
 procedure TncLocalRepairHost.execute_worker;

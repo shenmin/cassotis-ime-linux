@@ -28,8 +28,37 @@ function nc_is_pinyin_spelling_helper_compatible(const initial_value: string;
     const final_value: string): Boolean;
 function nc_is_canonical_pinyin_syllable(const value: string): Boolean;
 function nc_normalize_umlaut_spelling(const value: string): string;
+procedure nc_merge_abbreviated_retroflex_initials(var syllables: TncPinyinParseResult);
 
 implementation
+
+procedure nc_merge_abbreviated_retroflex_initials(var syllables: TncPinyinParseResult);
+var
+    read_idx, write_idx: Integer;
+begin
+    read_idx := 0;
+    write_idx := 0;
+    while read_idx < Length(syllables) do
+    begin
+        syllables[write_idx] := syllables[read_idx];
+        // Only adjacent unresolved initials join; explicit boundaries survive.
+        if (read_idx < High(syllables)) and
+            ((syllables[read_idx].text = 'z') or
+             (syllables[read_idx].text = 'c') or
+             (syllables[read_idx].text = 's')) and
+            (syllables[read_idx + 1].text = 'h') and
+            (syllables[read_idx].start_index + syllables[read_idx].length =
+             syllables[read_idx + 1].start_index) then
+        begin
+            syllables[write_idx].text := syllables[read_idx].text + 'h';
+            Inc(syllables[write_idx].length, syllables[read_idx + 1].length);
+            Inc(read_idx);
+        end;
+        Inc(read_idx);
+        Inc(write_idx);
+    end;
+    SetLength(syllables, write_idx);
+end;
 
 type
     TncIntegerArray = array of Integer;

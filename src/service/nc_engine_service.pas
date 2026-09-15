@@ -177,6 +177,8 @@ begin
 
     provider := TncSqliteDictionary.Create(active_dictionary_path,
         user_dictionary_path);
+    // Opening can prune legacy rows, so select their display script first.
+    provider.set_user_dictionary_variant(FState.dictionary_variant);
     if not provider.Open then
     begin
         provider.Free;
@@ -728,6 +730,7 @@ var
     raw_key_state: TncKeyState;
     raw_commit_text: string;
     engine_commit_text: string;
+    prefetch_task: TncLocalCompletionTask;
 begin
     nc_initialize_engine_result(Result);
     Result.error_code := PrepareContext(context_id, generation_id, context);
@@ -866,6 +869,14 @@ begin
                 Result.commit_text := engine_commit_text;
         end;
         SyncStateFromEngine;
+        if (FLocalCompletionHost <> nil) and FLocalCompletionHost.Ready and
+            FEngine.get_prefetch_long_neural_completion_request(prefetch_task.request) then
+        begin
+            prefetch_task.context_id := context.Id;
+            prefetch_task.generation_id := context.Generation;
+            prefetch_task.prefetch_only := True;
+            FLocalCompletionHost.Enqueue(prefetch_task);
+        end;
         PopulateResult(context, Result);
         Result.async_pending := QueueLongNeuralCompletion(context);
     except

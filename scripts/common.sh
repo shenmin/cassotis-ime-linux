@@ -450,6 +450,7 @@ cassotis_stage_neural_runtime() {
             "$destination_dir/local_completion/$file_name"
     done
     for file_name in context_int8.onnx query_int8.onnx readings.json \
+                     joint_query_int8.onnx joint_head_int8.onnx bilateral_head_int8.onnx \
                      vocab.json runtime_manifest.json; do
         install -m 0644 "$source_dir/local_repair/$file_name" \
             "$destination_dir/local_repair/$file_name"
@@ -489,6 +490,7 @@ cassotis_atomic_install_neural_runtime() {
             "$destination_dir/local_completion/$file_name" 0644
     done
     for file_name in context_int8.onnx query_int8.onnx readings.json \
+                     joint_query_int8.onnx joint_head_int8.onnx bilateral_head_int8.onnx \
                      vocab.json runtime_manifest.json; do
         cassotis_atomic_install "$source_dir/local_repair/$file_name" \
             "$destination_dir/local_repair/$file_name" 0644
@@ -516,6 +518,9 @@ cassotis_remove_neural_runtime() {
         "$destination_dir/local_completion/model_manifest.json" \
         "$destination_dir/local_repair/context_int8.onnx" \
         "$destination_dir/local_repair/query_int8.onnx" \
+        "$destination_dir/local_repair/joint_query_int8.onnx" \
+        "$destination_dir/local_repair/joint_head_int8.onnx" \
+        "$destination_dir/local_repair/bilateral_head_int8.onnx" \
         "$destination_dir/local_repair/readings.json" \
         "$destination_dir/local_repair/vocab.json" \
         "$destination_dir/local_repair/runtime_manifest.json"

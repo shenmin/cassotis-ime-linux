@@ -12,7 +12,7 @@ uses
     SyncObjs,
     Generics.Collections,
     Dynlibs,
-    nc_local_repair_host,
+    nc_local_repair_host, nc_dictionary_intf, nc_local_repair_guard,
     nc_engine_intf;
 
 const
@@ -57,7 +57,7 @@ type
     end;
 
     TncPinyinTransformerHostReranker = class(TInterfacedObject,
-        IncLongNeuralReranker, IncLongLocalRepair, IncLongLocalRepairPolicy)
+        IncLongNeuralReranker, IncLongLocalRepair, IncLongLocalRepairPolicy, IncLongJointRepair)
     private type
         TncPtCreate = function(const model_path: PAnsiChar;
             const intra_threads: Integer; const error_text: PAnsiChar;
@@ -178,6 +178,11 @@ type
             out selected_index: Integer): Boolean;
         function ready: Boolean;
         function local_repair_ready: Boolean;
+        function joint_ready: Boolean;
+        function try_finalize(const dictionary: TncDictionaryProvider;
+            const query_text, draft, path, current, second, aligned_pinyin: string;
+            const document_key, preceding_text: string;
+            out selected: TncValidatedRepairPath): Boolean;
         function allows_no_context_refinement: Boolean;
         procedure set_document_context(const document_key, preceding_text: string);
         function try_repair(const query_text, draft_text: string;
@@ -2121,6 +2126,23 @@ end;
 function TncPinyinTransformerHostReranker.local_repair_ready: Boolean;
 begin
     Result := (m_local_repair <> nil) and m_local_repair.ready;
+end;
+
+function TncPinyinTransformerHostReranker.joint_ready: Boolean;
+begin
+    Result := (m_local_repair <> nil) and m_local_repair.joint_ready;
+end;
+
+function TncPinyinTransformerHostReranker.try_finalize(
+    const dictionary: TncDictionaryProvider;
+    const query_text, draft, path, current, second, aligned_pinyin: string;
+    const document_key, preceding_text: string;
+    out selected: TncValidatedRepairPath): Boolean;
+begin
+    selected := Default(TncValidatedRepairPath);
+    Result := (m_local_repair <> nil) and m_local_repair.try_finalize(dictionary,
+        query_text, draft, path, current, second, aligned_pinyin,
+        document_key, preceding_text, selected);
 end;
 
 function TncPinyinTransformerHostReranker.try_repair(

@@ -525,8 +525,20 @@ end;
 function transform_ziguang_code(const source: string): string;
 var
     value: string;
+    initial_code: string;
+    initial_length: Integer;
 begin
     value := LowerCase(source);
+    // Preserve the original initial (including the zero-initial o prefix).
+    // A generated final key must never be reinterpreted as part of sh/ch/zh.
+    initial_length := 1;
+    if (Copy(value, 1, 2) = 'sh') or (Copy(value, 1, 2) = 'ch') or
+        (Copy(value, 1, 2) = 'zh') then
+    begin
+        initial_length := 2;
+    end;
+    initial_code := transform_ziguang_initial(Copy(value, 1, initial_length));
+    value := Copy(value, initial_length + 1, MaxInt);
     if ends_with(value, 'uai') then
         value := replace_suffix(value, 'uai', 'y')
     else if ends_with(value, 'iang') then
@@ -584,7 +596,7 @@ begin
     else if ends_with(value, 'in') then
         value := replace_suffix(value, 'in', 'y');
 
-    Result := LowerCase(transform_ziguang_initial(value));
+    Result := initial_code + value;
 end;
 
 function transform_pinyinjiajia_initial(const value: string): string;

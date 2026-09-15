@@ -21,13 +21,13 @@ corresponding model-training data.
 
 The current Linux engine is reviewed against:
 
-- Cassotis IME v1.25.0 (`d72f2d024f257f8699851da276dad8dbdc0371c7`)
-- Cassotis Lexicon v1.25.0 (`cd8aed88e86ff0377cc6accd1881d93e25253d50`)
+- Cassotis IME v1.26.1 (`0b8203c2372c1e16e0a3cf4a49d35b219b8f0135`)
+- Cassotis Lexicon v1.26.1 (`2d172f2804b9acc8fe60b47cab7c863010e00b98`)
 - Simplified dictionary schema 24, SHA-256
-  `ddec15f2015c3182d971e90656a568d9ec434794dadcf822f3abd77ff0d91acd`
+  `92eef697be82951946fc67563dd0d01c7b42ab032446781666b99f6d7d9cb244`
 - Traditional dictionary schema 24, SHA-256
-  `f310600f824c062c875b73e19a982f0e129730907d10ef20f0455c4de19bb6a3`
-- Simplified/traditional base entries: 213,290 / 216,505
+  `bbec07c92d58024d6c63bf3a3acdfd514b1b6e35b7084a5b7cf97e091d1c3fbf`
+- Simplified/traditional base entries: 213,359 / 216,574
 - Simplified/traditional completion competition rows: 42,453 / 42,448
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379
 - Simplified long-completion tables: 35,423 visible paths and 97,589 total
@@ -41,11 +41,14 @@ behavior differences.
 
 
 The native runtime also has an exact integer-arithmetic regression for
-quantized inference. All six model sessions enable ONNX Runtime's x86
+quantized inference. All eight model sessions enable ONNX Runtime's x86
 quantization precision mode to avoid saturating intermediate products on CPUs
 without VNNI. This does not change the model files or quantization scales.
 The local-repair ABI tests additionally exercise phonetic output constraints,
 finite confidence values, and context-cache reuse, replacement and clearing.
+Joint-head loading assigns distinct names to shared quantized constants to
+avoid runtime conversion collisions. Tensor bytes, operators and packaged
+model files remain unchanged.
 
 Cold-start validation deliberately blocks native model initialization while
 testing the production IPC service: first-key candidates, selection/commit,
@@ -124,10 +127,11 @@ the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
 
-## v1.25.0 Port Results
+## Historical v1.25.0 Port Results
 
 Qualification on 2026-09-10/11 uses the exact v1.25.0 sources, models,
-newly built dictionaries and unchanged frozen corpora listed above. The
+the v1.25.0 dictionaries and unchanged frozen corpora. These are historical
+v0.7.0 measurements, not results for the current v0.8.0 input hashes. The
 Windows reference is compiled with Delphi from the exact tag and replayed
 against the same database and cases, without user learning. Its long-accuracy
 totals reproduce the published Windows table:
@@ -348,7 +352,7 @@ keys, along with prompt/error, stability, request-chain and latency checks.
 Static-result challenges increase the number of model requests; pipeline
 throughput is not capped merely to reproduce older request counts.
 
-All six model sessions avoid retaining peak-sized CPU arenas. Free glibc pages
+All eight model sessions avoid retaining peak-sized CPU arenas. Free glibc pages
 are returned after model initialization and destruction, never on each key.
 The complete aarch64 allocation-policy recheck preserved all 16,300 first
 candidate texts and target ranks and reached 960,956 KiB peak HWM, with

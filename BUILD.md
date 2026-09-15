@@ -3,13 +3,13 @@
 ## Requirements
 
 Build on Linux x86_64 or aarch64 with Free Pascal 3.2.2, C/C++20 compilers,
-Bash, SQLite 3, Python 3/PyGObject, GTK 3, and the IBus and Fcitx 5 development
+Bash, SQLite 3, OpenCC, Python 3/PyGObject, GTK 3, and the IBus and Fcitx 5 development
 headers. Both adapters are built; only one framework needs to be active.
 
 On Ubuntu/Debian:
 
 ```bash
-sudo apt install fpc gcc g++ pkg-config sqlite3 libsqlite3-dev \
+sudo apt install fpc gcc g++ pkg-config sqlite3 libsqlite3-dev libopencc-dev \
   libglib2.0-dev libibus-1.0-dev fcitx5 fcitx5-modules \
   libfcitx5core-dev libfcitx5config-dev python3 python3-gi \
   gir1.2-gtk-3.0 desktop-file-utils
@@ -21,6 +21,8 @@ Set `FPC=/path/to/fpc` for a compiler outside PATH. Set
 CMake, CUDA, a GPU, and a system ONNX Runtime installation are not required.
 The repository includes the CPU runtime and model assets; SHA-256 checks in
 `data/runtime-assets.sha256` are verified before compilation.
+OpenCC's shared library and `s2t.json`/`t2s.json` conversion data are required
+for displaying shared learned words in the selected simplified/traditional form.
 
 ## Build
 

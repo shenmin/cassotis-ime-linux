@@ -13,7 +13,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            fpc gcc g++ pkg-config sqlite3 libsqlite3-dev \
+            fpc gcc g++ pkg-config sqlite3 libsqlite3-dev libopencc-dev \
             libglib2.0-dev libibus-1.0-dev \
             fcitx5 fcitx5-modules libfcitx5core-dev libfcitx5config-dev \
             python3 python3-gi gir1.2-gtk-3.0

@@ -9,6 +9,8 @@ interface
 uses nc_dictionary_intf;
 
 type
+    TncLocalRepairEntryLookup = function(const pinyin, text: string;
+        out weight: Integer; out is_user: Boolean): Boolean of object;
     TncValidatedRepairPath = record
         text, aligned_pinyin, segment_path: string;
         // Lexical/alignment validity, not a guarantee of sentence correctness.
@@ -18,13 +20,16 @@ type
 
 function guard_local_repair_words(const dictionary: TncDictionaryProvider;
     const draft, proposal, encoded_path, aligned_pinyin: string;
-    const minimum_word_ratio: Double): string;
+    const minimum_word_ratio: Double;
+    const entry_lookup: TncLocalRepairEntryLookup = nil): string;
 
 function valid_local_repair_refinement(const original, first, proposal: string): Boolean;
 
 function validate_local_repair_path(const dictionary: TncDictionaryProvider;
     const draft, proposal, encoded_path, aligned_pinyin: string;
-    const minimum_word_ratio: Double; const allow_resegmentation: Boolean): TncValidatedRepairPath;
+    const minimum_word_ratio: Double; const allow_resegmentation: Boolean;
+    const build_path: Boolean = True;
+    const entry_lookup: TncLocalRepairEntryLookup = nil): TncValidatedRepairPath;
 
 implementation
 
@@ -32,7 +37,9 @@ uses SysUtils, Math, Generics.Collections, nc_types;
 
 function validate_local_repair_path(const dictionary: TncDictionaryProvider;
     const draft, proposal, encoded_path, aligned_pinyin: string;
-    const minimum_word_ratio: Double; const allow_resegmentation: Boolean): TncValidatedRepairPath;
+    const minimum_word_ratio: Double; const allow_resegmentation: Boolean;
+    const build_path: Boolean;
+    const entry_lookup: TncLocalRepairEntryLookup): TncValidatedRepairPath;
 type
     TWord = record
         first, finish, weight: Integer;
@@ -82,6 +89,11 @@ var
         Result.text := text;
         Result.weight := Low(Integer);
         key := query(first, finish);
+        if Assigned(entry_lookup) then
+        begin
+            Result.found := entry_lookup(key, text, Result.weight, Result.user);
+            Exit;
+        end;
         if not cache.TryGetValue(key, items) then
         begin
             dictionary.lookup_isolated_exact_component(key, items);
@@ -143,7 +155,7 @@ var
 begin
     Result := Default(TncValidatedRepairPath);
     Result.text := guard_local_repair_words(dictionary, draft, proposal,
-        encoded_path, aligned_pinyin, minimum_word_ratio);
+        encoded_path, aligned_pinyin, minimum_word_ratio, entry_lookup);
     guarded := Result.text;
     syllables := aligned_pinyin.Split([#3], TStringSplitOptions.ExcludeEmpty);
     if (dictionary = nil) or (Length(draft) <> Length(proposal)) or
@@ -153,11 +165,15 @@ begin
         (Length(draft) > 40) or (encoded_path = '') or
         (StringReplace(encoded_path, #3, '', [rfReplaceAll]) <> draft) or
         not valid_local_repair_refinement(draft, draft, proposal) then Exit;
+    // Text-only callers need boundary recovery only when the word guard reverted
+    // something. No path or LM fields are produced on this branch in either case.
+    if not build_path and ((not allow_resegmentation) or (guarded = proposal)) then Exit;
     parts := encoded_path.Split([#3], TStringSplitOptions.ExcludeEmpty);
     SetLength(words, Length(parts));
     SetLength(replacements, Length(parts));
     SetLength(consumed, Length(parts));
-    cache := TDictionary<string, TncCandidateList>.Create;
+    cache := nil;
+    if not Assigned(entry_lookup) then cache := TDictionary<string, TncCandidateList>.Create;
     try
         offset := 0;
         for i := 0 to High(parts) do
@@ -267,6 +283,7 @@ begin
 
         // Rebuild only changed neighborhoods; untouched exact words retain their
         // original boundaries. The path and text are validated as one result.
+        if not build_path then Exit;
         windows := nil;
         for i := 0 to High(words) do
         begin
@@ -372,14 +389,15 @@ end;
 
 function guard_local_repair_words(const dictionary: TncDictionaryProvider;
     const draft, proposal, encoded_path, aligned_pinyin: string;
-    const minimum_word_ratio: Double): string;
+    const minimum_word_ratio: Double;
+    const entry_lookup: TncLocalRepairEntryLookup): string;
 var
     words, syllables: TArray<string>;
     word, replacement, query: string;
     items: TncCandidateList;
     item: TncCandidate;
     position, index, old_weight, new_weight, weight, spans: Integer;
-    old_found, new_found, user_word, changed, previous_changed: Boolean;
+    old_found, new_found, user_word, changed, previous_changed, ignored_user: Boolean;
 begin
     Result := draft;
     if (dictionary = nil) or (Length(draft) <> Length(proposal)) or
@@ -405,22 +423,31 @@ begin
             user_word := False;
             old_weight := 0;
             new_weight := Low(Integer);
-            dictionary.lookup_isolated_exact_component(query, items);
-            for item in items do
+            if Assigned(entry_lookup) then
             begin
-                if item.comment <> '' then Continue;
-                weight := item.score;
-                if item.has_dict_weight then weight := item.dict_weight;
-                if item.text = word then
+                old_found := entry_lookup(query, word, old_weight, user_word);
+                old_weight := Max(0, old_weight);
+                new_found := entry_lookup(query, replacement, new_weight, ignored_user);
+            end
+            else
+            begin
+                dictionary.lookup_isolated_exact_component(query, items);
+                for item in items do
                 begin
-                    old_found := True;
-                    old_weight := Max(old_weight, weight);
-                    user_word := user_word or (item.source = cs_user);
-                end;
-                if item.text = replacement then
-                begin
-                    new_found := True;
-                    new_weight := Max(new_weight, weight);
+                    if item.comment <> '' then Continue;
+                    weight := item.score;
+                    if item.has_dict_weight then weight := item.dict_weight;
+                    if item.text = word then
+                    begin
+                        old_found := True;
+                        old_weight := Max(old_weight, weight);
+                        user_word := user_word or (item.source = cs_user);
+                    end;
+                    if item.text = replacement then
+                    begin
+                        new_found := True;
+                        new_weight := Max(new_weight, weight);
+                    end;
                 end;
             end;
             // An existing exact word is an anchor, not a bag of homophones.

@@ -23,7 +23,21 @@ type
     TncLocalCompletionTask = record
         context_id: QWord;
         generation_id: QWord;
+        prefetch_only: Boolean;
         request: TncLongNeuralCompletionRequest;
+    end;
+
+    TncLocalCompletionPrefetchCache = record
+    private
+        FValid, FAccepted: Boolean;
+        FTask: TncLocalCompletionTask;
+        FResult: TncLongNeuralCompletionResult;
+    public
+        procedure Clear;
+        procedure Remember(const task: TncLocalCompletionTask;
+            const accepted: Boolean; const value: TncLongNeuralCompletionResult);
+        function Take(const task: TncLocalCompletionTask; out accepted: Boolean;
+            out value: TncLongNeuralCompletionResult): Boolean;
     end;
 
     TncLocalCompletionFinished = record
@@ -105,6 +119,7 @@ type
         FWorker: TncLocalCompletionWorker;
         FPendingTask: TncLocalCompletionTask;
         FHasPendingTask: Boolean;
+        FPrefetchCache: TncLocalCompletionPrefetchCache;
         FFinished: TncLocalCompletionFinished;
         FHasFinished: Boolean;
         FModule: TLibHandle;
@@ -164,6 +179,52 @@ const
 function join_path(const base_path, child_path: string): string;
 begin
     Result := IncludeTrailingPathDelimiter(base_path) + child_path;
+end;
+
+procedure TncLocalCompletionPrefetchCache.Clear;
+begin
+    FValid := False;
+    FAccepted := False;
+    FTask := Default(TncLocalCompletionTask);
+    FResult := Default(TncLongNeuralCompletionResult);
+end;
+
+procedure TncLocalCompletionPrefetchCache.Remember(const task: TncLocalCompletionTask;
+    const accepted: Boolean; const value: TncLongNeuralCompletionResult);
+begin
+    Clear;
+    if not task.prefetch_only then Exit;
+    FTask := task;
+    FResult := value;
+    FAccepted := accepted;
+    FValid := True;
+end;
+
+function TncLocalCompletionPrefetchCache.Take(const task: TncLocalCompletionTask;
+    out accepted: Boolean; out value: TncLongNeuralCompletionResult): Boolean;
+begin
+    Result := FValid and not task.prefetch_only and
+        (task.context_id = FTask.context_id) and
+        (task.generation_id = FTask.generation_id) and
+        (task.request.query_prefix = FTask.request.query_prefix) and
+        (task.request.query_syllables = FTask.request.query_syllables) and
+        (task.request.context_text = FTask.request.context_text) and
+        (task.request.phonetic_only = FTask.request.phonetic_only) and
+        (task.request.top1_text = FTask.request.top1_text) and
+        (task.request.top1_path = FTask.request.top1_path) and
+        (task.request.top1_anchor_path = FTask.request.top1_anchor_path) and
+        (task.request.top2_text = FTask.request.top2_text) and
+        (task.request.top2_path = FTask.request.top2_path) and
+        (task.request.top2_anchor_path = FTask.request.top2_anchor_path);
+    accepted := False;
+    value := Default(TncLongNeuralCompletionResult);
+    if Result then
+    begin
+        accepted := FAccepted;
+        value := FResult;
+    end;
+    // One worker-owned slot, consumed at most once by the matching real request.
+    Clear;
 end;
 
 function read_utf8_file(const file_name: string): UTF8String;
@@ -683,7 +744,14 @@ begin
             if not PopTask(task) then
                 Continue;
         end;
-        accepted := RunTask(task, completion_result);
+        if not FPrefetchCache.Take(task, accepted, completion_result) then
+            accepted := RunTask(task, completion_result);
+        if task.prefetch_only then
+        begin
+            FPrefetchCache.Remember(task, accepted, completion_result);
+            if not Ready then Break;
+            Continue;
+        end;
         StoreFinished(task, accepted, completion_result);
         if not Ready then
             Break;

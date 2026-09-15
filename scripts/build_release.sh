@@ -164,7 +164,7 @@ Priority: optional
 Architecture: $deb_arch
 Maintainer: Shen Min <shenmin@gmail.com>
 Installed-Size: $installed_size
-Depends: libc6, libgcc-s1, libstdc++6, libsqlite3-0, libglib2.0-0t64 | libglib2.0-0, libibus-1.0-5, libfcitx5core7, libfcitx5config6, libfcitx5utils2, python3, python3-gi, gir1.2-gtk-3.0
+Depends: libc6, libgcc-s1, libstdc++6, libsqlite3-0, libopencc1.1 | libopencc2, libopencc-data, libglib2.0-0t64 | libglib2.0-0, libibus-1.0-5, libfcitx5core7, libfcitx5config6, libfcitx5utils2, python3, python3-gi, gir1.2-gtk-3.0
 Recommends: ibus | fcitx5
 Homepage: https://github.com/shenmin/cassotis-ime-linux
 Description: Cassotis Chinese input method for IBus and Fcitx 5

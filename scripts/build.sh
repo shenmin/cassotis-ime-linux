@@ -95,6 +95,9 @@ install -m 0644 \
 install -m 0644 \
     "$cassotis_root/data/models/local_repair/context_int8.onnx" \
     "$cassotis_root/data/models/local_repair/query_int8.onnx" \
+    "$cassotis_root/data/models/local_repair/joint_query_int8.onnx" \
+    "$cassotis_root/data/models/local_repair/joint_head_int8.onnx" \
+    "$cassotis_root/data/models/local_repair/bilateral_head_int8.onnx" \
     "$cassotis_root/data/models/local_repair/readings.json" \
     "$cassotis_root/data/models/local_repair/vocab.json" \
     "$cassotis_root/data/models/local_repair/runtime_manifest.json" \

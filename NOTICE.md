@@ -13,7 +13,7 @@ project. The attribution snapshot bundled with this release is available in
 [docs/LEXICON_ATTRIBUTION.md](docs/LEXICON_ATTRIBUTION.md).
 
 The program links to platform libraries supplied by the target Linux
-distribution, including Free Pascal runtime components, SQLite, GLib, IBus,
+distribution, including Free Pascal runtime components, SQLite, OpenCC, GLib, IBus,
 Fcitx 5, GTK, and PyGObject. Their respective licenses remain unchanged.
 
 Binary builds bundle the official CPU distribution of ONNX Runtime 1.20.1

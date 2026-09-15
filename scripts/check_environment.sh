@@ -38,6 +38,12 @@ else
     cassotis_die "SQLite runtime library libsqlite3.so.0 was not found"
 fi
 
+if [[ "$sqlite_cache" == *libopencc.so* ]]; then
+    printf 'opencc_runtime=system\n'
+else
+    cassotis_die "OpenCC runtime library was not found; install OpenCC and its conversion data"
+fi
+
 if command -v cmake >/dev/null 2>&1; then
     printf 'cmake=%s\n' "$(command -v cmake)"
 else

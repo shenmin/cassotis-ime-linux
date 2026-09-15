@@ -1,4 +1,17 @@
 namespace {
+struct LocalRepairEncoding {
+    std::array<float, 40 * 768> hidden{};
+    std::array<float, 40 * 768> raw_hidden{};
+    std::array<int64_t, 40> draft{}, pinyin{};
+    std::array<float, 40 * 99> logits{};
+    std::array<int64_t, 40 * 99> readings{};
+    int count{};
+    bool matches(const int64_t* text, const int64_t* py, int n) const {
+        return count == n && std::equal(text, text + n, draft.begin()) &&
+            std::equal(py, py + n, pinyin.begin());
+    }
+};
+struct LocalRepairJoint;
 struct LocalRepairHandle {
     std::unique_ptr<Ort::Session> context_session;
     std::unique_ptr<Ort::Session> query_session;
@@ -7,8 +20,11 @@ struct LocalRepairHandle {
     std::vector<Ort::Value> memory;
     uint64_t document{};
     uint64_t encodings{};
+    std::unique_ptr<LocalRepairJoint> joint;
 };
 }
+
+#include "nc_local_repair_joint_ort.inc"
 
 extern "C" CASSOTIS_EXPORT void* cassotis_lr_create(
     const char* context_path, const char* query_path, int threads,
@@ -51,6 +67,7 @@ extern "C" CASSOTIS_EXPORT int cassotis_lr_run(
             handle.context_ids.size() != static_cast<size_t>(context_count) ||
             !std::equal(handle.context_ids.begin(), handle.context_ids.end(), context)) {
             handle.memory.clear();
+            if (handle.joint) handle.joint->clear();
             handle.context_ids.assign(context, context + context_count);
             handle.document = document;
             const std::array<int64_t, 2> shape{1, context_count};
@@ -76,9 +93,12 @@ extern "C" CASSOTIS_EXPORT int cassotis_lr_run(
                 dimensions.data(), dimensions.size(), info.GetElementType()));
         }
         const char* names[] = {"draft_ids", "pinyin_ids", "keys", "values", "context_mask"};
-        const char* outputs[] = {"best_ids", "margins", "edit_probabilities"};
-        auto results = handle.query_session->Run(Ort::RunOptions{nullptr}, names, inputs.data(), inputs.size(), outputs, 3);
-        for (const auto& tensor : results) {
+        const char* outputs[] = {"best_ids", "margins", "edit_probabilities",
+            "joint_hidden", "joint_scores", "joint_reading_ids"};
+        const bool capture = handle.joint && context_count == 2 && length >= 6;
+        auto results = handle.query_session->Run(Ort::RunOptions{nullptr}, names, inputs.data(), inputs.size(), outputs, capture ? 6 : 3);
+        for (size_t i = 0; i < 3; ++i) {
+            const auto& tensor = results[i];
             if (tensor.GetTensorTypeAndShapeInfo().GetElementCount() != static_cast<size_t>(length)) {
                 throw std::runtime_error("invalid local repair output shape");
             }
@@ -86,6 +106,7 @@ extern "C" CASSOTIS_EXPORT int cassotis_lr_run(
         std::copy_n(results[0].GetTensorData<int64_t>(), length, best);
         std::copy_n(results[1].GetTensorData<float>(), length, margins);
         std::copy_n(results[2].GetTensorData<float>(), length, edits);
+        if (capture) handle.joint->remember(draft, pinyin, length, results);
         return 1;
     } catch (const std::exception& error) {
         SetError(error_text, error_capacity, error.what());
@@ -119,6 +140,7 @@ extern "C" CASSOTIS_EXPORT void cassotis_lr_clear(void* opaque) {
     auto& handle = *static_cast<LocalRepairHandle*>(opaque);
     const std::lock_guard<std::mutex> guard(handle.lock);
     handle.memory.clear();
+    if (handle.joint) handle.joint->clear();
     std::fill(handle.context_ids.begin(), handle.context_ids.end(), 0);
     handle.context_ids.clear();
     handle.document = 0;
