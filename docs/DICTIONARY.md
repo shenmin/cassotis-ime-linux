@@ -145,7 +145,10 @@ installations. User data is never written into a base artifact.
 
 Inspect a final database without starting an input framework:
 
-
+```bash
+sqlite3 -readonly /path/to/dict_sc.db \
+  "SELECT pinyin, text, weight FROM dict_base WHERE pinyin = 'shijie' ORDER BY weight DESC LIMIT 9;"
+```
 
 See [benchmark results](../BENCHMARK.md) / [简体中文](../BENCHMARK.CN.md)
 for the published quality measurements and evaluation methodology.
