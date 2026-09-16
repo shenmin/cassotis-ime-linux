@@ -41,7 +41,7 @@ behavior differences.
 
 
 The native runtime also has an exact integer-arithmetic regression for
-quantized inference. All eight model sessions enable ONNX Runtime's x86
+quantized inference. All inference sessions enable ONNX Runtime's x86
 quantization precision mode to avoid saturating intermediate products on CPUs
 without VNNI. This does not change the model files or quantization scales.
 The local-repair ABI tests additionally exercise phonetic output constraints,
@@ -104,9 +104,10 @@ keys with the Windows reference. Both request four completion inference threads;
 the Linux runtime caps this at the available CPU count (two on the qualification
 VMs).
 Deadline-free accuracy does not replace the production check or change the
-input method's runtime settings. In both tracks the conditional reranker and
-local-repair stage retain their normal configuration; the completion deadline
-argument does not change the separate local-repair timeout.
+input method's runtime settings. Deadline 0 also disables the upstream
+conditional-reranker and local-repair timeout, matching the Windows accuracy
+protocol. The production track retains the normal 30 ms upstream policy and
+50 ms completion deadline.
 
 Since the v1.24.0 port, long-completion timing includes decoding and resolving
 the final visible candidate list before resolving the Tab result, matching the
@@ -126,6 +127,90 @@ latency, and Linux process RSS/high-water marks. Memory events contain only
 the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
+
+## v1.26.1 Qualification In Progress
+
+The first qualification below predates the aarch64 signed-score correction.
+It is retained as diagnostic evidence, not as the final v0.8.0 acceptance.
+FPC 3.2.2 on aarch64 miscompiles ordered comparisons against the minimum
+32-bit integer, causing reachable subspan scores to be treated as unreachable.
+Equivalent sentinel equality checks correct this without changing weights,
+models or search limits. A focused engine regression fails before the fix
+on aarch64 and passes afterwards; x86_64 passes both versions. Full native
+quality and completion tracks are being rerun. The Windows reference and
+nine-key comparison allowance remain unchanged.
+
+### First Qualification, Before The Score Correction
+
+Native qualification on 2026-09-16 uses the v1.26.1 models and dictionary
+hashes above, with unchanged frozen cases. The published Windows reference is
+retained as published, not replaced with a Linux-specific target:
+
+| Platform | Long Top1 / 16,300 | Long Top2 / 16,300 | Short Top1, context off / 65,000 | Short Top1, context on / 65,000 |
+| --- | ---: | ---: | ---: | ---: |
+| Windows v1.26.1 reference | 11,974 | 12,947 | 60,378 | 61,860 |
+| Linux x86_64 | 11,978 | 12,953 | 60,378 | 61,860 |
+| Linux aarch64 | 11,973 | 12,956 | 60,378 | 61,860 |
+
+Both complete short tracks preserve the target ranks and first-candidate
+failure signature: 7,762 rows, SHA-256
+`532743c51052f0fe2fb7b66ea6bc50a8a84f6db025a06fb514cb7cc3b85fa4a4`.
+Context-off Top2/Top5/Top9 are 63,194/64,531/64,652; context-on counts are
+63,549/64,573/64,652. The context-on competition subset remains
+9,596 Top1 and 10,775 Top2 out of 11,728. Long Top5 and Top9 equal Top2.
+These aggregate long results do not imply case-by-case identity across CPUs.
+
+Production-mode query latency is measured separately from long accuracy:
+
+| Architecture | Track | Mean | P50 | P95 | Maximum |
+| --- | --- | ---: | ---: | ---: | ---: |
+| x86_64 | Long sentence | 196.973 ms | 210 ms | 346 ms | 1,075 ms |
+| x86_64 | Short, context off | 10.702 ms | 8 ms | 27 ms | 68 ms |
+| x86_64 | Short, context on | 11.823 ms | 9 ms | 29 ms | 69 ms |
+| aarch64 | Long sentence | 90.257 ms | 84 ms | 166 ms | 672 ms |
+| aarch64 | Short, context off | 6.787 ms | 5 ms | 16 ms | 42 ms |
+| aarch64 | Short, context on | 7.447 ms | 6 ms | 18 ms | 42 ms |
+
+The quality-process peak HWM is 927,692 KiB on x86_64 and 958,052 KiB on
+aarch64, below the retained 1,048,576 KiB ceiling. Different host timings must
+not be interpreted as a compiler speed comparison.
+
+Full long completion, with 16,300 cases in each track:
+
+| Platform and completion deadline | Prompts | Hits | Saved keys | Stable / eligible pairs |
+| --- | ---: | ---: | ---: | ---: |
+| Windows v1.26.1 reference, no deadline | 6,488 | 410 | 967 | - |
+| Linux x86_64, no deadline | 6,489 | 409 | 959 | 27 / 741 |
+| Linux aarch64, no deadline | 6,491 | 413 | 953 | 25 / 739 |
+| Linux x86_64, production 50 ms | 6,484 | 410 | 967 | 27 / 739 |
+| Linux aarch64, production 50 ms | 6,490 | 413 | 953 | 25 / 739 |
+
+The aarch64 result has three more correct completions but saves 14 fewer keys
+than Windows. These are different metrics: a correct continuation may complete
+a shorter suffix. This difference exceeds the default nine-key comparison
+allowance; it is not hidden by the higher hit count or by the production gate.
+In this first run, deadline 0 had not yet been propagated to the upstream
+local-repair stage; the corrected accuracy protocol above applies to the rerun.
+The x86_64 deadline-free result is one hit and eight keys lower. Timed and
+deadline-free runs can also diverge through result acceptance and cache state.
+Total production mean/P95/maximum, including decoding, final candidates and
+visible completion, is 111.375/282/847 ms on x86_64 and 54.785/122/580 ms on
+aarch64. Neither inference deadlines nor latency budgets were relaxed.
+
+Short completion matches on both architectures: 9,420 hits, 12,775 prompts,
+24,006 saved keys, 1,691/1,749 stable pairs and signature `0F85F09476081967`.
+Its mean/P95/maximum is 1.255/3/22 ms on x86_64 and 0.791/2/15 ms on aarch64.
+The previously published Windows short-completion table records 9,419 hits;
+the same-input replay records 9,420, as in the earlier baseline comparison.
+
+With model initialization held, first/max key times are 28.447/76.673 ms on
+x86_64 and 11.185/53.597 ms on aarch64. Separate process-cold trials measure
+17.865/79.160 ms and 18.601/48.208 ms. Service startup is separate, approximately
+2.5 s and 1.6 s; OS file caches were not dropped. The eight-context, 8,300-key
+transport checks show post-warmup RSS growth of 8 KiB and 0 KiB respectively,
+with restart recovery passing. Both native suites pass 384 unit tests and the
+five-stage IBus/Fcitx framework matrix. Package and visual application checks
+are reported separately in [COMPATIBILITY.md](COMPATIBILITY.md).
 
 ## Historical v1.25.0 Port Results
 

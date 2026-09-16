@@ -12,9 +12,9 @@
 The x86_64 release-gated host uses Ubuntu 26.04.1, Linux 7.0.0-30,
 Free Pascal 3.2.2, IBus
 1.5.34-rc2, and Fcitx 5.1.19. Its automated desktop matrix was last completed
-on 2026-09-11. Native ARM64 framework validation was completed on 2026-09-10
+on 2026-09-16. Native ARM64 framework validation was completed on 2026-09-16
 using Ubuntu 26.04.1, Linux 7.0.0-30, Free Pascal 3.2.2, IBus 1.5.34-rc2, and
-Fcitx 5.1.19. These v1.25.0 port qualification runs use the frozen schema-24
+Fcitx 5.1.19. These v1.26.1 port qualification runs use the frozen schema-24
 simplified/traditional dictionaries; they do not replace final package acceptance.
 
 Both architecture qualification runs covered the core test suite, simplified/traditional
@@ -27,6 +27,12 @@ Each binary release must separately pass the full gate from its exact source
 revision. Installing the final Debian package, application focus,
 rendering, and desktop appearance remain manual checklist items on both
 architectures.
+
+Real GTK 3 and GTK 4 entry fields were also exercised through IBus on both
+GNOME Wayland hosts on 2026-09-16. Native keyboard events verified Chinese
+commit, raw Enter commit, bare Shift followed by an English period, and a
+Shift-letter chord that must preserve Chinese mode. These input assertions
+do not establish candidate placement or mixed-DPI rendering correctness.
 
 Both framework adapters are deliberately thin. Parsing, dictionaries,
 ranking, completion, settings state, and user learning live in the same local

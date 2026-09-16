@@ -86,6 +86,8 @@ candidate recall while typing. Ziguang shuangpin syllable boundaries are correct
 Simplified/traditional display uses OpenCC and preserves the identity of learned
 words across mode changes. Shared inference precision settings also avoid
 quantized arithmetic saturation on x86 CPUs without VNNI.
+On aarch64, valid sentence paths remain reachable across a compiler-specific
+signed-score comparison boundary, without changing ranking weights.
 Static completion stays available while background results are pending, and
 low-confidence model results leave existing candidates intact.
 Models load and warm up in the background. Dictionary candidates, ordinary

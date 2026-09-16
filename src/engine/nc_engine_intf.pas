@@ -3554,7 +3554,7 @@ begin
 
         if (new_preference > existing_preference + 24) or
             ((Abs(new_preference - existing_preference) <= 24) and
-            (path_score_hint > Low(Integer)) and
+            (path_score_hint <> Low(Integer)) and
             (m_current_segment_path_score_map <> nil) and
             m_current_segment_path_score_map.TryGetValue(key, existing_score_hint) and
             (path_score_hint > existing_score_hint + 48)) or
@@ -3580,7 +3580,7 @@ var
     existing_score_hint: Integer;
     key: string;
 begin
-    if (m_current_segment_path_score_map = nil) or (path_score_hint <= Low(Integer)) then
+    if (m_current_segment_path_score_map = nil) or (path_score_hint = Low(Integer)) then
     begin
         Exit;
     end;
@@ -15028,7 +15028,7 @@ var
                             end;
 
                             if (span_units_local = 2) and
-                                (chunk_exact_weight_local > Low(Integer)) and
+                                (chunk_exact_weight_local <> Low(Integer)) and
                                 is_directional_location_phrase_text_local(
                                 chunk_text_local) and
                                 has_direction_context_local then
@@ -18774,7 +18774,7 @@ var
                         m_candidates[candidate_idx_local].score);
                 end;
             end;
-            if (best_partial_score_local > Low(Integer)) and
+            if (best_partial_score_local <> Low(Integer)) and
                 (Length(short_particle_tail_candidates) > 0) then
             begin
                 for particle_idx_local := 0 to High(short_particle_tail_candidates) do
@@ -18805,7 +18805,7 @@ var
                     end;
                 end;
             end;
-            if (best_partial_score_local > Low(Integer)) and
+            if (best_partial_score_local <> Low(Integer)) and
                 try_get_short_particle_tail_query_parts(lookup_text,
                 tail_key_local, tail_text_local, head_key_local) and
                 (tail_text_local <> '') then
@@ -30024,8 +30024,10 @@ var
             global_idx := start_idx + pos;
             fixed_text := get_fixed_boundary_single_char_local(
                 exact_subspan_cache_syllables[global_idx].text);
+            // Equality avoids FPC 3.2.2 AArch64's signed-minimum comparison bug.
+            // Every Integer except the sentinel is a reachable score, even < 0.
             if (fixed_text <> '') and ((pos + 1 = span_syllables) or
-                (best_scores[pos + 1] > Low(Integer))) then
+                (best_scores[pos + 1] <> Low(Integer))) then
             begin
                 if not try_get_exact_single_char_weight_local(global_idx, fixed_text,
                     fixed_weight) then
@@ -30040,7 +30042,7 @@ var
                     fixed_weight + c_fixed_single_bonus, 1));
             end;
 
-            if ((pos + 1 = span_syllables) or (best_scores[pos + 1] > Low(Integer))) then
+            if ((pos + 1 = span_syllables) or (best_scores[pos + 1] <> Low(Integer))) then
             begin
                 collect_exact_single_char_candidates_local(global_idx, 6,
                     single_text_options, single_weight_options);
@@ -34510,7 +34512,7 @@ var
         begin
             Result := (input_syllable_count >= 2) and
                 (candidate.comment = '') and
-                (get_candidate_segment_path_score_hint(candidate) > Low(Integer)) and
+                (get_candidate_segment_path_score_hint(candidate) <> Low(Integer)) and
                 (not candidate.has_dict_weight) and
                 (candidate.source <> cs_user);
         end;
@@ -50587,7 +50589,7 @@ var
                         oracle_support_score_local,
                         oracle_support_segments_local);
                     if (oracle_support_path_local = '') and
-                        (best_supported_visible_score_local > Low(Integer)) and
+                        (best_supported_visible_score_local <> Low(Integer)) and
                         (candidate_score <=
                         best_supported_visible_score_local +
                         get_supported_keep_margin_local) then
@@ -70730,7 +70732,7 @@ var
                     SameText(normalize_pinyin_text(syllables_local[start_idx + 1].text), 'mian') and
                     SameText(get_fixed_sentence_single_char_local(
                     syllables_local[start_idx + 2].text), string(Char($7684))) and
-                    (best_scores[start_idx + 2] > Low(Integer)) and
+                    (best_scores[start_idx + 2] <> Low(Integer)) and
                     (best_texts[start_idx + 2] <> '') then
                 begin
                     directional_phrase_text := directional_text + string(Char($9762));
@@ -70793,7 +70795,7 @@ var
 
                 next_idx := start_idx + 1;
                 if (next_idx = syllable_count_local) or
-                    (best_scores[next_idx] > Low(Integer)) then
+                    (best_scores[next_idx] <> Low(Integer)) then
                 begin
                     total_score := fixed_weight + c_fixed_single_bonus -
                         fixed_override_penalty;
@@ -70930,7 +70932,7 @@ var
         best_total_path := '';
         best_existing_index := -1;
 
-        if best_scores[0] > Low(Integer) then
+        if best_scores[0] <> Low(Integer) then
         begin
             best_total_score := best_scores[0];
             best_total_text := best_texts[0];
@@ -70977,7 +70979,7 @@ var
             if (best_total_text = '') and (syllable_count_local >= 2) and
                 try_get_fixed_single_weight_local(0, fallback_fixed_text,
                 fallback_fixed_weight) and
-                (best_scores[1] > Low(Integer)) and (best_texts[1] <> '') then
+                (best_scores[1] <> Low(Integer)) and (best_texts[1] <> '') then
             begin
                 best_total_score := fallback_fixed_weight + c_fixed_single_bonus +
                     best_scores[1] + get_suffix_context_bonus_local(fallback_fixed_text,
@@ -77510,7 +77512,7 @@ var
             Exit;
         end;
 
-        Result := get_candidate_segment_path_score_hint(candidate) > Low(Integer);
+        Result := get_candidate_segment_path_score_hint(candidate) <> Low(Integer);
     end;
 
     procedure ensure_best_lightweight_sentence_candidate_visible(var candidates: TncCandidateList);
@@ -93209,7 +93211,7 @@ var
             begin
                 if (text_units >= Max(2, input_syllable_count - 1)) and
                     (candidate.has_dict_weight or (candidate.source = cs_user) or
-                    (segment_score_hint > Low(Integer))) then
+                    (segment_score_hint <> Low(Integer))) then
                 begin
                     Exit(True);
                 end;
@@ -93221,7 +93223,7 @@ var
             if (comment_units <= 1) and
                 (text_units >= Max(2, input_syllable_count - 2)) and
                 (candidate.has_dict_weight or (candidate.source = cs_user) or
-                (segment_score_hint > Low(Integer))) then
+                (segment_score_hint <> Low(Integer))) then
             begin
                 Exit(True);
             end;
@@ -105473,7 +105475,7 @@ var
                 end;
             end;
 
-            if best_anchor_rank <= Low(Integer) then
+            if best_anchor_rank = Low(Integer) then
             begin
                 Exit;
             end;
@@ -149076,14 +149078,14 @@ begin
             c_suppress_nonlexicon_complete_long_candidates and
             (m_last_lookup_syllable_count >= 3) then
         begin
-            if (best_one_plus_two_partial_score > Low(Integer)) and
-                ((best_two_plus_one_partial_score <= Low(Integer)) or
+            if (best_one_plus_two_partial_score <> Low(Integer)) and
+                ((best_two_plus_one_partial_score = Low(Integer)) or
                 ((best_two_plus_one_partial_score * 100) <=
                 (best_one_plus_two_partial_score * c_three_syllable_boundary_ratio_pct))) then
             begin
                 preferred_three_syllable_partial_kind := 1;
             end
-            else if best_two_plus_one_partial_score > Low(Integer) then
+            else if best_two_plus_one_partial_score <> Low(Integer) then
             begin
                 preferred_three_syllable_partial_kind := 2;
             end;
@@ -160312,7 +160314,7 @@ var
             end;
         end;
 
-        Result := (current_weight > Low(Integer)) and
+        Result := (current_weight <> Low(Integer)) and
             (best_weight > current_weight + min_weight_gap);
     end;
 
@@ -166716,7 +166718,7 @@ var
                 particle_exact_weight_cache.TryGetValue(cache_key_local,
                 cached_weight_local) then
             begin
-                if cached_weight_local > Low(Integer) then
+                if cached_weight_local <> Low(Integer) then
                 begin
                     out_weight := cached_weight_local;
                     Exit(True);

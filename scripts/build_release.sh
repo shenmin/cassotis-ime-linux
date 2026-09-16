@@ -140,6 +140,8 @@ for document in README.md README.CN.md BUILD.md COMPATIBILITY.md \
         install -m 0644 "$cassotis_root/$document" "$bundle_dir/$document"
 done
 install -m 0644 "$cassotis_root/snapshot.jpg" "$bundle_dir/snapshot.jpg"
+install -m 0644 "$cassotis_root/cassotis_ime_yanquan.png" \
+    "$bundle_dir/cassotis_ime_yanquan.png"
 install -d -m 0755 "$bundle_dir/docs"
 install -m 0644 "$cassotis_root/docs/DICTIONARY.md" \
     "$bundle_dir/docs/DICTIONARY.md"

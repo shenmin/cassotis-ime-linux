@@ -17,6 +17,8 @@
 - Applied consistent quantized inference precision to joint repair heads on
   x86 CPUs without VNNI. Models still load and warm up asynchronously, and
   ordinary input does not wait for neural initialization.
+- Preserved reachable sentence paths on aarch64 by avoiding a compiler-specific
+  signed-minimum comparison error, without changing candidate weights.
 
 ## 0.7.0 - 2026-09-11
 
