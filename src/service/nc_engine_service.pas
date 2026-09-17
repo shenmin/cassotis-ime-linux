@@ -480,7 +480,8 @@ begin
     context.SetCandidates(candidates);
     context.SelectCandidate(FEngine.get_selected_index);
     completion := FEngine.get_one_key_completion;
-    context.SetCompletion(completion.full_pinyin, completion.text);
+    context.SetCompletion(completion.full_pinyin, completion.text,
+        completion.source = okcs_exact_tail_fallback);
 end;
 
 procedure TncEngineService.PopulateResult(const context: TncEngineContext;
@@ -497,6 +498,7 @@ begin
     engine_result.page_index := FEngine.get_page_index;
     engine_result.page_count := FEngine.get_page_count;
     engine_result.completion_text := context.CompletionText;
+    engine_result.completion_is_exact_tail := context.CompletionIsExactTail;
 end;
 
 function TncEngineService.QueueLongNeuralCompletion(
@@ -507,9 +509,11 @@ begin
     Result := False;
     if (context = nil) or (FEngine = nil) or
         (FLocalCompletionHost = nil) or (not context.Active) or
-        (context.Composition = '') or (context.CompletionText <> '') then
+        (context.Composition = '') then
         Exit;
     task := Default(TncLocalCompletionTask);
+    // The engine owns source precedence: a visible exact-tail fallback may
+    // still be refined asynchronously, whereas a lexical prediction may not.
     if not FEngine.get_long_neural_completion_request(task.request) then
         Exit;
     task.context_id := context.Id;

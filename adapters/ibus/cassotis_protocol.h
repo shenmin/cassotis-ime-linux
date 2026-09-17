@@ -181,6 +181,7 @@ typedef struct {
 typedef struct {
     gboolean handled;
     gboolean async_pending;
+    gboolean completion_is_exact_tail;
     gchar *commit_text;
     gchar *preedit_text;
     gchar *query_text;

@@ -6,6 +6,33 @@ bundle_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source_root="$bundle_dir/root"
 destdir="${DESTDIR:-/}"
 
+usage() {
+    cat <<'EOF'
+Usage: ./install.sh [--system]
+       ./install.sh --user [--framework auto|ibus|fcitx5|both] [--check] [--no-refresh]
+
+--system installs into /usr and requires sudo (the historical default).
+--user installs into ~/.local and XDG directories; do NOT use sudo.
+--check validates user-install compatibility without changing files or settings.
+DESTDIR is for staging a system filesystem tree, not for user installation.
+EOF
+}
+
+case "${1:-}" in
+    --user)
+        shift
+        command -v python3 >/dev/null 2>&1 || {
+            printf 'Error: Python 3 is required for user installation.\n' >&2
+            exit 1
+        }
+        exec python3 "$bundle_dir/install-support/user_install.py" install \
+            --bundle "$bundle_dir" "$@"
+        ;;
+    --help|-h) usage; exit 0 ;;
+    --system) shift ;;
+esac
+[[ $# -eq 0 ]] || { usage >&2; exit 2; }
+
 run_bounded() {
     local duration="$1"
 
@@ -35,9 +62,21 @@ start_session_refresh() {
     sha256sum --check ./usr/share/cassotis-ime/release-sha256.txt
 ) >/dev/null
 if [[ "$destdir" == / && $EUID -ne 0 ]]; then
-    printf 'Error: run with sudo, or set DESTDIR for a staged install.\n' >&2
+    printf 'Error: use ./install.sh --user without sudo, or sudo ./install.sh --system.\n' >&2
     exit 1
 fi
+
+# Check before copying, so immutable systems do not get a partial installation.
+for directory in "$destdir" "$destdir/usr" "$destdir/usr/lib" \
+                 "$destdir/usr/libexec" "$destdir/usr/share"; do
+    parent="$directory"
+    while [[ ! -e "$parent" ]]; do parent="$(dirname -- "$parent")"; done
+    if [[ ! -d "$parent" || ! -w "$parent" ]]; then
+        printf 'Error: system destination is read-only or not writable: %s\n' "$parent" >&2
+        printf 'Use ./install.sh --user WITHOUT sudo; keep filesystem protection enabled.\n' >&2
+        exit 1
+    fi
+done
 
 install -d -m 0755 "$destdir"
 cp -a "$source_root/." "$destdir/"

@@ -21,13 +21,13 @@ corresponding model-training data.
 
 The current Linux engine is reviewed against:
 
-- Cassotis IME v1.26.1 (`0b8203c2372c1e16e0a3cf4a49d35b219b8f0135`)
-- Cassotis Lexicon v1.26.1 (`2d172f2804b9acc8fe60b47cab7c863010e00b98`)
+- Cassotis IME v1.27.0 (`667240fbdc4ab0ba542ec36da56280ebe0a7351c`)
+- Cassotis Lexicon v1.27.0 (`11f17d0ee38b0fcdf221656f0a4b5590d3bacc59`)
 - Simplified dictionary schema 24, SHA-256
-  `92eef697be82951946fc67563dd0d01c7b42ab032446781666b99f6d7d9cb244`
+  `6d01a9430bfbe30f26914b0f7d11e2f6cbf00de95445d96b66090eeca29553fa`
 - Traditional dictionary schema 24, SHA-256
-  `bbec07c92d58024d6c63bf3a3acdfd514b1b6e35b7084a5b7cf97e091d1c3fbf`
-- Simplified/traditional base entries: 213,359 / 216,574
+  `19e367ab7c5453f11642b56f9ff0da311654d6bbfb11b089cdad498d7205c3fd`
+- Simplified/traditional base entries: 213,493 / 216,708
 - Simplified/traditional completion competition rows: 42,453 / 42,448
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379
 - Simplified long-completion tables: 35,423 visible paths and 97,589 total
@@ -122,13 +122,71 @@ phase uses the existing long-query mean/P95/maximum budgets. The prior total
 maximum is also retained, so adding a phase cannot hide a slowdown in the
 previously measured work or silently admit a larger worst-case delay.
 
-The runner reports Top1/Top2/Top5/Top9 counts, mean/P50/P95/maximum query
+Long-sentence scoring reports visible complete-candidate Top1/Top2; the redundant
+long Top5/Top9 metrics were removed with the v1.27.0 protocol. Short-word
+diagnostics retain Top1/Top2/Top5/Top9. The runner reports mean/P50/P95/maximum query
 latency, and Linux process RSS/high-water marks. Memory events contain only
 the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
 
-## v1.26.1 Qualification In Progress
+## v1.27.0 Qualification
+
+Native candidate qualification on 2026-09-17 uses freshly imported v1.27.0
+dictionaries and the unchanged frozen cases. Completion and package acceptance
+are still being completed; the historical sections below do not replace them.
+
+| Platform | Long Top1 / 16,300 | Long Top2 / 16,300 | Short Top1, context off / 65,000 | Short Top1, context on / 65,000 |
+| --- | ---: | ---: | ---: | ---: |
+| Windows v1.27.0 reference | 11,978 | 12,955 | 60,378 | 61,860 |
+| Linux x86_64 | 11,979 | 12,954 | 60,378 | 61,860 |
+| Linux aarch64 | 11,975 | 12,954 | 60,378 | 61,860 |
+
+Short context-off Top2/Top5/Top9 are 63,194/64,531/64,652; context-on counts
+are 63,549/64,573/64,652 on both architectures. The contextual competition
+subset is 9,596 Top1 and 10,775 Top2 out of 11,728. Both short failure traces
+have 7,762 rows and SHA-256
+`75ff9950bbd354d1b4a75885046041234b5e5deb43ff0a753e51f482dcb2d43e`.
+Only one case's target rank changes from 3 to 4 in each context mode compared
+with v1.26.1, due to a newly added lexicon entry. A native Windows v1.27.0
+replay independently confirms it; the aggregate short scores do not change.
+
+Production-mode query latency is measured separately from long accuracy:
+
+| Architecture | Track | Mean | P50 | P95 | Maximum |
+| --- | --- | ---: | ---: | ---: | ---: |
+| x86_64 | Long sentence | 199.146 ms | 210 ms | 353 ms | 1,122 ms |
+| x86_64 | Short, context off | 10.726 ms | 8 ms | 27 ms | 347 ms |
+| x86_64 | Short, context on | 11.872 ms | 9 ms | 29 ms | 237 ms |
+| aarch64 | Long sentence | 80.345 ms | 75 ms | 146 ms | 587 ms |
+| aarch64 | Short, context off | 5.983 ms | 5 ms | 14 ms | 37 ms |
+| aarch64 | Short, context on | 6.552 ms | 5 ms | 15 ms | 42 ms |
+
+Quality-process peak HWM is 892,476 KiB on x86_64 and 932,412 KiB on aarch64,
+below the retained 1,048,576 KiB ceiling. These host-specific timings are not
+a controlled cross-architecture speed comparison.
+
+The frozen Windows long predictive-completion reference is 425 hits, 6,769
+prompts and 987 saved keys out of 16,300 cases. ARM64 completes both accuracy
+and production-50-ms tracks with 425 hits, 6,771 prompts and 981 saved keys,
+within the nine-key comparison allowance. The x86_64 completion tracks are
+still running.
+
+The new `predictive_continuations_v1` completion scope excludes exact-tail
+conversion from predictive prompts, hits, misses and saved keys. It records all
+displayed hints and exact-tail prefix matches separately. Conversion acceptance
+is still tested, including full syllable alignment and no automatic learning.
+The accuracy and production tracks use the same classification. Old completion
+coverage figures must not be treated as measurements under this new protocol.
+
+The separate deterministic 500-case request-only neural check has 380 requests,
+170 accepted results, 123 applied/visible completions, 12 hits, 18 saved keys
+and signature `528E47C7FFCA2EE3`. Its changed v1.27.0 signature was independently
+reproduced by an unmodified Windows engine: all 500 query, request-path and
+completion records match ARM64. This check does not resolve the final candidate
+list, so it must not be confused with the complete completion benchmark above.
+
+## Historical v1.26.1 Qualification
 
 The first qualification below predates the aarch64 signed-score correction.
 It is retained as diagnostic evidence, not as the final v0.8.0 acceptance.
@@ -136,14 +194,15 @@ FPC 3.2.2 on aarch64 miscompiles ordered comparisons against the minimum
 32-bit integer, causing reachable subspan scores to be treated as unreachable.
 Equivalent sentinel equality checks correct this without changing weights,
 models or search limits. A focused engine regression fails before the fix
-on aarch64 and passes afterwards; x86_64 passes both versions. Full native
-quality and completion tracks are being rerun. The Windows reference and
-nine-key comparison allowance remain unchanged.
+on aarch64 and passes afterwards; x86_64 passes both versions. The correction
+is retained in the v1.27.0 port; the historical figures below do not replace its
+new quality and completion runs.
 
 ### First Qualification, Before The Score Correction
 
-Native qualification on 2026-09-16 uses the v1.26.1 models and dictionary
-hashes above, with unchanged frozen cases. The published Windows reference is
+Native qualification on 2026-09-16 used the v1.26.1 models and dictionaries
+(213,359 simplified and 216,574 traditional entries), with unchanged frozen
+cases. The published Windows reference is
 retained as published, not replaced with a Linux-specific target:
 
 | Platform | Long Top1 / 16,300 | Long Top2 / 16,300 | Short Top1, context off / 65,000 | Short Top1, context on / 65,000 |

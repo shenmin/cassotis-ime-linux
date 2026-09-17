@@ -24,8 +24,9 @@
      CASSOTIS_STATE_FLAG_FUZZY_PINYIN_ENABLED |                        \
      CASSOTIS_STATE_FLAG_DEBUG_MODE)
 #define CASSOTIS_ENGINE_RESULT_FLAG_ASYNC_PENDING 0x01U
+#define CASSOTIS_ENGINE_RESULT_FLAG_EXACT_TAIL 0x02U
 #define CASSOTIS_ENGINE_RESULT_KNOWN_FLAGS \
-    CASSOTIS_ENGINE_RESULT_FLAG_ASYNC_PENDING
+    (CASSOTIS_ENGINE_RESULT_FLAG_ASYNC_PENDING | CASSOTIS_ENGINE_RESULT_FLAG_EXACT_TAIL)
 #define CASSOTIS_SHORTCUT_KNOWN_MODIFIERS                               \
     (CASSOTIS_MODIFIER_SHIFT | CASSOTIS_MODIFIER_CONTROL |             \
      CASSOTIS_MODIFIER_ALT)
@@ -540,6 +541,8 @@ gboolean cassotis_protocol_decode_engine_result(
     result->handled = handled != 0;
     result->async_pending =
         (result_flags & CASSOTIS_ENGINE_RESULT_FLAG_ASYNC_PENDING) != 0;
+    result->completion_is_exact_tail =
+        (result_flags & CASSOTIS_ENGINE_RESULT_FLAG_EXACT_TAIL) != 0;
     result->candidate_count = candidate_count;
     result->candidates = g_new0(CassotisCandidate, candidate_count);
     for (index = 0; index < candidate_count; ++index) {

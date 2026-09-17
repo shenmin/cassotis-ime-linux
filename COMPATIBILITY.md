@@ -61,3 +61,27 @@ following remain explicit manual checks before publishing a release:
 
 Floating status-window styling, a tray application, and product logging remain
 outside the current Linux product scope.
+
+Windows-style red pinyin warnings are not part of this release. Windows renders
+them in its own candidate window. IBus supports text-color attributes, whereas
+the native Fcitx 5 text-format API offers theme-defined highlighting rather than
+an explicit warning color. Linux retains the framework's normal rendering and
+does not promise consistent red warnings across desktops or client applications.
+
+## Read-Only Systems And User Installation
+
+The portable `--user` installer was exercised on Ubuntu x86_64 and aarch64 on
+2026-09-17 with a read-only `/usr`, a separate writable HOME and an isolated
+D-Bus/PID namespace. Both native frameworks passed input, completion and
+shortcut tests using relocated runtime files and registration metadata.
+Upgrade and removal retained the learned-word database. These checks do not
+modify the user's active desktop session.
+
+This validates the user-directory installation mechanism, not SteamOS itself.
+SteamOS Desktop Mode has not been tested on hardware; Gaming Mode is outside
+this validation. A compatible IBus or Fcitx 5 and the required runtime libraries
+must already be available. The installer refuses unsupported architectures,
+missing/ABI-incompatible dependencies, non-writable or noexec runtime paths,
+and conflicting installations before copying files. It never turns off OS
+filesystem protection or lowers compiled framework version requirements.
+See [portable user installation](BUILD.md#portable-user-installation).

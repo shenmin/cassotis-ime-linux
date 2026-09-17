@@ -305,6 +305,8 @@ static void render_result(CassotisIbusEngine *self,
     gboolean has_completion;
     gboolean vertical;
     guint page_size;
+    const gchar *completion_key = self->state.one_key_completion_key ==
+        CASSOTIS_COMPLETION_BACKTICK ? "`" : "Tab";
 
     if (result->commit_text != NULL && result->commit_text[0] != '\0') {
         text = ibus_text_new_from_string(result->commit_text);
@@ -350,7 +352,7 @@ static void render_result(CassotisIbusEngine *self,
             ibus_lookup_table_append_label(table, label);
         }
         ibus_lookup_table_append_label(
-            table, ibus_text_new_from_string("Tab"));
+            table, ibus_text_new_from_string(completion_key));
         for (index = 0; index < result->candidate_count; ++index) {
             display_text = candidate_display_text(
                 &self->state, &result->candidates[index]);
@@ -358,10 +360,12 @@ static void render_result(CassotisIbusEngine *self,
             ibus_lookup_table_append_candidate(table, text);
             g_free(display_text);
         }
-        display_text = g_strdup_printf(
-            result->candidate_count == page_size
-                ? "\xE2\x87\xA5%s"
-                : "Tab  \xE2\x87\xA5%s",
+        /* The arrow denotes a prediction beyond typed Pinyin. Exact-tail
+           conversion keeps the framework's normal text presentation. */
+        display_text = g_strdup_printf("%s%s%s%s",
+            result->candidate_count == page_size ? "" : completion_key,
+            result->candidate_count == page_size ? "" : "  ",
+            result->completion_is_exact_tail ? "" : "\xE2\x87\xA5",
             result->completion_text);
         text = ibus_text_new_from_string(display_text);
         ibus_lookup_table_append_candidate(table, text);

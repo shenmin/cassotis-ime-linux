@@ -70,7 +70,9 @@ const
         c_state_flag_punctuation_full_width or
         c_state_flag_fuzzy_pinyin_enabled or c_state_flag_debug_mode;
     c_engine_result_flag_async_pending = $01;
-    c_engine_result_known_flags = c_engine_result_flag_async_pending;
+    c_engine_result_flag_exact_tail = $02;
+    c_engine_result_known_flags = c_engine_result_flag_async_pending or
+        c_engine_result_flag_exact_tail;
     c_shortcut_flag_shift = $01;
     c_shortcut_flag_control = $02;
     c_shortcut_flag_alt = $04;
@@ -681,6 +683,8 @@ begin
         result_flags := 0;
         if engine_result.async_pending then
             result_flags := result_flags or c_engine_result_flag_async_pending;
+        if engine_result.completion_is_exact_tail then
+            result_flags := result_flags or c_engine_result_flag_exact_tail;
         writer.WriteByte(result_flags);
         writer.WriteInt32(engine_result.selected_index);
         writer.WriteInt32(engine_result.page_index);
@@ -749,8 +753,12 @@ begin
             Result := False;
         end;
         if Result then
+        begin
             engine_result.async_pending :=
                 (result_flags and c_engine_result_flag_async_pending) <> 0;
+            engine_result.completion_is_exact_tail :=
+                (result_flags and c_engine_result_flag_exact_tail) <> 0;
+        end;
         if Result and (candidate_count > c_ipc_payload_max_candidates) then
         begin
             reader.SetError('Engine result has too many candidates');

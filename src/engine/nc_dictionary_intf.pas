@@ -127,7 +127,27 @@ type
         function get_candidate_penalty(const pinyin: string; const text: string): Integer; virtual;
     end;
 
+function nc_get_char_lm_span_scores(const dictionary: TncDictionaryProvider;
+    const texts: TArray<string>; out scores: TArray<Integer>): Boolean;
+
 implementation
+
+function nc_get_char_lm_span_scores(const dictionary: TncDictionaryProvider;
+    const texts: TArray<string>; out scores: TArray<Integer>): Boolean;
+var text: string;
+begin
+    Result := False;
+    scores := nil;
+    if (dictionary = nil) or (Length(texts) = 0) then Exit;
+    if dictionary.get_char_lm_cached_span_scores(texts, scores) and
+        (Length(scores) = Length(texts)) then Exit(True);
+    // Final local comparisons must not depend on earlier queries warming the
+    // FIFO cache. Load only their bounded windows, with identical BOS/EOS policy.
+    if Length(texts) > 64 then Exit;
+    for text in texts do if Length(text) > 40 then Exit;
+    Result := dictionary.get_char_lm_continuation_scores('', texts, scores) and
+        (Length(scores) = Length(texts));
+end;
 
 function TncDictionaryProvider.lookup_exact_full_pinyin(const pinyin: string;
     out results: TncCandidateList): Boolean;

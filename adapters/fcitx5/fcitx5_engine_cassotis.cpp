@@ -265,7 +265,8 @@ private:
 
 class CassotisCompletionWord final : public fcitx::CandidateWord {
 public:
-    CassotisCompletionWord(CassotisFcitxEngine *engine, const char *text);
+    CassotisCompletionWord(CassotisFcitxEngine *engine, const char *text,
+                           bool exactTail);
 
     void select(fcitx::InputContext *inputContext) const override;
 
@@ -574,7 +575,8 @@ void CassotisFcitxState::renderResult(CassotisEngineResult *result) {
             candidates->insert(
                 static_cast<int>(result->candidate_count),
                 std::make_unique<CassotisCompletionWord>(
-                    engine_, result->completion_text));
+                    engine_, result->completion_text,
+                    result->completion_is_exact_tail));
         }
         if (result->selected_index >= 0 &&
             static_cast<guint32>(result->selected_index) <
@@ -709,9 +711,10 @@ void CassotisCandidateWord::select(
 }
 
 CassotisCompletionWord::CassotisCompletionWord(
-    CassotisFcitxEngine *engine, const char *text)
+    CassotisFcitxEngine *engine, const char *text, bool exactTail)
     : fcitx::CandidateWord(
-          fcitx::Text(std::string("\xE2\x87\xA5") + (text ? text : ""))),
+          fcitx::Text(std::string(exactTail ? "" : "\xE2\x87\xA5") +
+                      (text ? text : ""))),
       engine_(engine) {}
 
 void CassotisCompletionWord::select(

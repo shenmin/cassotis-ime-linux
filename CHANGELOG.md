@@ -2,10 +2,22 @@
 
 ## Unreleased
 
-## 0.8.0 - 2026-09-16
+## 0.8.0 - Pending
 
 - Updated the engine and fresh simplified/traditional dictionaries to the
-  Cassotis IME and Cassotis Lexicon v1.26.1 baseline.
+  Cassotis IME and Cassotis Lexicon v1.27.0 baseline.
+- Added exact-tail Tab conversion as a bounded fallback below predictive
+  completion, without recursively joining words or learning the converted text.
+  Both frameworks distinguish it from predictive hints and allow asynchronous
+  predictions to replace the fallback.
+- Revalidated reused paths against current syllables and exact readings,
+  restored five-syllable sentence decoding, and fetched bounded span-LM evidence
+  when the span cache is cold.
+- Preserved learned exact-prefix priority using raw dictionary weights and
+  bounded learning evidence, without reordering unlearned exact groups.
+- Added portable installation into writable user directories for read-only
+  systems, with dependency preflight and tracked upgrade/removal. SteamOS binary
+  compatibility still depends on its installed framework and runtime libraries.
 - Added joint local sentence repair with bilateral context verification,
   retaining existing candidates when model or dictionary evidence is insufficient.
 - Preserved corrected text through one-key completion and added bounded

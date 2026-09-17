@@ -7,6 +7,21 @@ source_root="$bundle_dir/root"
 destdir="${DESTDIR:-/}"
 manifest="$source_root/usr/share/cassotis-ime/release-manifest.txt"
 
+case "${1:-}" in
+    --user)
+        shift
+        exec python3 "$bundle_dir/install-support/user_install.py" uninstall \
+            --bundle "$bundle_dir" "$@"
+        ;;
+    --help|-h)
+        printf 'Usage: ./uninstall.sh [--system] | --user [--no-refresh]\n'
+        printf 'User uninstall must run without sudo and preserves learned words and settings.\n'
+        exit 0
+        ;;
+    --system) shift ;;
+esac
+[[ $# -eq 0 ]] || { printf 'Error: unknown uninstall option.\n' >&2; exit 2; }
+
 run_bounded() {
     local duration="$1"
 

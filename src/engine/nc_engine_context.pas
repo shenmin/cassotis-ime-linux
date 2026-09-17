@@ -23,6 +23,7 @@ type
         FSelectedIndex: Integer;
         FCompletionText: string;
         FCompletionPinyin: string;
+        FCompletionIsExactTail: Boolean;
         FModifierShortcutPending: Boolean;
         FModifierShortcutCanceled: Boolean;
         FModifierShortcutAction: TncShortcutAction;
@@ -37,7 +38,7 @@ type
         function DeleteLastCompositionCharacter: Boolean;
         procedure SetCandidates(const value: TncCandidateList);
         procedure SetCompletion(const full_pinyin: string;
-            const text: string);
+            const text: string; const exact_tail: Boolean = False);
         procedure BeginModifierShortcut(const action: TncShortcutAction;
             const key_code: Word);
         procedure CancelModifierShortcut;
@@ -57,6 +58,7 @@ type
         property SelectedIndex: Integer read FSelectedIndex;
         property CompletionText: string read FCompletionText;
         property CompletionPinyin: string read FCompletionPinyin;
+        property CompletionIsExactTail: Boolean read FCompletionIsExactTail;
         property ModifierShortcutPending: Boolean
             read FModifierShortcutPending;
         property ModifierShortcutKeyCode: Word
@@ -111,6 +113,7 @@ begin
     FSelectedIndex := -1;
     FCompletionText := '';
     FCompletionPinyin := '';
+    FCompletionIsExactTail := False;
 end;
 
 procedure TncEngineContext.SetComposition(const value: string);
@@ -140,10 +143,11 @@ begin
 end;
 
 procedure TncEngineContext.SetCompletion(const full_pinyin: string;
-    const text: string);
+    const text: string; const exact_tail: Boolean);
 begin
     FCompletionPinyin := full_pinyin;
     FCompletionText := text;
+    FCompletionIsExactTail := (text <> '') and exact_tail;
 end;
 
 procedure TncEngineContext.BeginModifierShortcut(

@@ -160,7 +160,8 @@ type
         okcs_transition,
         okcs_long_transition,
         okcs_long_neural,
-        okcs_document_copy
+        okcs_document_copy,
+        okcs_exact_tail_fallback
     );
 
     TncOneKeyCompletion = record
@@ -317,6 +318,7 @@ type
     TncEngineResult = record
         handled: Boolean;
         async_pending: Boolean;
+        completion_is_exact_tail: Boolean;
         commit_text: string;
         preedit_text: string;
         query_text: string;
@@ -418,6 +420,7 @@ procedure nc_initialize_engine_result(out value: TncEngineResult);
 begin
     value.handled := False;
     value.async_pending := False;
+    value.completion_is_exact_tail := False;
     value.commit_text := '';
     value.preedit_text := '';
     value.query_text := '';

@@ -132,6 +132,9 @@ install -m 0755 "$cassotis_root/packaging/portable/install.sh" \
     "$bundle_dir/install.sh"
 install -m 0755 "$cassotis_root/packaging/portable/uninstall.sh" \
     "$bundle_dir/uninstall.sh"
+install -d -m 0755 "$bundle_dir/install-support"
+install -m 0644 "$cassotis_root/packaging/portable/user_install.py" \
+    "$cassotis_root/scripts/fcitx5_profile.py" "$bundle_dir/install-support/"
 for document in README.md README.CN.md BUILD.md COMPATIBILITY.md \
                 BENCHMARK.md BENCHMARK.CN.md CONFIGURATION.md \
                 CONFIGURATION.CN.md \

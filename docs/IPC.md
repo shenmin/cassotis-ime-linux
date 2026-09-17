@@ -106,7 +106,13 @@ flags byte followed by commit text, preedit text, normalized query, one-key
 completion, error text, and at most 256 candidates. Result flag bit 0 is
 `async_pending`: the ordinary key result is complete and immediately
 renderable, while a bounded background completion request may still produce a
-new completion row. All other result flag bits are reserved and rejected.
+new completion row. Bit 1 is `completion_is_exact_tail`: the completion row
+converts an already-typed exact suffix instead of predicting additional text.
+Adapters retain the configured completion key label but omit the prediction
+arrow for this fallback. Bits 2 through 7 are reserved and rejected.
+The flag does not change payload size. Engine and adapters must be upgraded
+together and restarted; older result decoders reject bit 1 rather than
+silently misrepresenting the hint.
 Each candidate contains source, display kind, dictionary-weight/deletable
 flags, final score, dictionary weight, fuzzy cost and rule mask, text, and
 annotation.
