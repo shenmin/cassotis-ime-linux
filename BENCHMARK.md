@@ -132,9 +132,10 @@ not ignored failures, and are not included in binary release assets.
 
 ## v1.27.0 Qualification
 
-Native candidate qualification on 2026-09-17 uses freshly imported v1.27.0
-dictionaries and the unchanged frozen cases. Completion and package acceptance
-are still being completed; the historical sections below do not replace them.
+Native qualification on 2026-09-17/18 uses freshly imported v1.27.0
+dictionaries and the unchanged frozen cases. The results below are from the
+complete quality and completion runs, not extrapolated samples. Package and
+desktop coverage is recorded separately in [COMPATIBILITY.md](COMPATIBILITY.md).
 
 | Platform | Long Top1 / 16,300 | Long Top2 / 16,300 | Short Top1, context off / 65,000 | Short Top1, context on / 65,000 |
 | --- | ---: | ---: | ---: | ---: |
@@ -155,22 +156,45 @@ Production-mode query latency is measured separately from long accuracy:
 
 | Architecture | Track | Mean | P50 | P95 | Maximum |
 | --- | --- | ---: | ---: | ---: | ---: |
-| x86_64 | Long sentence | 199.146 ms | 210 ms | 353 ms | 1,122 ms |
-| x86_64 | Short, context off | 10.726 ms | 8 ms | 27 ms | 347 ms |
-| x86_64 | Short, context on | 11.872 ms | 9 ms | 29 ms | 237 ms |
-| aarch64 | Long sentence | 80.345 ms | 75 ms | 146 ms | 587 ms |
-| aarch64 | Short, context off | 5.983 ms | 5 ms | 14 ms | 37 ms |
-| aarch64 | Short, context on | 6.552 ms | 5 ms | 15 ms | 42 ms |
+| x86_64 | Long sentence | 195.313 ms | 206 ms | 347 ms | 1,224 ms |
+| x86_64 | Short, context off | 10.664 ms | 8 ms | 27 ms | 69 ms |
+| x86_64 | Short, context on | 11.819 ms | 9 ms | 29 ms | 73 ms |
+| aarch64 | Long sentence | 80.641 ms | 75 ms | 146 ms | 586 ms |
+| aarch64 | Short, context off | 5.978 ms | 5 ms | 14 ms | 37 ms |
+| aarch64 | Short, context on | 6.552 ms | 5 ms | 16 ms | 36 ms |
 
-Quality-process peak HWM is 892,476 KiB on x86_64 and 932,412 KiB on aarch64,
+Quality-process peak HWM is 928,340 KiB on x86_64 and 921,980 KiB on aarch64,
 below the retained 1,048,576 KiB ceiling. These host-specific timings are not
 a controlled cross-architecture speed comparison.
 
-The frozen Windows long predictive-completion reference is 425 hits, 6,769
-prompts and 987 saved keys out of 16,300 cases. ARM64 completes both accuracy
-and production-50-ms tracks with 425 hits, 6,771 prompts and 981 saved keys,
-within the nine-key comparison allowance. The x86_64 completion tracks are
-still running.
+Long predictive completion runs all 16,300 cases in each track:
+
+| Platform and deadline | Predictive prompts | Hits | Saved keys | Stable / comparable pairs |
+| --- | ---: | ---: | ---: | ---: |
+| Windows v1.27.0 reference, unlimited | 6,769 | 425 | 987 | - |
+| Linux x86_64, unlimited | 6,770 | 425 | 987 | 27 / 768 |
+| Linux aarch64, unlimited | 6,772 | 425 | 981 | 27 / 770 |
+| Linux x86_64, production 50 ms | 6,758 | 425 | 987 | 27 / 767 |
+| Linux aarch64, production 50 ms | 6,770 | 425 | 982 | 27 / 770 |
+
+Both architectures match the Windows hit count. The aarch64 saved-key loss is
+six without the deadline and five in production, within the nine-key allowance.
+Production decode/final-candidate/visible-completion total mean/P50/P95/maximum
+is 116.358/76/286/873 ms on x86_64 and 48.713/43/107/496 ms on aarch64.
+The separately checked decoding-plus-visible-completion mean is 29.758 ms and
+18.899 ms respectively; neither its budgets nor the final-candidate budgets
+were relaxed.
+
+The separate 65,000-case short-completion track matches on both architectures:
+12,831 opportunities, 12,775 prompts, 9,420 hits, 24,006 saved keys and
+1,691 stable pairs out of 1,749. Its exact signature remains
+`0F85F09476081967`. Mean/P50/P95/maximum is 1.342/1/3/20 ms on x86_64 and
+0.698/1/2/11 ms on aarch64.
+
+Targeted incremental candidate checks use fixed search work in both static
+and fully initialized neural modes, so model startup scheduling does not decide
+a strict rank assertion. Production IPC, blocked-model cold start and
+wall-clock latency are tested separately; this does not change runtime limits.
 
 The new `predictive_continuations_v1` completion scope excludes exact-tail
 conversion from predictive prompts, hits, misses and saved keys. It records all

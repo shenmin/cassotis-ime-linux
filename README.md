@@ -104,7 +104,9 @@ selection/commit and static completion remain available before neural models
 are ready, so first-key input does not wait for model loading.
 
 Native measurements on x86_64 and aarch64 use the same 16,300 long-sentence
-and 65,000 short-word cases as Windows. Counts, latency, memory and any
+and 65,000 short-word cases as Windows. Both short-word tracks match the
+Windows v1.27.0 totals; long-sentence Top1/Top2 differ by at most three cases.
+Counts, latency, memory and any
 cross-platform differences are recorded in [BENCHMARK.md](BENCHMARK.md),
 rather than assuming identical neural decisions on different CPUs. Release
 checks also cover native core and dictionary tests, package payloads, cold-start
@@ -123,8 +125,9 @@ either framework after installation.
 Each portable archive contains the same dynamically linked binaries as its
 matching `.deb` and requires compatible runtime libraries; it is not a
 distribution-independent package. Compatible Debian-family systems can use
-the package matching their architecture. Other distributions should build
-natively from source.
+the package matching their architecture. On other distributions, run the
+portable installer's dependency preflight first; build natively from source
+if the supplied binaries are incompatible.
 
 See [COMPATIBILITY.md](COMPATIBILITY.md) for the exact test scope and platform
 status.
@@ -194,7 +197,9 @@ The portable bundle includes an isolated OpenCC fallback for systems without
 the conversion library or data; it does not replace system libraries. User
 installation, upgrade, removal and desktop input have been tested on SteamOS
 3.8.14, KDE X11 with IBus 1.5.32. SteamOS Gaming Mode and Fcitx 5 on SteamOS
-are not covered by this test. This does not guarantee binary compatibility with
+are not covered by this test. SteamOS acceptance covers installation and actual
+input, not performance benchmarks; those run on the two Ubuntu architectures.
+This does not guarantee binary compatibility with
 every distribution. If preflight reports incompatible libraries or an older
 Fcitx version, use a build for that distribution; do not disable its filesystem
 protection. See

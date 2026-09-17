@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.8.0 - Pending
+## 0.8.0 - 2026-09-18
 
 - Updated the engine and fresh simplified/traditional dictionaries to the
   Cassotis IME and Cassotis Lexicon v1.27.0 baseline.
