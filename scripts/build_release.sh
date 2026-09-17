@@ -128,6 +128,7 @@ bundle_name="cassotis-ime-linux-$version-$release_arch"
 bundle_dir="$work_dir/$bundle_name"
 install -d -m 0755 "$bundle_dir/root"
 cp -a "$stage_root/." "$bundle_dir/root/"
+python3 "$cassotis_root/scripts/stage_portable_opencc.py" "$bundle_dir/root"
 install -m 0755 "$cassotis_root/packaging/portable/install.sh" \
     "$bundle_dir/install.sh"
 install -m 0755 "$cassotis_root/packaging/portable/uninstall.sh" \

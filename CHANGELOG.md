@@ -16,8 +16,11 @@
 - Preserved learned exact-prefix priority using raw dictionary weights and
   bounded learning evidence, without reordering unlearned exact groups.
 - Added portable installation into writable user directories for read-only
-  systems, with dependency preflight and tracked upgrade/removal. SteamOS binary
-  compatibility still depends on its installed framework and runtime libraries.
+  systems, with dependency preflight and tracked upgrade/removal. Bundled an
+  isolated OpenCC fallback and preserved IBus input-source selection after
+  installation. Verified user installation and desktop input on SteamOS KDE
+  X11 with IBus; other framework/runtime combinations still require compatible
+  system dependencies.
 - Added joint local sentence repair with bilateral context verification,
   retaining existing candidates when model or dictionary evidence is insufficient.
 - Preserved corrected text through one-key completion and added bounded

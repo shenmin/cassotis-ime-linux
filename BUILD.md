@@ -104,8 +104,11 @@ Do not use `sudo`/`su`, `DESTDIR`, or disable the OS's read-only protection.
 The `--user` option requires an archive containing `install-support/`; older
 archives without that directory do not support this installation mode.
 
-The runtime requires Python 3.9+, PyGObject/GTK 3, SQLite 3, OpenCC (including
-conversion data), and the selected framework's runtime libraries. `ldd` is
+The runtime requires Python 3.9+, PyGObject/GTK 3, SQLite 3, and the selected
+framework's runtime libraries. A working system OpenCC and its conversion
+data take precedence; the portable bundle includes a private OpenCC/MARISA
+fallback for systems without them. The `.deb` uses system OpenCC dependencies.
+`ldd` is
 required for preflight checks. `--check` verifies bundle checksums, CPU
 architecture, native symbol dependencies, the compiled Fcitx minimum version,
 dynamic engine dependencies, destination ownership and available space. It
@@ -153,6 +156,7 @@ Fcitx versions from the binary build host. Passing the writable-directory
 check does not establish binary compatibility. A failed ABI preflight needs
 a compatible native build, not root privileges or forced dependency changes.
 SteamOS Gaming Mode and hardware-specific integration are not validated.
+See [COMPATIBILITY.md](COMPATIBILITY.md) for the tested SteamOS desktop setup.
 
 ## Build Packages
 

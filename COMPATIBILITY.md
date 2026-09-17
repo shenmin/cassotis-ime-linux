@@ -7,6 +7,7 @@
 | Ubuntu 26.04.1 x86_64, GNOME, Wayland | Native adapter, real daemon input-context smoke | Native addon, official testfrontend plus desktop discovery/reload | Automated framework matrix passed |
 | Ubuntu 26.04.1 x86_64, GNOME, X11 | Expected from the same framework APIs | Expected from the same framework APIs | Not yet release-gated |
 | Ubuntu 26.04.1 aarch64, GNOME, Wayland | Native adapter, real daemon input-context smoke | Native addon, official testfrontend plus desktop discovery/reload | Automated framework matrix passed |
+| SteamOS 3.8.14 x86_64, KDE, X11 | IBus 1.5.32, user-directory installation and real GTK input | Not installed on the test host | Candidate bundle install/upgrade/removal and desktop input passed |
 | Other distributions | Source build | Source build | Community-tested; no repackaged Debian binaries |
 
 The x86_64 release-gated host uses Ubuntu 26.04.1, Linux 7.0.0-30,
@@ -77,10 +78,21 @@ shortcut tests using relocated runtime files and registration metadata.
 Upgrade and removal retained the learned-word database. These checks do not
 modify the user's active desktop session.
 
-This validates the user-directory installation mechanism, not SteamOS itself.
-SteamOS Desktop Mode has not been tested on hardware; Gaming Mode is outside
-this validation. A compatible IBus or Fcitx 5 and the required runtime libraries
-must already be available. The installer refuses unsupported architectures,
+The candidate portable bundle was also tested on a SteamOS 3.8.14 x86_64 host
+(build 20260707.10, glibc 2.41), KDE X11, IBus 1.5.32 on 2026-09-17.
+Install, upgrade, uninstall and reinstall wrote only to the desktop user's
+writable directories and preserved the user database byte-for-byte. A real
+GTK entry field verified Chinese commit, raw Enter commit, bare Shift followed
+by an English period, a Shift-letter chord, traditional conversion and Tab
+completion. The settings UI check passed, and the installer preserved the
+selected English keyboard and other IBus input sources during refresh.
+No system OpenCC was installed: this test exercised the bundle's private
+OpenCC/MARISA libraries and conversion data, including their attribution files.
+No filesystem protection was changed. Gaming Mode and Fcitx 5 on SteamOS remain
+untested; the separate Ubuntu read-only namespace tests cover write protection.
+
+A compatible IBus or Fcitx 5 and the remaining runtime libraries must already
+be available. The installer refuses unsupported architectures,
 missing/ABI-incompatible dependencies, non-writable or noexec runtime paths,
 and conflicting installations before copying files. It never turns off OS
 filesystem protection or lowers compiled framework version requirements.

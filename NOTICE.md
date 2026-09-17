@@ -16,6 +16,13 @@ The program links to platform libraries supplied by the target Linux
 distribution, including Free Pascal runtime components, SQLite, OpenCC, GLib, IBus,
 Fcitx 5, GTK, and PyGObject. Their respective licenses remain unchanged.
 
+Portable binary bundles additionally include OpenCC and its conversion data
+(Apache-2.0), together with MARISA (BSD-2-Clause), as a fallback when a
+compatible system converter is unavailable. These files remain private to
+Cassotis; they are not installed into system library directories. The exact
+package versions, file hashes, attribution and license texts are supplied in
+`third-party/opencc` in the bundle's installed documentation.
+
 Binary builds bundle the official CPU distribution of ONNX Runtime 1.20.1
 for the selected architecture. ONNX Runtime is distributed under the MIT
 License. Its license and third-party notices are included under

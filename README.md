@@ -190,10 +190,14 @@ and dictionaries under `${XDG_DATA_HOME:-$HOME/.local/share}/cassotis-ime`,
 without writing to `/usr` or disabling filesystem protection. The framework
 must already be installed and enabled in the desktop session.
 
-This addresses read-only installation paths, not binary compatibility with
-every distribution. SteamOS has not been validated on hardware. If preflight
-reports incompatible libraries or an older Fcitx version, use a build for that
-distribution; do not disable its filesystem protection. See
+The portable bundle includes an isolated OpenCC fallback for systems without
+the conversion library or data; it does not replace system libraries. User
+installation, upgrade, removal and desktop input have been tested on SteamOS
+3.8.14, KDE X11 with IBus 1.5.32. SteamOS Gaming Mode and Fcitx 5 on SteamOS
+are not covered by this test. This does not guarantee binary compatibility with
+every distribution. If preflight reports incompatible libraries or an older
+Fcitx version, use a build for that distribution; do not disable its filesystem
+protection. See
 [user installation and removal](BUILD.md#portable-user-installation).
 
 Use `sudo ./uninstall.sh` only for a portable installation. Package installs

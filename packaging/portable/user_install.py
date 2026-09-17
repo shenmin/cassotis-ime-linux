@@ -246,6 +246,7 @@ def check_runtime(files: dict[str, Path], frameworks: list[str], environment: di
     runtime = files[LIBEXEC + "cassotis-engine"].parent
     environment = dict(environment, LD_LIBRARY_PATH=str(runtime))
     candidates = [p for n, p in files.items() if n.startswith(LIBEXEC) and
+                  not n.startswith(LIBEXEC + 'opencc/') and
                   (n.endswith(".so") or ".so." in n)]
     candidates.extend(files[LIBEXEC + n] for n in ("cassotis-engine", "cassotis-control"))
     if "ibus" in frameworks:
@@ -279,25 +280,55 @@ def check_runtime(files: dict[str, Path], frameworks: list[str], environment: di
     command([sys.executable, "-c", "import ctypes; ctypes.CDLL('libsqlite3.so.0')"],
             env=environment, required=True)
     # These libraries are loaded dynamically by the engine, not listed by ldd.
+    for name in ('libopencc.so', 'libmarisa.so'):
+        private_library = runtime / 'opencc' / name
+        if private_library.exists():
+            check_elf(private_library, platform.machine())
     command([sys.executable, "-c", """
 import ctypes
+from pathlib import Path
+import sys
+
+def usable(lib, directory):
+    lib.opencc_open.argtypes = [ctypes.c_char_p]
+    lib.opencc_open.restype = ctypes.c_void_p
+    lib.opencc_close.argtypes = [ctypes.c_void_p]
+    lib.opencc_convert_utf8.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t]
+    lib.opencc_convert_utf8.restype = ctypes.c_void_p
+    lib.opencc_convert_utf8_free.argtypes = [ctypes.c_void_p]
+    samples = (('s2t.json', '\u6c49\u8bed', '\u6f22\u8a9e'), ('t2s.json', '\u6f22\u8a9e', '\u6c49\u8bed'))
+    for config, source, expected in samples:
+        path = str(directory / config) if directory else config
+        handle = lib.opencc_open(path.encode())
+        if handle in (None, ctypes.c_void_p(-1).value):
+            return False
+        output = None
+        try:
+            encoded = source.encode()
+            output = lib.opencc_convert_utf8(handle, encoded, len(encoded))
+            if not output or ctypes.string_at(output).decode() != expected:
+                return False
+        finally:
+            if output:
+                lib.opencc_convert_utf8_free(output)
+            lib.opencc_close(handle)
+    return True
+
 for name in ('libopencc.so.1.1', 'libopencc.so.2', 'libopencc.so.1'):
     try:
-        lib = ctypes.CDLL(name)
-        break
-    except OSError:
+        if usable(ctypes.CDLL(name), None):
+            raise SystemExit(0)
+    except (OSError, AttributeError):
         pass
-else:
-    raise SystemExit('Missing a compatible OpenCC runtime')
-lib.opencc_open.argtypes = [ctypes.c_char_p]
-lib.opencc_open.restype = ctypes.c_void_p
-lib.opencc_close.argtypes = [ctypes.c_void_p]
-for config in (b's2t.json', b't2s.json'):
-    handle = lib.opencc_open(config)
-    if handle in (None, ctypes.c_void_p(-1).value):
-        raise SystemExit('Missing OpenCC conversion data: ' + config.decode())
-    lib.opencc_close(handle)
-"""], env=environment, required=True)
+directory = Path(sys.argv[1]) / 'opencc'
+try:
+    dependency = ctypes.CDLL(str(directory / 'libmarisa.so'))
+    if usable(ctypes.CDLL(str(directory / 'libopencc.so')), directory):
+        raise SystemExit(0)
+except (OSError, AttributeError) as error:
+    raise SystemExit('Incompatible OpenCC fallback: ' + str(error))
+raise SystemExit('Missing or incompatible OpenCC conversion data')
+""", str(runtime)], env=environment, required=True)
     version = command([str(runtime / "cassotis-engine"), "--version"], env=environment, required=True)
     return version.stdout.strip()
 
@@ -532,10 +563,32 @@ def gnome_sources(add: bool) -> None:
         command(["gsettings", "set", schema, key, repr(items)])
 
 
+def ibus_sources(add: bool) -> None:
+    schema = 'org.freedesktop.ibus.general'
+    key = 'preload-engines'
+    result = command(['gsettings', 'get', schema, key])
+    if result is None or result.returncode:
+        return
+    try:
+        items = ast.literal_eval(result.stdout.strip().removeprefix('@as '))
+    except (ValueError, SyntaxError):
+        return
+    if not isinstance(items, list) or any(not isinstance(item, str) for item in items):
+        return
+    if add and 'cassotis' not in items:
+        items.append('cassotis')
+    if not add:
+        items = [item for item in items if item != 'cassotis']
+    command(['gsettings', 'set', schema, key, repr(items)])
+
+
 def refresh(layout: Layout, frameworks: list[str], *, previous_frameworks=(), no_refresh=False) -> None:
     affected = set(frameworks) | set(previous_frameworks)
     environment = dict(os.environ, IBUS_COMPONENT_PATH=ibus_component_path(layout))
     if "ibus" in affected:
+        current = command(['ibus', 'engine'])
+        selected = (current.stdout.strip() if current is not None and
+                    current.returncode == 0 else '')
         command(["ibus", "write-cache"], env=environment)
     command(["update-desktop-database", str(layout.roots["data"] / "applications")])
     command(["gtk-update-icon-cache", "-q", "-t", str(layout.roots["data"] / "icons/hicolor")])
@@ -573,6 +626,10 @@ def refresh(layout: Layout, frameworks: list[str], *, previous_frameworks=(), no
         for key, value in saved.items():
             command(["gsettings", "set", schema, key, value])
         gnome_sources("ibus" in frameworks)
+        if 'gnome' not in os.environ.get('XDG_CURRENT_DESKTOP', '').lower():
+            ibus_sources('ibus' in frameworks)
+        if restarted and selected and (selected != 'cassotis' or 'ibus' in frameworks):
+            command(['ibus', 'engine', selected], env=environment)
     if "fcitx5" in affected:
         helper = Path(__file__).with_name("fcitx5_profile.py")
         profile = layout.roots["config"] / "fcitx5/profile"
