@@ -152,13 +152,12 @@ the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
 
-## v1.29.0 Pre-Release Measurements
+## v0.9.0 Native Measurements
 
-The native v1.29.0 port runs use the frozen inputs listed above. Full short-word
-runs were repeated after adopting the 60 ms contextual inference budget. The
-long-sentence and completion measurements precede that short-only budget change;
-they are retained separately rather than presented as a fresh full-release run.
-Final source-revision and package qualification is still required before release.
+The full native runs on 2026-09-28 use the frozen v1.29.0 inputs listed above,
+fresh product builds, the deployed 60 ms short-context inference budget and
+both complete long-completion tracks. Package and desktop coverage is recorded
+separately in [COMPATIBILITY.md](COMPATIBILITY.md).
 
 | Platform | Long Top1 / 16,300 | Long Top2 / 16,300 | Short Top1, context off / 65,000 | Short Top1, context on / 65,000 | Short Top2, context on / 65,000 |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -174,39 +173,47 @@ imply identical per-case predictions. Relative to its earlier 30 ms run, x86_64
 has 92 Top1 gains and 21 losses, a net gain of 71; aarch64 target ranks are
 unchanged. Model parameters and quality/latency/memory gates were not relaxed.
 
-The 60 ms short-word runs measured:
+Production-mode query latency is measured separately from long accuracy:
 
-| Architecture | Context | Mean | P50 | P95 | Maximum |
+| Architecture | Track | Mean | P50 | P95 | Maximum |
 | --- | --- | ---: | ---: | ---: | ---: |
-| x86_64 | Off | 6.608 ms | 4 ms | 19 ms | 45 ms |
-| x86_64 | On | 12.540 ms | 7 ms | 35 ms | 75 ms |
-| aarch64 | Off | 3.711 ms | 3 ms | 10 ms | 30 ms |
-| aarch64 | On | 5.196 ms | 4 ms | 14 ms | 28 ms |
+| x86_64 | Long sentence | 160.922 ms | 177 ms | 292 ms | 808 ms |
+| x86_64 | Short, context off | 6.960 ms | 5 ms | 20 ms | 56 ms |
+| x86_64 | Short, context on | 12.791 ms | 8 ms | 36 ms | 88 ms |
+| aarch64 | Long sentence | 62.126 ms | 60 ms | 118 ms | 414 ms |
+| aarch64 | Short, context off | 3.757 ms | 3 ms | 10 ms | 25 ms |
+| aarch64 | Short, context on | 5.281 ms | 4 ms | 14 ms | 31 ms |
 
-Short-run process high-water marks are 602,604 KiB and 586,760 KiB respectively.
+Full quality-process high-water marks are 990,440 KiB and 991,168 KiB respectively,
+below the unchanged 1,048,576 KiB ceiling.
 These are different hosts, not a controlled architecture speed comparison.
 
-The preceding complete long-completion runs measured:
+Both long-completion tracks run all 16,300 cases:
 
 | Platform and deadline | Hits / 16,300 | Saved keys |
 | --- | ---: | ---: |
 | Windows v1.29.0 reference, unlimited | 424 | 987 |
 | Linux x86_64, unlimited | 424 | 987 |
 | Linux aarch64, unlimited | 423 | 979 |
-| Linux x86_64, production 50 ms | 423 | 986 |
+| Linux x86_64, production 50 ms | 423 | 979 |
 | Linux aarch64, production 50 ms | 423 | 979 |
 
-The aarch64 deficit is one hit and eight saved keys, within the nine-count
-allowance. Short completion matches on both architectures: 12,831 opportunities,
+The aarch64 accuracy deficit is one hit and eight saved keys, within the
+nine-count allowance. Both production runs have the same deficit; the x86_64
+deadline-free run matches Windows. Short completion matches on both architectures: 12,831 opportunities,
 12,775 prompts, 9,420 hits, 24,006 saved keys and 1,691/1,749 stable pairs.
 An independent replay of the original Windows v1.29.0 runner confirms the
 updated exact signature `1349AAD4C2D7416C`; historical signatures were retained.
 
+Production completion total mean/P50/P95/maximum is 88.632/46/244/576 ms on
+x86_64 and 36.767/31/90/319 ms on aarch64, including final-candidate work.
+Short completion measures 0.806/1/2/18 ms and 0.433/0/1/12 ms respectively.
+
 Both rebuilt core suites pass 491 tests. With native model initialization held,
-first-key/maximum latency is 28.614/49.882 ms on x86_64 and 13.321/49.064 ms on
-aarch64. Separate process-cold trials measure 40.347/118.323 ms and
-22.316/56.777 ms. OS caches were not dropped; these key timings exclude service
-startup, measured separately at about 2.62 s and 1.44 s. Ordinary input therefore
+first-key/maximum latency is 20.545/45.068 ms on x86_64 and 13.609/45.690 ms on
+aarch64. Separate process-cold trials measure 32.554/100.270 ms and
+20.441/74.212 ms. OS caches were not dropped; these key timings exclude service
+startup, measured separately at about 2.29 s and 1.41 s. Ordinary input therefore
 does not wait for model initialization, but service launch is not instantaneous.
 
 ## Historical v1.27.0 Qualification

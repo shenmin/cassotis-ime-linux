@@ -26,6 +26,8 @@
   contexts, and retained ordinary candidates when optional inference is unavailable.
 - Prevented background model verification from retaining input-service sockets
   during shutdown, so framework reconnection does not reuse a closing service.
+- Cleaned up each packaging attempt's temporary staging directory on success or
+  failure, without removing generated release archives or earlier work.
 
 ## 0.8.0 - 2026-09-18
 

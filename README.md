@@ -86,7 +86,7 @@ cloud service, network connection, or GPU.
 
 ## Supported Release
 
-The v0.9.0 source follows Cassotis IME and Cassotis Lexicon v1.29.0, with fresh
+v0.9.0 follows Cassotis IME and Cassotis Lexicon v1.29.0, with fresh
 schema-24 dictionaries containing 249,342 simplified and 252,554 traditional
 base records. These counts include single-character readings from Unihan and
 other sources as well as multi-character entries; a character or word may have

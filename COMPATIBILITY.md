@@ -1,14 +1,15 @@
 # Compatibility
 
-## v0.9.0 Pre-Release Validation
+## v0.9.0 Validation
 
 The v1.29.0 engine/dictionary port and Linux 60 ms short-context inference budget
-have passed the following development-package checks. These results supplement,
-not replace, qualification of the eventual published source revision and assets.
+use the following native and installed-package coverage. Full corpus measurements
+were completed on 2026-09-28; each final package must also pass payload, lifecycle
+and desktop checks from its recorded source revision before publication.
 
 | Platform | Verified checks |
 | --- | --- |
-| Ubuntu x86_64 and aarch64 | Native core/runtime tests; full affected short-word suites; blocked-model and process-cold input; IPC stress and restart recovery |
+| Ubuntu x86_64 and aarch64 | 491 core tests per architecture; complete long-sentence, short-word and completion suites; blocked-model and process-cold input; IPC stress and restart recovery |
 | Ubuntu x86_64 and aarch64 | Debian v0.8.0-to-v0.9.0 upgrade, removal/reinstallation, immediate GNOME discovery and unchanged personal-dictionary hashes |
 | Ubuntu x86_64 and aarch64 | Installed-package GTK 3/4 input under IBus/Fcitx 5, each with Wayland and XWayland clients: eight combinations per architecture |
 | Ubuntu x86_64 and aarch64 | Relocated portable user installation with a read-only `/usr`, native tests for both frameworks, upgrade/removal and retained user data |
@@ -20,12 +21,20 @@ the isolated Ubuntu namespaces. No SteamOS corpus benchmark was required.
 The SteamOS Fcitx 5 and Gaming Mode combinations remain untested. The input
 assertions do not establish candidate placement or mixed-DPI rendering correctness.
 Aggregate quality results and timing scope are recorded in
-[BENCHMARK.md](BENCHMARK.md#v1290-pre-release-measurements) and
-[BENCHMARK.CN.md](BENCHMARK.CN.md#v1290-发布前实测).
+[BENCHMARK.md](BENCHMARK.md#v090-native-measurements) and
+[BENCHMARK.CN.md](BENCHMARK.CN.md#v090-原生实测).
 
-The release matrix below records the previously published v0.8.0 qualification.
+Both Ubuntu hosts run GNOME Wayland with IBus 1.5.34-rc2 and Fcitx 5.1.19.
+The final package checks include both frameworks and all eight GTK/backend
+combinations per architecture. SteamOS acceptance uses the final x86_64 portable
+bundle; it is not an additional corpus-performance qualification.
 
-## Binary Release Matrix
+Chromium/Electron, standalone GNOME X11 sessions, Gaming Mode and mixed-DPI
+candidate placement are not claimed as newly verified by these automated runs.
+Framework-managed candidate rendering still needs application-specific manual
+observation; a successful text-commit assertion is not a visual-placement test.
+
+## Historical v0.8.0 Release Matrix
 
 | Platform | IBus | Fcitx 5 | Status |
 | --- | --- | --- | --- |
