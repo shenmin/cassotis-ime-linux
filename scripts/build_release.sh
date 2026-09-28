@@ -60,6 +60,7 @@ done
 cassotis_require_linux
 cassotis_require_command dpkg-deb
 cassotis_require_command install
+cassotis_require_command mktemp
 cassotis_require_command realpath
 cassotis_require_command sha256sum
 cassotis_require_command tar
@@ -86,10 +87,27 @@ esac
 resolved_output="$(realpath -m -- "$output_dir")"
 [[ "$resolved_output" != '/' && "$resolved_output" != "$cassotis_root" ]] ||
     cassotis_die "refusing unsafe output directory: $resolved_output"
-work_dir="$cassotis_root/build/release-work"
+work_parent="$cassotis_root/build"
+[[ ! -L "$work_parent" && "$(realpath -m -- "$work_parent")" == "$work_parent" ]] ||
+    cassotis_die "refusing unsafe staging parent: $work_parent"
+install -d -m 0755 "$work_parent" "$resolved_output"
+work_dir="$(mktemp -d "$work_parent/release-work.XXXXXX")"
+cleanup_release_work() {
+    local result=$?
+    if [[ -e "$work_dir" || -L "$work_dir" ]]; then
+        if [[ -L "$work_dir" || "$(realpath -m -- "$work_dir")" != "$work_dir" ||
+              "$(dirname -- "$work_dir")" != "$work_parent" ]]; then
+            printf 'Error: refusing unsafe staging cleanup: %s\n' "$work_dir" >&2
+            return 1
+        fi
+        rm -rf -- "$work_dir" || result=$?
+    fi
+    return "$result"
+}
+trap cleanup_release_work EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 stage_root="$work_dir/root"
-rm -rf -- "$work_dir"
-install -d -m 0755 "$work_dir" "$resolved_output"
 
 # The output path is user-controlled. Never recursively delete it: accept an
 # empty directory or a directory containing only artifacts from an earlier
