@@ -19,7 +19,7 @@
 本项目源自
 [言泉输入法 Windows 版](https://github.com/shenmin/cassotis-ime)，并使用
 [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon) 生成的词库。
-共享的 Free Pascal 引擎以言泉输入法 v1.27.0 为行为基线，移植了候选召回、
+共享的 Free Pascal 引擎以言泉输入法 v1.29.0 为行为基线，移植了候选召回、
 短词排序、长句排序、一键补全、用户学习、模糊拼音与双拼逻辑，并接入语料训练
 的多阶段排序链、用于歧义长句的拼音条件 Transformer 评分器、文档局部自适应与
 复制补全、受约束的拼音对齐候选生成、同时具有词库与读音修复和生成式后备召回的
@@ -34,14 +34,17 @@
 - 全拼支持 `lue`/`nue` 与 `lve`/`nve` 两种写法，也支持 `jv`/`qv`/`xv` 音节
   对应的规范 `ju`/`qu`/`xu` 拼写；显式隔音符仍严格分隔音节，
   音节边界有歧义或已确认部分词语时，仍可选择完整前缀词及相应单字。
-- 移植言泉输入法 v1.27.0 的短词、上下文候选和长句本地统计排序模型链；
+- 移植言泉输入法 v1.29.0 的短词、上下文候选和长句本地统计排序模型链；
   歧义长句比较可以使用与 Windows 版相同的宿主侧条件评分器和受约束候选生成器，
-  并由学习式门控决定是否采用模型结果；短词 exact 查询仍使用独立的确定性排序路径。
+  并由学习式门控决定是否采用模型结果。独立的短词模型可根据前文，谨慎调整前两个
+  完整词库候选的顺序；保留用户选择优先级，不改动单字和模糊匹配。
 - 六层 INT8 本地修复模型可改进拼音完整对齐的简体长句中的同音字错误，保留短词、
   完整词库词和用户词查询，并在替换词片段前检查词库证据。最多缓存光标前最新的
   256 个字符，上下文缓存仅驻留内存，不会上传服务器或写入磁盘。
 - 联合候选选择与双向上下文校验共同改进本地长句修复，证据不足时保留原有候选；
   修正后的文本与一键补全保持对齐。
+- 拼音对齐的文学用语修复可改善长句候选，同时保护用户词；长句中的较长前缀仍可
+  单独选择，短词组合也使用与 Windows 引擎一致的词库和语言模型证据。
 - 文档局部自适应只使用当前框架已提供的光标附近文本，临时提升文档内重复术语、
   转移关系和已经出现过的续写；有界证据按输入上下文隔离，并在上下文结束时清除，
   不会持久化文档内容。
@@ -61,31 +64,27 @@
 
 ## 已验证发行环境
 
-v0.8.0 源码以言泉输入法和 Cassotis Lexicon v1.27.0 为行为和数据基线，
-重新构建 schema 24 词库，包含 213,493 条简体词条及 216,708 条繁体词条。
-相比 v0.7.0，新版加入联合长句修复与双向上下文校验，确保一键补全保留修正后的
-文本，并在后台提前准备补全结果，不让每次按键等待补全推理。
-持续输入中的 `zh`/`ch`/`sh` 处理和完整词片段排序得到改进，
-同时修复紫光双拼的音节边界问题。复用的长句路径会重新检查当前音节及显式隔音符，
-五音节输入恢复完整的长句排序路径；学习过的完整前缀保留用户词优先级，并使用
-有上限的词频证据。新增完整尾词 Tab 兜底转换，与预测续写分别处理。
-简繁显示使用 OpenCC 转换，切换模式后仍保留
-用户词的学习与删除身份。统一的推理精度配置避免不支持 VNNI 的 x86 CPU
-出现量化整数运算饱和。等待后台结果时仍保留静态补全，模型置信不足时保持原有候选。
-aarch64 还修复了编译器特定的有符号分数比较问题，避免有效长句路径被误判为
-不可达，不改变排序权重。
+v0.9.0 源码以言泉输入法和 Cassotis Lexicon v1.29.0 为行为和数据基线，
+重新构建 schema 24 字词库，简体、繁体基础库分别有 249,342 和 252,554 条记录。
+此数量包含 Unihan 等来源的单字读音条目及多字词条；同一字词可有多种读音记录，
+不等于去重后的词语数量。简体包含 23,918 条单字记录和 225,424 条多字记录，
+繁体包含 24,177 条单字记录和 228,377 条多字记录。
+相比 v0.8.0，新版加入短词上下文判别与文学用语修复，改进长句部分选择、短词组合
+召回和模糊音常用单字排序。补充读音不会重复累计同一文本的热度证据；扩充的专业
+词条保持低权重，仅参与完整匹配，不挤占预测补全。
+预计算拼音兼容关系与索引化尾词查询减少重复分配和扫描，保持既定匹配规则。
+等待后台结果时仍保留静态补全，模型置信不足时保持原有候选。
 模型加载与预热在后台完成，就绪前仍可通过词库和原有排序正常输入、上屏及
 使用静态补全，不让首次输入等待神经模型加载。
 
 x86_64 与 aarch64 使用与 Windows 相同的 16,300 条长句和 65,000 条短词
-进行原生测量。两组短词成绩均与 Windows v1.27.0 相同，长句 Top1/Top2
-差异不超过三条。准确度、延迟、内存及跨平台差异记录在
+进行原生测量。准确度、延迟、内存及跨平台差异记录在
 [BENCHMARK.CN.md](BENCHMARK.CN.md)，不假定不同 CPU 的神经模型决策完全相同。
 发行检查还覆盖原生核心与词库测试、安装包内容、冷启动响应和自动化 IBus/Fcitx
 桌面矩阵。桌面与输入框架的具体测试范围见
 [COMPATIBILITY.md](COMPATIBILITY.md)。
 
-v0.8.0 面向 amd64 与 arm64 提供 `.deb` 安装包和便携二进制包。验证环境为
+v0.9.0 面向 amd64 与 arm64 提供 `.deb` 安装包和便携二进制包。验证环境为
 两个架构的 Ubuntu 26.04.1 GNOME Wayland，结果记录在
 [BENCHMARK.CN.md](BENCHMARK.CN.md)。已发布安装包及校验信息请以
 [GitHub Releases](https://github.com/shenmin/cassotis-ime-linux/releases) 为准。
@@ -102,13 +101,25 @@ v0.8.0 面向 amd64 与 arm64 提供 `.deb` 安装包和便携二进制包。验
 
 ## 安装
 
+先按系统环境选择安装方式，避免在只读系统中执行系统级安装命令：
+
+| 系统环境 | 下载格式 | 安装方式 |
+| --- | --- | --- |
+| 依赖兼容的 Debian、Ubuntu 及衍生系统 | `.deb` | [APT 安装](#debian-installation) |
+| SteamOS 桌面模式等系统目录只读的环境 | `.tar.gz` | [用户目录安装，无需 sudo](#user-installation) |
+| 其他具有兼容运行库、系统目录可写的发行版 | `.tar.gz` | [便携包的系统安装](#system-installation) |
+
+<a id="debian-installation"></a>
+
+### Debian / Ubuntu：APT 安装
+
 从 [GitHub Releases](https://github.com/shenmin/cassotis-ime-linux/releases)
 下载与系统架构相符的 `.deb`，将本地计算的 SHA-256 与 Release 资产信息中
 显示的摘要核对一致后，再用 APT 安装：
 
 ```bash
 arch="$(dpkg --print-architecture)"  # 输出 amd64 或 arm64
-package="cassotis-ime_0.8.0_${arch}.deb"
+package="cassotis-ime_0.9.0_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -127,33 +138,45 @@ sudo apt install "./${package}"
 `fcitx5-configtool` 中 Cassotis 的配置操作打开。安装后的备用命令是
 `/usr/libexec/cassotis-ime/cassotis-settings`。
 
-也可以校验并安装与系统架构相符的便携二进制包：
+通过 APT 安装的版本使用 `sudo apt remove cassotis-ime` 卸载，用户词库和
+设置会保留。
 
-```bash
-arch="$(uname -m)"  # 输出 x86_64 或 aarch64
-archive="cassotis-ime-linux-0.8.0-${arch}.tar.gz"
-sha256sum "${archive}"
-tar -xzf "${archive}"
-cd "cassotis-ime-linux-0.8.0-${arch}"
-sudo ./install.sh
-```
+<a id="user-installation"></a>
 
-便携安装器不会自动解决运行库依赖，所需库见 [BUILD.md](BUILD.md)。
+### SteamOS 等只读系统：用户目录安装
 
-对于系统目录只读的环境，可以安装到当前桌面用户的可写目录。
+先从 [GitHub Releases](https://github.com/shenmin/cassotis-ime-linux/releases)
+下载与 `uname -m` 对应的便携包（`x86_64` 或 `aarch64`），并核对 SHA-256。
+在 SteamOS 的**桌面模式**或其他系统目录只读的桌面环境中，使用当前发布的
+便携二进制包，将程序安装到个人目录。不要沿用旧包中的安装脚本，也不要运行
+`sudo ./install.sh`。请先结束正在输入的拼音，再在当前桌面用户的终端执行；
 以下命令**不要使用 `sudo` 或 `su`**：
 
 ```bash
-./install.sh --user --check
+arch="$(uname -m)"  # 输出 x86_64 或 aarch64
+archive="cassotis-ime-linux-0.9.0-${arch}.tar.gz"
+sha256sum "${archive}"
+tar -xzf "${archive}"
+cd "cassotis-ime-linux-0.9.0-${arch}"
+./install.sh --user --check &&
 ./install.sh --user
 ```
+
+`--check` 只做预检，不安装文件；通过后才执行下一行安装命令。
 
 自动选择时，KDE 优先使用已安装的 Fcitx 5，GNOME 优先使用 IBus；也可以通过
 `--framework fcitx5` 或 `--framework ibus` 明确选择。安装器会先检查架构、
 动态库/ABI 依赖和框架版本，通过后才复制文件。程序安装在
 `~/.local/libexec/cassotis-ime`，词库安装在
 `${XDG_DATA_HOME:-$HOME/.local/share}/cassotis-ime`，不写入 `/usr`，不关闭系统
-只读保护。所选框架本身需要已安装，并已启用为桌面的输入法框架。
+只读保护。所选框架本身需要已安装，并已启用为桌面的输入法框架；
+安装器不会自动安装依赖或替换当前桌面框架。指定框架时，两条命令均加上
+相同的参数，例如 `./install.sh --user --framework ibus --check` 和
+`./install.sh --user --framework ibus`。
+
+安装后在当前框架中选择 Cassotis；若列表未刷新，重启该框架或重新登录。
+用户目录安装的设置备用命令为
+`~/.local/libexec/cassotis-ime/cassotis-settings`。
 
 便携包附带独立的 OpenCC 简繁转换运行库及数据，在系统缺少它们时使用，
 不会替换系统动态库。已在 SteamOS 3.8.14 的 KDE X11 桌面、IBus 1.5.32 下
@@ -164,14 +187,29 @@ sudo ./install.sh
 二进制，不应通过关闭系统只读保护处理。
 详见 [用户目录安装与卸载](BUILD.md#portable-user-installation)。
 
-只有使用便携包安装时才使用 `sudo ./uninstall.sh` 卸载；通过软件包安装的
-版本应执行 `sudo apt remove cassotis-ime`。两种卸载方式都不会删除用户词库
-和设置，并会在安装、卸载时刷新桌面元数据及活动输入法会话。软件包只建议
-安装 IBus 或 Fcitx 5 其中一个框架，不会建议同时安装两个桌面守护进程。
-
+升级时解压新版便携包，以同一桌面用户再次运行上述预检与安装命令。
 使用 `--user` 安装的版本应通过 `./uninstall.sh --user` 卸载，**不要加 sudo**。
 它只移除安装清单中未经修改的程序文件，保留用户词库和设置。不要混用系统安装、
 源码用户目录安装和便携用户目录安装。
+
+<a id="system-installation"></a>
+
+### 其他系统：便携包的系统安装
+
+仅当系统目录可写、具有管理员权限且运行库兼容时，才使用以下方式。
+SteamOS 等只读系统请使用上面的[用户目录安装](#user-installation)。
+
+```bash
+arch="$(uname -m)"  # 输出 x86_64 或 aarch64
+archive="cassotis-ime-linux-0.9.0-${arch}.tar.gz"
+sha256sum "${archive}"
+tar -xzf "${archive}"
+cd "cassotis-ime-linux-0.9.0-${arch}"
+sudo ./install.sh
+```
+
+便携安装器不会自动解决运行库依赖，所需库见 [BUILD.md](BUILD.md)。
+仅这种系统级便携安装使用 `sudo ./uninstall.sh` 卸载，用户词库和设置会保留。
 
 ## 构建与测试
 

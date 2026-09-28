@@ -20,8 +20,100 @@ procedure nc_copy_candidate_page(const candidates: TncCandidateList;
 procedure nc_order_candidate_prefix_tiers(var candidates: TncCandidateList;
     var sources: TArray<Integer>; const prefix_units: TArray<Integer>;
     const max_prefix_units: Integer);
+function nc_sentence_prefix_candidates(const anchor: TncCandidate;
+    const words, remaining_pinyin: TArray<string>; const limit: Integer): TncCandidateList;
+procedure nc_insert_sentence_prefixes(var pool: TncCandidateList;
+    var sources: TArray<Integer>; const prefixes: TncCandidateList;
+    const head_count: Integer);
 
 implementation
+
+function nc_sentence_prefix_candidates(const anchor: TncCandidate;
+    const words, remaining_pinyin: TArray<string>; const limit: Integer): TncCandidateList;
+var
+    text: string;
+    ends: TArray<Integer>;
+    i, count, previous_length: Integer;
+begin
+    Result := nil;
+    if (Length(words) < 2) or (Length(words) <> Length(remaining_pinyin)) or
+        (limit <= 0) then Exit;
+    SetLength(ends, Length(words));
+    text := '';
+    for i := 0 to High(words) do
+    begin
+        if words[i] = '' then Exit;
+        text := text + words[i];
+        ends[i] := Length(text);
+    end;
+    if text <> anchor.text then Exit;
+    previous_length := Length(text) + 1;
+    for i := High(words) - 1 downto 0 do
+    begin
+        // Distinct stopping points, not a staircase of near-identical single cuts.
+        if (ends[i] < 4) or (previous_length - ends[i] < 2) or
+            (remaining_pinyin[i] = '') then Continue;
+        count := Length(Result);
+        SetLength(Result, count + 1);
+        Result[count] := Default(TncCandidate);
+        Result[count].text := Copy(text, 1, ends[i]);
+        Result[count].comment := remaining_pinyin[i];
+        Result[count].score := anchor.score;
+        Result[count].source := cs_rule;
+        Result[count].display_kind := cdk_sentence_prefix;
+        previous_length := ends[i];
+        if Length(Result) >= limit then Break;
+    end;
+end;
+
+procedure nc_insert_sentence_prefixes(var pool: TncCandidateList;
+    var sources: TArray<Integer>; const prefixes: TncCandidateList;
+    const head_count: Integer);
+var
+    merged: TncCandidateList;
+    merged_sources: TArray<Integer>;
+    i, j, count: Integer;
+    duplicate: Boolean;
+begin
+    if (Length(pool) <> Length(sources)) or (head_count < 0) or
+        (head_count > Length(pool)) then
+        raise EArgumentException.Create('Invalid sentence prefix pool');
+    if Length(prefixes) = 0 then Exit;
+    SetLength(merged, Length(pool) + Length(prefixes));
+    SetLength(merged_sources, Length(merged));
+    count := 0;
+    for i := 0 to head_count - 1 do
+    begin
+        merged[count] := pool[i];
+        merged_sources[count] := sources[i];
+        Inc(count);
+    end;
+    for i := 0 to High(prefixes) do
+    begin
+        merged[count] := prefixes[i];
+        merged_sources[count] := -1;
+        Inc(count);
+    end;
+    for i := head_count to High(pool) do
+    begin
+        duplicate := False;
+        for j := 0 to head_count + Length(prefixes) - 1 do
+            if nc_visible_candidate_key(pool[i], pool[i].comment) =
+                nc_visible_candidate_key(merged[j], merged[j].comment) then
+            begin
+                duplicate := True;
+                Break;
+            end;
+        if duplicate then Continue;
+        merged[count] := pool[i];
+        merged_sources[count] := sources[i];
+        Inc(count);
+    end;
+    SetLength(merged, count);
+    SetLength(merged_sources, count);
+    pool := merged;
+    sources := merged_sources;
+end;
 
 function nc_visible_candidate_key(const candidate: TncCandidate;
     const normalized_tail: string): string;

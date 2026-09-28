@@ -118,11 +118,17 @@ end;
 function is_initial_final_compatible_common(const initial_value: string;
     const final_value: string): Boolean;
 begin
+    // "er" is a zero-initial syllable. Accepting synthetic initial+er
+    // syllables (ner/ger/...) makes compact streams such as "pingwener"
+    // prefer "ping+we+ner" over the intended "ping+wen+er".
     if final_value = 'er' then
     begin
         Exit(False);
     end;
 
+    // b/p/m/f/w can take bare "u" (bu/pu/mu/fu/wu), but not medial-u
+    // finals such as ue/uan/uai/uo. Without this, missing-apostrophe input
+    // like "bue" is greedily parsed as invalid "bue" instead of "bu"+"e".
     if ((initial_value = 'b') or (initial_value = 'p') or
         (initial_value = 'm') or (initial_value = 'f') or
         (initial_value = 'w')) and (Length(final_value) > 1) and
@@ -131,12 +137,19 @@ begin
         Exit(False);
     end;
 
+    // y/w are spelling helpers in pinyin, so their legal combinations are
+    // much narrower than ordinary initials. Use allowlists here: accepting
+    // synthetic spellings such as yian, yuai, or wuan steals compact-input
+    // boundaries (for example, yu+ai becomes the invalid single unit yuai).
     if not nc_is_pinyin_spelling_helper_compatible(initial_value,
         final_value) then
     begin
         Exit(False);
     end;
 
+    // j/q/x use u as the written form of ü only for u/ue/uan/un.
+    // Other u-medial finals are invalid and otherwise steal boundaries,
+    // e.g. "quangao" becomes invalid "quang"+"ao" instead of "quan"+"gao".
     if (initial_value = 'j') or (initial_value = 'q') or
         (initial_value = 'x') then
     begin
@@ -148,6 +161,8 @@ begin
         end;
     end;
 
+    // Restrict obviously invalid retroflex/alveolar combinations to avoid
+    // greedy wrong splits like "zhineng" -> "zhin + eng" (expected "zhi + neng").
     if (initial_value = 'zh') or (initial_value = 'ch') or
         (initial_value = 'sh') or (initial_value = 'r') or
         (initial_value = 'z') or (initial_value = 'c') or
@@ -165,6 +180,9 @@ begin
         end;
     end;
 
+    // These initials do not form standard iang/iong syllables. Allowing
+    // synthetic forms like "diang" makes compact streams such as
+    // "dian+geng" tie with the wrong "diang+eng" parse.
     if ((initial_value = 'b') or (initial_value = 'p') or
         (initial_value = 'm') or (initial_value = 'f') or
         (initial_value = 'd') or (initial_value = 't') or
@@ -176,6 +194,28 @@ begin
     end;
 
     Result := True;
+end;
+
+var
+    // Precomputed is_initial_final_compatible_common over the constant tables;
+    // the parser's DP probes every pair at every input position.
+    g_initial_final_compatible: array[Low(c_initials)..High(c_initials),
+        Low(c_finals)..High(c_finals)] of Boolean;
+
+procedure build_initial_final_compatibility;
+var
+    initial_idx: Integer;
+    final_idx: Integer;
+begin
+    for initial_idx := Low(c_initials) to High(c_initials) do
+    begin
+        for final_idx := Low(c_finals) to High(c_finals) do
+        begin
+            g_initial_final_compatible[initial_idx, final_idx] :=
+                is_initial_final_compatible_common(c_initials[initial_idx],
+                c_finals[final_idx]);
+        end;
+    end;
 end;
 
 function nc_is_canonical_pinyin_syllable(const value: string): Boolean;
@@ -236,94 +276,30 @@ var
     memo_done: TncBooleanArray;
 
     function has_prefix(const source: string; const start_index: Integer; const value: string): Boolean;
+    var
+        value_length: Integer;
+        char_idx: Integer;
     begin
-        if value = '' then
+        value_length := Length(value);
+        if value_length = 0 then
         begin
             Exit(False);
         end;
 
-        if start_index + Length(value) > Length(source) then
+        if start_index + value_length > Length(source) then
         begin
             Exit(False);
         end;
 
-        Result := Copy(source, start_index + 1, Length(value)) = value;
-    end;
-
-    function is_initial_final_compatible(const initial_value: string; const final_value: string): Boolean;
-    begin
-        // "er" is a zero-initial syllable. Accepting synthetic initial+er
-        // syllables (ner/ger/...) makes compact streams such as "pingwener"
-        // prefer "ping+we+ner" over the intended "ping+wen+er".
-        if final_value = 'er' then
+        // Same result as comparing Copy(source, start_index + 1, value_length)
+        // with value, without allocating a substring for every probe.
+        for char_idx := 1 to value_length do
         begin
-            Exit(False);
-        end;
-
-        // b/p/m/f/w can take bare "u" (bu/pu/mu/fu/wu), but not medial-u
-        // finals such as ue/uan/uai/uo. Without this, missing-apostrophe input
-        // like "bue" is greedily parsed as invalid "bue" instead of "bu"+"e".
-        if ((initial_value = 'b') or (initial_value = 'p') or
-            (initial_value = 'm') or (initial_value = 'f') or
-            (initial_value = 'w')) and
-            (Length(final_value) > 1) and (final_value[1] = 'u') then
-        begin
-            Exit(False);
-        end;
-
-        // y/w are spelling helpers in pinyin, so their legal combinations are
-        // much narrower than ordinary initials. Use allowlists here: accepting
-        // synthetic spellings such as yian, yuai, or wuan steals compact-input
-        // boundaries (for example, yu+ai becomes the invalid single unit yuai).
-        if not nc_is_pinyin_spelling_helper_compatible(initial_value,
-            final_value) then
-        begin
-            Exit(False);
-        end;
-
-        // j/q/x use u as the written form of ü only for u/ue/uan/un.
-        // Other u-medial finals are invalid and otherwise steal boundaries,
-        // e.g. "quangao" becomes invalid "quang"+"ao" instead of "quan"+"gao".
-        if (initial_value = 'j') or (initial_value = 'q') or
-            (initial_value = 'x') then
-        begin
-            if (final_value = 'ua') or (final_value = 'uai') or
-                (final_value = 'uang') or (final_value = 'ui') or
-                (final_value = 'uo') then
+            if source[start_index + char_idx] <> value[char_idx] then
             begin
                 Exit(False);
             end;
         end;
-
-        // Restrict obviously invalid retroflex/alveolar combinations to avoid
-        // greedy wrong splits like "zhineng" -> "zhin + eng" (expected "zhi + neng").
-        if (initial_value = 'zh') or (initial_value = 'ch') or (initial_value = 'sh') or
-            (initial_value = 'r') or (initial_value = 'z') or (initial_value = 'c') or
-            (initial_value = 's') then
-        begin
-            if (final_value = 'ia') or (final_value = 'in') or (final_value = 'ing') or (final_value = 'iu') or
-                (final_value = 'ie') or (final_value = 'ian') or (final_value = 'iang') or
-                (final_value = 'iao') or (final_value = 'iong') or
-                (final_value = 'ue') or (final_value = 've') or (final_value = 'van') or
-                (final_value = 'vn') then
-            begin
-                Exit(False);
-            end;
-        end;
-
-        // These initials do not form standard iang/iong syllables. Allowing
-        // synthetic forms like "diang" makes compact streams such as
-        // "dian+geng" tie with the wrong "diang+eng" parse.
-        if ((initial_value = 'b') or (initial_value = 'p') or
-            (initial_value = 'm') or (initial_value = 'f') or
-            (initial_value = 'd') or (initial_value = 't') or
-            (initial_value = 'g') or (initial_value = 'k') or
-            (initial_value = 'h')) and
-            ((final_value = 'iang') or (final_value = 'iong')) then
-        begin
-            Exit(False);
-        end;
-
         Result := True;
     end;
 
@@ -437,11 +413,11 @@ var
 
             for final_idx := Low(c_finals) to High(c_finals) do
             begin
-                final_value := c_finals[final_idx];
-                if not is_initial_final_compatible(initial_value, final_value) then
+                if not g_initial_final_compatible[initial_idx, final_idx] then
                 begin
                     Continue;
                 end;
+                final_value := c_finals[final_idx];
                 if not has_prefix(lower_text, start_index + Length(initial_value), final_value) then
                 begin
                     Continue;
@@ -550,7 +526,7 @@ begin
     Result := result_list;
 end;
 
-function nc_normalize_umlaut_spelling(const value: string): string;
+function normalize_umlaut_syllables(const value: string): string;
 var
     lower_value: string;
     parser: TncPinyinParser;
@@ -558,13 +534,7 @@ var
     syllable: TncPinyinSyllable;
 begin
     Result := value;
-    if (Pos('v', value) = 0) and (Pos('V', value) = 0) and
-        (Pos('ue', value) = 0) and (Pos('UE', value) = 0) and
-        (Pos('uE', value) = 0) and (Pos('Ue', value) = 0) then Exit;
     lower_value := LowerCase(value);
-    if (Pos('lue', lower_value) = 0) and (Pos('nue', lower_value) = 0) and
-        (Pos('jv', lower_value) = 0) and (Pos('qv', lower_value) = 0) and
-        (Pos('xv', lower_value) = 0) then Exit;
     // Normalize complete syllables only, never join explicit boundaries.
     // Equal-length aliases preserve raw key offsets for partial commits.
     parser := TncPinyinParser.Create;
@@ -584,5 +554,36 @@ begin
              (Copy(syllable.text, 2, MaxInt) = 'vn')) then
             Result[syllable.start_index + 2] := 'u';
 end;
+
+function nc_normalize_umlaut_spelling(const value: string): string;
+var
+    idx: Integer;
+    current_char: Char;
+    next_char: Char;
+begin
+    Result := value;
+    // Only lue/nue/jv/qv/xv (ASCII case-insensitive, as LowerCase) can change
+    // the spelling. Scan once instead of lowering and probing every pattern.
+    for idx := 1 to Length(value) - 1 do
+    begin
+        current_char := value[idx];
+        if (current_char >= 'A') and (current_char <= 'Z') then
+            current_char := Char(Ord(current_char) + 32);
+        next_char := value[idx + 1];
+        if (next_char >= 'A') and (next_char <= 'Z') then
+            next_char := Char(Ord(next_char) + 32);
+        if ((next_char = 'v') and CharInSet(current_char, ['j', 'q', 'x'])) or
+            ((next_char = 'u') and CharInSet(current_char, ['l', 'n']) and
+             (idx + 2 <= Length(value)) and
+             CharInSet(value[idx + 2], ['e', 'E'])) then
+        begin
+            Result := normalize_umlaut_syllables(value);
+            Exit;
+        end;
+    end;
+end;
+
+initialization
+    build_initial_final_compatibility;
 
 end.

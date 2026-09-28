@@ -232,6 +232,9 @@ install -d -m 0755 "$(stage_path "$doc_path/third-party/macbert")"
 install -m 0644 "$cassotis_root/third_party/macbert/LICENSE" \
     "$cassotis_root/third_party/macbert/NOTICE" \
     "$(stage_path "$doc_path/third-party/macbert")/"
+install -d -m 0755 "$(stage_path "$doc_path/third-party/rbt3")"
+install -m 0644 "$cassotis_root/third_party/rbt3/NOTICE" \
+    "$(stage_path "$doc_path/third-party/rbt3")/"
 
 if grep -R -n -E '@(EXECUTABLE|SETUP|VERSION|FCITX_VERSION|LIBRARY)@' \
         "$resolved_destdir"; then

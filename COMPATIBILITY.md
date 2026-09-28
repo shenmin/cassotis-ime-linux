@@ -1,5 +1,30 @@
 # Compatibility
 
+## v0.9.0 Pre-Release Validation
+
+The v1.29.0 engine/dictionary port and Linux 60 ms short-context inference budget
+have passed the following development-package checks. These results supplement,
+not replace, qualification of the eventual published source revision and assets.
+
+| Platform | Verified checks |
+| --- | --- |
+| Ubuntu x86_64 and aarch64 | Native core/runtime tests; full affected short-word suites; blocked-model and process-cold input; IPC stress and restart recovery |
+| Ubuntu x86_64 and aarch64 | Debian v0.8.0-to-v0.9.0 upgrade, removal/reinstallation, immediate GNOME discovery and unchanged personal-dictionary hashes |
+| Ubuntu x86_64 and aarch64 | Installed-package GTK 3/4 input under IBus/Fcitx 5, each with Wayland and XWayland clients: eight combinations per architecture |
+| Ubuntu x86_64 and aarch64 | Relocated portable user installation with a read-only `/usr`, native tests for both frameworks, upgrade/removal and retained user data |
+| SteamOS 3.8.14 x86_64, KDE X11, IBus 1.5.32 | User installation/upgrade, uninstall/reinstall, source discovery, preferences launcher, ordinary/traditional/Ziguang input and Tab completion |
+
+SteamOS testing did not change filesystem protection. This host currently has
+a writable `/usr`; enforcement of a read-only `/usr` was tested separately in
+the isolated Ubuntu namespaces. No SteamOS corpus benchmark was required.
+The SteamOS Fcitx 5 and Gaming Mode combinations remain untested. The input
+assertions do not establish candidate placement or mixed-DPI rendering correctness.
+Aggregate quality results and timing scope are recorded in
+[BENCHMARK.md](BENCHMARK.md#v1290-pre-release-measurements) and
+[BENCHMARK.CN.md](BENCHMARK.CN.md#v1290-发布前实测).
+
+The release matrix below records the previously published v0.8.0 qualification.
+
 ## Binary Release Matrix
 
 | Platform | IBus | Fcitx 5 | Status |

@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## 0.9.0 - 2026-09-28
+
+- Updated the engine and simplified/traditional dictionaries to Cassotis IME
+  and Cassotis Lexicon v1.29.0.
+- Added conservative context-aware short-word disambiguation using four INT8
+  early-exit models. It only considers the first two exact dictionary candidates
+  and preserves learned choices, single characters and fuzzy matches.
+- Allowed up to 60 ms for contextual short-word inference on Linux to reduce
+  timeout abstentions on slower CPUs and virtual machines. Completed queries
+  return immediately; cancelled inference keeps the original candidate order.
+- Added pinyin-aligned literary phrase recovery for long sentences, sharing the
+  existing local-repair context encoder and retaining trusted user words. Repaired
+  text remains consistent with one-key completion.
+- Improved evidence-backed short compounds and longer sentence-prefix selection,
+  and corrected common-character ordering for fuzzy input.
+- Avoided counting the same text repeatedly when a word has additional readings.
+  Expanded low-weight specialist coverage without admitting catalogue-only terms
+  into predictive completion.
+- Reduced repeated pinyin prefix allocation and compound-tail scans with
+  precomputed compatibility checks and indexed dictionary lookups.
+- Kept model loading off the input path, shared model instances across input
+  contexts, and retained ordinary candidates when optional inference is unavailable.
+- Prevented background model verification from retaining input-service sockets
+  during shutdown, so framework reconnection does not reuse a closing service.
+
 ## 0.8.0 - 2026-09-18
 
 - Updated the engine and fresh simplified/traditional dictionaries to the

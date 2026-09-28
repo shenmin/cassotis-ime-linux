@@ -77,7 +77,7 @@ install -m 0755 "$ort_arch_dir/libonnxruntime_providers_shared.so" \
 ln -sfn libonnxruntime.so.1.20.1 "$bin_dir/libonnxruntime.so.1"
 ln -sfn libonnxruntime.so.1 "$bin_dir/libonnxruntime.so"
 install -d -m 0755 "$bin_dir/pinyin_transformer" \
-    "$bin_dir/local_completion" "$bin_dir/local_repair"
+    "$bin_dir/local_completion" "$bin_dir/local_repair" "$bin_dir/short_context"
 install -m 0644 \
     "$cassotis_root/data/models/pinyin_transformer/pinyin_conditional_scorer_int8.onnx" \
     "$cassotis_root/data/models/pinyin_transformer/pinyin_parallel_generator_int8.onnx" \
@@ -98,10 +98,22 @@ install -m 0644 \
     "$cassotis_root/data/models/local_repair/joint_query_int8.onnx" \
     "$cassotis_root/data/models/local_repair/joint_head_int8.onnx" \
     "$cassotis_root/data/models/local_repair/bilateral_head_int8.onnx" \
+    "$cassotis_root/data/models/local_repair/style_head.onnx" \
+    "$cassotis_root/data/models/local_repair/style_phrases.bin" \
+    "$cassotis_root/data/models/local_repair/style_manifest.json" \
     "$cassotis_root/data/models/local_repair/readings.json" \
     "$cassotis_root/data/models/local_repair/vocab.json" \
     "$cassotis_root/data/models/local_repair/runtime_manifest.json" \
     "$bin_dir/local_repair/"
+install -m 0644 \
+    "$cassotis_root/data/models/short_context/exit0.int8.onnx" \
+    "$cassotis_root/data/models/short_context/exit1.int8.onnx" \
+    "$cassotis_root/data/models/short_context/exit2.int8.onnx" \
+    "$cassotis_root/data/models/short_context/exit3.int8.onnx" \
+    "$cassotis_root/data/models/short_context/tokenizer.bin" \
+    "$cassotis_root/data/models/short_context/policy.bin" \
+    "$cassotis_root/data/models/short_context/runtime_manifest.json" \
+    "$bin_dir/short_context/"
 
 common_args=(
     -Mdelphiunicode

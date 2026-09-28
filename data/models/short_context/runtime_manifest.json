@@ -1,0 +1,25 @@
+{
+  "format": 2,
+  "enabled": true,
+  "architecture": "rbt3-shared-early-exit-with-context-veto",
+  "counterfactual": "reuse-encoder-segments",
+  "parameters": 39465224,
+  "context_characters": 48,
+  "candidate_count": 2,
+  "max_inference_ms": 30,
+  "cpu_threads": 1,
+  "base_model": "hfl/rbt3",
+  "base_license": "Apache-2.0",
+  "files": {
+    "exit0.int8.onnx": "f3dfac23372e37b7230290fabe9f47bbab2e5ede51471306046a3cd1f48dbadd",
+    "exit1.int8.onnx": "1f0670dfb3b38dff5be27b541c788cdd72c17cebfde2743e32d6b1afa4052831",
+    "exit2.int8.onnx": "82a9cfbb08d6154d2866188be4478b26583ea93620b599ba49a6e75775e94cf4",
+    "exit3.int8.onnx": "ba7ba57189d4d6bc8aeb1762dcba66d3b755aeea8607d36361313aa6432f176f",
+    "tokenizer.bin": "69432566bb6a874956187a961fb0c9bd0bd1cf4193f15cbe2577b851ceb71487",
+    "policy.bin": "15751be356fe3226120e9b379f2370204f9e960cf11713f4e6fc1694c627b278"
+  },
+  "provenance": {
+    "proposer_policy_sha256": "b24185241fac36cb172848285c6409c6735a9ff59f1febeeb68dfdf194d66f43",
+    "veto_sha256": "0951e5b8128442c90974b57bb4197826eb75ae622eb8939b5dcc3c00f755fd17"
+  }
+}

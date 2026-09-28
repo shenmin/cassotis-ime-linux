@@ -13,7 +13,7 @@ uses
     Generics.Collections,
     Dynlibs,
     nc_local_repair_host, nc_dictionary_intf, nc_local_repair_guard,
-    nc_engine_intf;
+    nc_engine_intf, nc_short_context_host, nc_short_context_ranker;
 
 const
     c_nc_pinyin_transformer_result_timeout_ms = 30;
@@ -57,7 +57,8 @@ type
     end;
 
     TncPinyinTransformerHostReranker = class(TInterfacedObject,
-        IncLongNeuralReranker, IncLongLocalRepair, IncLongLocalRepairPolicy, IncLongJointRepair)
+        IncLongNeuralReranker, IncLongLocalRepair, IncLongLocalRepairPolicy,
+        IncLongJointRepair, IncLongStyleRepair, IncShortContextReranker)
     private type
         TncPtCreate = function(const model_path: PAnsiChar;
             const intra_threads: Integer; const error_text: PAnsiChar;
@@ -84,6 +85,7 @@ type
     private
         m_base_directory: string;
         m_local_repair: TncLocalRepairHost;
+        m_short_context: IncShortContextReranker;
         m_state_lock: TCriticalSection;
         m_run_lock: TCriticalSection;
         m_loader: TncPinyinTransformerLoadThread;
@@ -179,6 +181,13 @@ type
         function ready: Boolean;
         function local_repair_ready: Boolean;
         function joint_ready: Boolean;
+        function style_ready: Boolean;
+        function short_context_ready: Boolean;
+        function try_switch_short_context(const request: TncShortContextRequest): Boolean;
+        function try_style_repair(const dictionary: TncDictionaryProvider;
+            const query, first, second, first_path, second_path,
+            document_key, preceding_text: string;
+            out selected: TncValidatedRepairPath): Boolean;
         function try_finalize(const dictionary: TncDictionaryProvider;
             const query_text, draft, path, current, second, aligned_pinyin: string;
             const document_key, preceding_text: string;
@@ -848,10 +857,12 @@ begin
         if not m_local_repair.wait_until_ready(60000) then
             raise Exception.Create('Local repair initialization timed out');
     end;
+    m_short_context := TncShortContextHost.Create(m_base_directory, background_load);
 end;
 
 destructor TncPinyinTransformerHostReranker.Destroy;
 begin
+    m_short_context := nil;
     FreeAndNil(m_local_repair);
     if m_loader <> nil then
     begin
@@ -2133,6 +2144,11 @@ begin
     Result := (m_local_repair <> nil) and m_local_repair.joint_ready;
 end;
 
+function TncPinyinTransformerHostReranker.style_ready: Boolean;
+begin
+    Result := (m_local_repair <> nil) and m_local_repair.style_ready;
+end;
+
 function TncPinyinTransformerHostReranker.try_finalize(
     const dictionary: TncDictionaryProvider;
     const query_text, draft, path, current, second, aligned_pinyin: string;
@@ -2156,6 +2172,28 @@ begin
     Result := (m_local_repair <> nil) and
         m_local_repair.try_repair(query_text, draft_text, document_key,
             preceding_text, repaired_text, aligned_pinyin, minimum_word_ratio);
+end;
+
+function TncPinyinTransformerHostReranker.short_context_ready: Boolean;
+begin
+    Result := (m_short_context <> nil) and m_short_context.short_context_ready;
+end;
+
+function TncPinyinTransformerHostReranker.try_switch_short_context(
+    const request: TncShortContextRequest): Boolean;
+begin
+    Result := (m_short_context <> nil) and m_short_context.try_switch_short_context(request);
+end;
+
+function TncPinyinTransformerHostReranker.try_style_repair(
+    const dictionary: TncDictionaryProvider;
+    const query, first, second, first_path, second_path,
+    document_key, preceding_text: string;
+    out selected: TncValidatedRepairPath): Boolean;
+begin
+    selected := Default(TncValidatedRepairPath);
+    Result := (m_local_repair <> nil) and m_local_repair.try_style_repair(dictionary,
+        query, first, second, first_path, second_path, document_key, preceding_text, selected);
 end;
 
 end.

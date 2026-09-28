@@ -105,6 +105,7 @@ begin
     Result.candidate_font_name := c_default_candidate_font_name;
     Result.candidate_font_size := c_default_candidate_font_size;
     Result.candidate_page_size := c_default_candidate_page_size;
+    Result.candidate_expand_on_paging := False;
     Result.candidate_page_key_scheme := cpks_minus_plus;
     Result.one_key_completion_key := ock_tab;
     Result.candidate_color_scheme := c_default_candidate_color_scheme;

@@ -1,0 +1,11 @@
+The contextual short-word model is fine-tuned from hfl/rbt3, the 3-layer
+RoBERTa-wwm-ext model published by the HFL Chinese BERT team.
+
+Upstream model: https://huggingface.co/hfl/rbt3
+Upstream project: https://github.com/ymcui/Chinese-BERT-wwm
+License: Apache License 2.0 (see ../macbert/LICENSE).
+
+Cassotis modifications: contextual candidate-pair fine-tuning, shared early
+exits, conservative context-evidence veto, and ONNX INT8 export. These changes
+are not endorsed by the upstream authors. Runtime assets contain parameters
+and tokenizer tables, not training documents or user history.

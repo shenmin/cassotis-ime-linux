@@ -123,6 +123,13 @@ typedef enum {
     CASSOTIS_COMPLETION_BACKTICK = 1
 } CassotisOneKeyCompletionKey;
 
+/* Wire values must match TncCandidateDisplayKind in nc_types. */
+typedef enum {
+    CASSOTIS_CANDIDATE_DEFAULT = 0,
+    CASSOTIS_CANDIDATE_LM_COMPOUND = 1,
+    CASSOTIS_CANDIDATE_SENTENCE_PREFIX = 2
+} CassotisCandidateDisplayKind;
+
 typedef enum {
     CASSOTIS_FUZZY_Z_ZH = 1U << 0,
     CASSOTIS_FUZZY_C_CH = 1U << 1,

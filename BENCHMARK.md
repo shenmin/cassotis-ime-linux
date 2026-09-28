@@ -21,13 +21,16 @@ corresponding model-training data.
 
 The current Linux engine is reviewed against:
 
-- Cassotis IME v1.27.0 (`667240fbdc4ab0ba542ec36da56280ebe0a7351c`)
-- Cassotis Lexicon v1.27.0 (`11f17d0ee38b0fcdf221656f0a4b5590d3bacc59`)
+- Cassotis IME v1.29.0 (`4a15188541bc3dcc02e6a282193c059f04646e65`)
+- Cassotis Lexicon v1.29.0 (`5df4a922cc2ea15ae18ee17a4836d78ff87bbc09`)
 - Simplified dictionary schema 24, SHA-256
-  `6d01a9430bfbe30f26914b0f7d11e2f6cbf00de95445d96b66090eeca29553fa`
+  `84a510700668316525ae983ba82822282932b91516a33849f3fb594581132ea1`
 - Traditional dictionary schema 24, SHA-256
-  `19e367ab7c5453f11642b56f9ff0da311654d6bbfb11b089cdad498d7205c3fd`
-- Simplified/traditional base entries: 213,493 / 216,708
+  `2dd9ce920349bdaadfeea894f2ae476256db7bba607a9741e9dc85a54b337340`
+- Simplified dictionary: 249,342 text-reading records, including 23,918
+  single-character and 225,424 multi-character records
+- Traditional dictionary: 252,554 text-reading records, including 24,177
+  single-character and 228,377 multi-character records
 - Simplified/traditional completion competition rows: 42,453 / 42,448
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379
 - Simplified long-completion tables: 35,423 visible paths and 97,589 total
@@ -39,6 +42,25 @@ Source and data consistency checks cover the engine, parsers, input schemes,
 models, and dictionaries, distinguishing platform adaptations from candidate
 behavior differences.
 
+The v1.29.0 port also validates the contextual short-word ranker and style-phrase
+runtime. The short-word ABI uses explicit UTF-16 code units rather than Linux
+`wchar_t`; tests cover supplementary characters, invalid or truncated input,
+bounded inference, and recovery after a cancelled inference. Production model
+loading remains lazy and asynchronous, with dictionary-only fallback while a
+model is unavailable. Benchmark initialization waits for models separately from
+query timing.
+
+Linux uses a 60 ms cancellation budget for contextual short-word reranking,
+compared with 30 ms in Windows v1.29.0, to reduce timeout abstentions on slower
+CPUs and virtual machines. Model parameters, ranking rules and quality gates
+are unchanged. The frozen model metadata retains the upstream 30 ms reference;
+the Linux host controls its separate runtime budget. This is not a fixed delay:
+completed inference returns immediately, and cancellation keeps the original
+candidate order. Model loading remains asynchronous and the long-completion
+deadline is separate. Short-word benchmarks use and report the deployed budget;
+the two platforms are not claimed to have identical runtime timing settings.
+The inference budget is not a hard ceiling on the full query or end-to-end key
+latency, which also includes dictionary, candidate and framework work.
 
 The native runtime also has an exact integer-arithmetic regression for
 quantized inference. All inference sessions enable ONNX Runtime's x86
@@ -130,7 +152,64 @@ the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
 
-## v1.27.0 Qualification
+## v1.29.0 Pre-Release Measurements
+
+The native v1.29.0 port runs use the frozen inputs listed above. Full short-word
+runs were repeated after adopting the 60 ms contextual inference budget. The
+long-sentence and completion measurements precede that short-only budget change;
+they are retained separately rather than presented as a fresh full-release run.
+Final source-revision and package qualification is still required before release.
+
+| Platform | Long Top1 / 16,300 | Long Top2 / 16,300 | Short Top1, context off / 65,000 | Short Top1, context on / 65,000 | Short Top2, context on / 65,000 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Windows v1.29.0 reference | 11,997 | 12,970 | - | 61,971 | 63,568 |
+| Linux x86_64 | 11,998 | 12,970 | 60,384 | 61,971 | 63,568 |
+| Linux aarch64 | 11,992 | 12,969 | 60,384 | 61,975 | 63,568 |
+
+Both architectures have short context-off Top2/Top5/Top9 of
+63,212/64,549/64,670 and context-on Top5/Top9 of 64,591/64,670.
+The contextual competition subset has 9,675/10,776 Top1/Top2 on x86_64 and
+9,677/10,776 on aarch64 out of 11,728 cases. Matching aggregate counts do not
+imply identical per-case predictions. Relative to its earlier 30 ms run, x86_64
+has 92 Top1 gains and 21 losses, a net gain of 71; aarch64 target ranks are
+unchanged. Model parameters and quality/latency/memory gates were not relaxed.
+
+The 60 ms short-word runs measured:
+
+| Architecture | Context | Mean | P50 | P95 | Maximum |
+| --- | --- | ---: | ---: | ---: | ---: |
+| x86_64 | Off | 6.608 ms | 4 ms | 19 ms | 45 ms |
+| x86_64 | On | 12.540 ms | 7 ms | 35 ms | 75 ms |
+| aarch64 | Off | 3.711 ms | 3 ms | 10 ms | 30 ms |
+| aarch64 | On | 5.196 ms | 4 ms | 14 ms | 28 ms |
+
+Short-run process high-water marks are 602,604 KiB and 586,760 KiB respectively.
+These are different hosts, not a controlled architecture speed comparison.
+
+The preceding complete long-completion runs measured:
+
+| Platform and deadline | Hits / 16,300 | Saved keys |
+| --- | ---: | ---: |
+| Windows v1.29.0 reference, unlimited | 424 | 987 |
+| Linux x86_64, unlimited | 424 | 987 |
+| Linux aarch64, unlimited | 423 | 979 |
+| Linux x86_64, production 50 ms | 423 | 986 |
+| Linux aarch64, production 50 ms | 423 | 979 |
+
+The aarch64 deficit is one hit and eight saved keys, within the nine-count
+allowance. Short completion matches on both architectures: 12,831 opportunities,
+12,775 prompts, 9,420 hits, 24,006 saved keys and 1,691/1,749 stable pairs.
+An independent replay of the original Windows v1.29.0 runner confirms the
+updated exact signature `1349AAD4C2D7416C`; historical signatures were retained.
+
+Both rebuilt core suites pass 491 tests. With native model initialization held,
+first-key/maximum latency is 28.614/49.882 ms on x86_64 and 13.321/49.064 ms on
+aarch64. Separate process-cold trials measure 40.347/118.323 ms and
+22.316/56.777 ms. OS caches were not dropped; these key timings exclude service
+startup, measured separately at about 2.62 s and 1.44 s. Ordinary input therefore
+does not wait for model initialization, but service launch is not instantaneous.
+
+## Historical v1.27.0 Qualification
 
 Native qualification on 2026-09-17/18 uses freshly imported v1.27.0
 dictionaries and the unchanged frozen cases. The results below are from the

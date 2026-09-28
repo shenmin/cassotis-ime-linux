@@ -12,6 +12,7 @@ struct LocalRepairEncoding {
     }
 };
 struct LocalRepairJoint;
+struct StylePhraseRuntime;
 struct LocalRepairHandle {
     std::unique_ptr<Ort::Session> context_session;
     std::unique_ptr<Ort::Session> query_session;
@@ -21,10 +22,12 @@ struct LocalRepairHandle {
     uint64_t document{};
     uint64_t encodings{};
     std::unique_ptr<LocalRepairJoint> joint;
+    std::unique_ptr<StylePhraseRuntime> style;
 };
 }
 
 #include "nc_local_repair_joint_ort.inc"
+#include "nc_style_phrase_ort.inc"
 
 extern "C" CASSOTIS_EXPORT void* cassotis_lr_create(
     const char* context_path, const char* query_path, int threads,

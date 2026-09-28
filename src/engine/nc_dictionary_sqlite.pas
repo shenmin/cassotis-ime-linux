@@ -107,6 +107,7 @@ type
         m_stmt_exact_pair_path_evidence: Psqlite3_stmt;
         m_stmt_compound_tail_support: Psqlite3_stmt;
         m_stmt_compound_tail_prefix_support: Psqlite3_stmt;
+        m_stmt_compound_tail_prefix_range_support: Psqlite3_stmt;
         m_stmt_prefix_popularity: Psqlite3_stmt;
         m_stmt_pinyin_followup_popularity: Psqlite3_stmt;
         m_stmt_contains_popularity: Psqlite3_stmt;
@@ -389,6 +390,9 @@ type
             out scores: TArray<Integer>): Boolean; override;
         function get_char_lm_attested_scores(const ngrams: TArray<string>;
             out scores: TArray<Integer>): Boolean; override;
+        function get_char_lm_parameters(const ngrams: TArray<string>;
+            out scores, backoffs: TArray<Integer>;
+            const reverse_model: Boolean = False): Boolean; override;
         function get_char_reverse_lm_suffix_scores(const texts: TArray<string>;
             out scores: TArray<Integer>): Boolean; override;
         function get_char_lm_span_scores(const texts: TArray<string>;
@@ -444,6 +448,15 @@ var
 const
     c_recent_explicit_user_choice_bonus = 1200;
     c_recent_explicit_user_choice_bonus_min = 200;
+
+    // An additive reading is selectable, but is not another observation of the
+    // same text. With no counted reading, retain one strongest curated row.
+    c_base_text_evidence_scope_sql =
+        '(b.contains_popularity_eligible <> 0 OR NOT EXISTS (' +
+        'SELECT 1 FROM dict_base AS counted WHERE counted.text = b.text ' +
+        'AND (counted.contains_popularity_eligible <> 0 ' +
+        'OR counted.weight > b.weight ' +
+        'OR (counted.weight = b.weight AND counted.id < b.id))))';
 
     default_schema_sql =
         'CREATE TABLE IF NOT EXISTS meta (' + sLineBreak +
@@ -1521,6 +1534,59 @@ begin
     end;
 end;
 
+// SQLite's default LIKE folds ASCII case, treats % and _ as wildcards and
+// stops at NUL, so it cannot use the BINARY text index. For other literals,
+// "text LIKE value || '%'" selects exactly the texts in [value, upper_bound),
+// where upper_bound increments the last code point: UTF-8 byte order is code
+// point order. Returns False when the rewrite would not be exact.
+function try_get_like_prefix_upper_bound(const value: string;
+    out upper_bound: string): Boolean;
+var
+    idx: Integer;
+    ch: Char;
+begin
+    Result := False;
+    upper_bound := '';
+    if value = '' then
+    begin
+        Exit;
+    end;
+
+    for idx := 1 to Length(value) do
+    begin
+        ch := value[idx];
+        if ((ch >= 'A') and (ch <= 'Z')) or ((ch >= 'a') and (ch <= 'z')) or
+            (ch = '%') or (ch = '_') or (ch = #0) then
+        begin
+            Exit;
+        end;
+        if (ch >= #$D800) and (ch <= #$DBFF) then
+        begin
+            if (idx = Length(value)) or (value[idx + 1] < #$DC00) or
+                (value[idx + 1] > #$DFFF) then
+            begin
+                Exit;
+            end;
+        end
+        else if (ch >= #$DC00) and (ch <= #$DFFF) then
+        begin
+            if (idx = 1) or (value[idx - 1] < #$D800) or
+                (value[idx - 1] > #$DBFF) then
+            begin
+                Exit;
+            end;
+        end;
+    end;
+
+    ch := value[Length(value)];
+    if ((ch >= #$D7FF) and (ch <= #$DFFF)) or (ch = #$FFFF) then
+    begin
+        Exit;
+    end;
+    upper_bound := Copy(value, 1, Length(value) - 1) + Char(Ord(ch) + 1);
+    Result := True;
+end;
+
 function calc_compound_tail_support_value(const path_count: Integer;
     const total_weight: Integer; const max_weight: Integer): Integer;
 const
@@ -2524,6 +2590,7 @@ begin
     m_stmt_exact_pair_path_evidence := nil;
     m_stmt_compound_tail_support := nil;
     m_stmt_compound_tail_prefix_support := nil;
+    m_stmt_compound_tail_prefix_range_support := nil;
     m_stmt_prefix_popularity := nil;
     m_stmt_pinyin_followup_popularity := nil;
     m_stmt_contains_popularity := nil;
@@ -3067,7 +3134,6 @@ function TncSqliteDictionary.lookup_fuzzy_full_pinyin_bounded(
     const max_syllables: Integer;
     const max_candidates_per_variant: Integer): Boolean;
 const
-    c_fuzzy_penalty_per_cost = 480;
     c_fuzzy_result_cache_limit = 4096;
 var
     query_key: string;
@@ -3233,7 +3299,7 @@ begin
                 end;
 
                 candidate.score := candidate.score -
-                    variant.cost * c_fuzzy_penalty_per_cost +
+                    variant.cost * c_fuzzy_lookup_penalty_per_cost +
                     get_fuzzy_choice_bonus(query_key, candidate.text);
                 candidate.source := cs_rule;
                 candidate.fuzzy_cost := variant.cost;
@@ -3432,6 +3498,7 @@ begin
                     Continue;
                 end;
                 seen.Add(seen_key, True);
+                item := Default(TncCandidate);
                 item.text := candidate_text;
                 item.comment := candidate_comment;
                 item.dict_weight := m_base_connection.ColumnInt(stmt, 3);
@@ -3473,6 +3540,7 @@ begin
                             Continue;
                         end;
                         seen.Add(seen_key, True);
+                        item := Default(TncCandidate);
                         item.text := candidate_text;
                         item.comment := '';
                         item.dict_weight := m_user_connection.ColumnInt(stmt, 2);
@@ -3523,6 +3591,7 @@ const
         'LEFT JOIN dict_base_completion_prior p ON p.pinyin=b.pinyin AND p.text=b.text ';
     query_sql = 'WITH prefix_probe AS (' + select_sql +
         'WHERE b.pinyin > ?1 AND b.pinyin < ?2 AND b.weight > 0 AND b.comment='''' ' +
+        'AND COALESCE(p.layer_kind, 0) <> 4 ' +
         'ORDER BY CASE WHEN p.corpus_score > 0 OR p.path_score >= 120 ' +
         'THEN 1 ELSE 0 END DESC, ' +
         '(COALESCE(p.popularity_prior,0) + b.weight) DESC, b.pinyin, b.text LIMIT ?3) ' +
@@ -3607,6 +3676,7 @@ const
         'ON p.pinyin = b.pinyin AND p.text = b.text ' +
         'WHERE b.pinyin >= ?1 AND b.pinyin < ?2 ' +
         'AND b.weight > 0 AND COALESCE(b.comment, '''') = '''' ' +
+        'AND COALESCE(p.layer_kind, 0) <> 4 ' +
         'ORDER BY COALESCE(p.popularity_prior, -1) DESC, b.weight DESC, ' +
         'length(b.text) ASC, b.text ASC LIMIT ?3';
     base_completion_weight_sql =
@@ -3619,12 +3689,14 @@ const
         'ON p.pinyin = b.pinyin AND p.text = b.text ' +
         'WHERE b.pinyin >= ?1 AND b.pinyin < ?2 ' +
         'AND b.weight > 0 AND COALESCE(b.comment, '''') = '''' ' +
+        'AND COALESCE(p.layer_kind, 0) <> 4 ' +
         'ORDER BY b.weight DESC, length(b.text) ASC, b.text ASC LIMIT ?3';
     base_completion_lookup_sql =
         'SELECT full_pinyin, text, weight, popularity_prior, ' +
         'corpus_score, document_score, source_count, path_score, ' +
         'vertical_penalty, layer_kind, prefix_anchored ' +
         'FROM dict_base_completion_lookup WHERE typed_prefix = ?1 ' +
+        'AND layer_kind <> 4 ' +
         'ORDER BY rank_order ASC LIMIT 16';
     user_completion_sql =
         'SELECT pinyin, text, weight, last_used FROM dict_user ' +
@@ -3981,6 +4053,8 @@ var
         item_idx: Integer;
         worst_idx: Integer;
     begin
+        if (candidate_source = okcs_base_exact) and
+            (vertical_layer_kind = c_completion_layer_exact_only_specialist) then Exit;
         if (Trim(candidate_text) = '') or
             (not candidate_matches_prefix(candidate_pinyin, candidate_text,
             candidate_compact_pinyin)) then
@@ -5458,10 +5532,10 @@ begin
         Exit;
     end;
 
-    // Long-sentence search performs many small indexed reads. Mapping the
-    // immutable base dictionary avoids repeatedly copying those pages through
-    // SQLite's small default page cache while the OS can share mapped pages.
-    m_base_connection.exec('PRAGMA mmap_size=134217728;');
+    // Keep mapped dictionary pages bounded alongside the optional model set.
+    // Pages beyond the mapping still use the normal SQLite page cache; this
+    // changes memory residency, not dictionary coverage or candidate ranking.
+    m_base_connection.exec('PRAGMA mmap_size=67108864;');
     m_base_connection.exec('PRAGMA cache_size=-8192;');
     m_base_connection.exec('PRAGMA temp_store=MEMORY;');
 end;
@@ -7435,6 +7509,7 @@ var
                     Continue;
                 end;
 
+                item := Default(TncCandidate);
                 item.text := candidate_text;
                 item.comment := '';
                 item.score := c_literal_candidate_score;
@@ -8936,7 +9011,8 @@ function TncSqliteDictionary.get_contains_popularity_score(const token: string):
 const
     indexed_query_sql =
         'SELECT weight FROM dict_base_contains_popularity WHERE token = ?1 LIMIT 1';
-    query_sql = 'SELECT COALESCE(SUM(weight), 0) FROM dict_base WHERE instr(text, ?1) > 0';
+    query_sql = 'SELECT COALESCE(SUM(b.weight), 0) FROM dict_base AS b ' +
+        'WHERE instr(b.text, ?1) > 0 AND ' + c_base_text_evidence_scope_sql;
 var
     stmt: Psqlite3_stmt;
     step_result: Integer;
@@ -9035,7 +9111,8 @@ end;
 
 function TncSqliteDictionary.get_prefix_popularity_score(const prefix: string): Integer;
 const
-    query_sql = 'SELECT COALESCE(SUM(weight), 0) FROM dict_base WHERE text >= ?1 AND text < ?2';
+    query_sql = 'SELECT COALESCE(SUM(b.weight), 0) FROM dict_base AS b ' +
+        'WHERE b.text >= ?1 AND b.text < ?2 AND ' + c_base_text_evidence_scope_sql;
 var
     step_result: Integer;
     upper_bound: string;
@@ -10316,6 +10393,11 @@ begin
         m_base_connection.finalize(m_stmt_compound_tail_prefix_support);
         m_stmt_compound_tail_prefix_support := nil;
     end;
+    if (m_stmt_compound_tail_prefix_range_support <> nil) and (m_base_connection <> nil) then
+    begin
+        m_base_connection.finalize(m_stmt_compound_tail_prefix_range_support);
+        m_stmt_compound_tail_prefix_range_support := nil;
+    end;
     if (m_stmt_prefix_popularity <> nil) and (m_base_connection <> nil) then
     begin
         m_base_connection.finalize(m_stmt_prefix_popularity);
@@ -10926,7 +11008,8 @@ const
         'SELECT COALESCE(SUM(weight), 0) FROM dict_base ' +
         'WHERE pinyin >= ?1 AND pinyin < ?2 AND pinyin <> ?1';
     prefix_sql =
-        'SELECT COALESCE(SUM(weight), 0) FROM dict_base WHERE text >= ?1 AND text < ?2';
+        'SELECT COALESCE(SUM(b.weight), 0) FROM dict_base AS b ' +
+        'WHERE b.text >= ?1 AND b.text < ?2 AND ' + c_base_text_evidence_scope_sql;
     exact_weight_sql =
         'SELECT COALESCE(MAX(weight), 0) FROM dict_base ' +
         'WHERE pinyin = ?1 AND text = ?2 AND length(text) = 1';
@@ -11381,6 +11464,7 @@ var
             Exit;
         end;
 
+        item := Default(TncCandidate);
         item.text := key;
         item.comment := candidate_comment;
         item.score := effective_score;
@@ -12568,6 +12652,7 @@ var
         effective_has_dict_weight := (effective_source = cs_rule) and has_dict_weight;
         effective_dict_weight := dict_weight;
 
+        item := Default(TncCandidate);
         item.text := text;
         item.comment := comment;
         item.score := score_with_bonus;
@@ -16915,6 +17000,41 @@ begin
     Result := get_char_lm_text_scores_internal(texts, scores, True, '', True);
 end;
 
+function TncSqliteDictionary.get_char_lm_parameters(const ngrams: TArray<string>;
+    out scores, backoffs: TArray<Integer>;
+    const reverse_model: Boolean): Boolean;
+var
+    wanted: TDictionary<string, Boolean>;
+    entries: TDictionary<string, TncCharLmCacheEntry>;
+    entry: TncCharLmCacheEntry;
+    idx: Integer;
+begin
+    Result := False;
+    SetLength(scores, Length(ngrams));
+    SetLength(backoffs, Length(ngrams));
+    for idx := 0 to High(scores) do scores[idx] := Low(Integer);
+    if (Length(ngrams) = 0) or (Length(ngrams) > 4096) or
+        not ensure_char_lm_available(reverse_model) then Exit;
+    wanted := TDictionary<string, Boolean>.Create;
+    entries := TDictionary<string, TncCharLmCacheEntry>.Create;
+    try
+        for idx := 0 to High(ngrams) do
+            if ngrams[idx] <> '' then
+                wanted.AddOrSetValue(ngrams[idx], True);
+        if not load_char_lm_entries(wanted.Keys.ToArray, entries, reverse_model) then Exit;
+        for idx := 0 to High(ngrams) do
+            if entries.TryGetValue(ngrams[idx], entry) and entry.found then
+            begin
+                scores[idx] := entry.score;
+                backoffs[idx] := entry.backoff;
+            end;
+        Result := True;
+    finally
+        entries.Free;
+        wanted.Free;
+    end;
+end;
+
 function TncSqliteDictionary.get_char_lm_attested_scores(
     const ngrams: TArray<string>; out scores: TArray<Integer>): Boolean;
 var
@@ -17199,8 +17319,15 @@ const
         'SELECT COUNT(1), COALESCE(SUM(weight), 0), COALESCE(MAX(weight), 0) ' +
         'FROM dict_base_query_path WHERE path_text LIKE ?1';
     prefix_query_sql =
-        'SELECT COUNT(1), COALESCE(SUM(weight), 0), COALESCE(MAX(weight), 0) ' +
-        'FROM dict_base WHERE comment = '''' AND text LIKE ?1 AND text <> ?2';
+        'SELECT COUNT(1), COALESCE(SUM(b.weight), 0), COALESCE(MAX(b.weight), 0) ' +
+        'FROM dict_base AS b WHERE b.comment = '''' AND b.text LIKE ?1 ' +
+        'AND b.text <> ?2 AND ' + c_base_text_evidence_scope_sql;
+    // Same rows as prefix_query_sql through idx_dict_base_text_weight; see
+    // try_get_like_prefix_upper_bound.
+    prefix_range_query_sql =
+        'SELECT COUNT(1), COALESCE(SUM(b.weight), 0), COALESCE(MAX(b.weight), 0) ' +
+        'FROM dict_base AS b WHERE b.comment = '''' AND b.text >= ?1 ' +
+        'AND b.text < ?3 AND b.text <> ?2 AND ' + c_base_text_evidence_scope_sql;
     c_segment_path_separator = #3;
     c_prefix_productivity_support_cap = 1500;
 var
@@ -17212,6 +17339,9 @@ var
     total_weight: Integer;
     max_weight: Integer;
     prefix_support: Integer;
+    prefix_upper_bound: string;
+    prefix_stmt: Psqlite3_stmt;
+    prefix_bound: Boolean;
 begin
     Result := 0;
     if m_defer_optional_model_loads then
@@ -17268,45 +17398,63 @@ begin
     if Result <= 0 then
     begin
         prefix_pattern := normalized_tail + '%';
+        prefix_stmt := nil;
         try
-            if m_stmt_compound_tail_prefix_support = nil then
+            if try_get_like_prefix_upper_bound(normalized_tail, prefix_upper_bound) then
             begin
-                if not m_base_connection.prepare(prefix_query_sql,
-                    m_stmt_compound_tail_prefix_support) then
+                if m_stmt_compound_tail_prefix_range_support = nil then
                 begin
-                    m_stmt_compound_tail_prefix_support := nil;
-                    Exit;
+                    if not m_base_connection.prepare(prefix_range_query_sql,
+                        m_stmt_compound_tail_prefix_range_support) then
+                    begin
+                        m_stmt_compound_tail_prefix_range_support := nil;
+                        Exit;
+                    end;
                 end;
+                prefix_stmt := m_stmt_compound_tail_prefix_range_support;
+                prefix_bound := m_base_connection.reset(prefix_stmt) and
+                    m_base_connection.clear_bindings(prefix_stmt) and
+                    m_base_connection.BindText(prefix_stmt, 1, normalized_tail) and
+                    m_base_connection.BindText(prefix_stmt, 2, normalized_tail) and
+                    m_base_connection.BindText(prefix_stmt, 3, prefix_upper_bound);
+            end
+            else
+            begin
+                if m_stmt_compound_tail_prefix_support = nil then
+                begin
+                    if not m_base_connection.prepare(prefix_query_sql,
+                        m_stmt_compound_tail_prefix_support) then
+                    begin
+                        m_stmt_compound_tail_prefix_support := nil;
+                        Exit;
+                    end;
+                end;
+                prefix_stmt := m_stmt_compound_tail_prefix_support;
+                prefix_bound := m_base_connection.reset(prefix_stmt) and
+                    m_base_connection.clear_bindings(prefix_stmt) and
+                    m_base_connection.BindText(prefix_stmt, 1, prefix_pattern) and
+                    m_base_connection.BindText(prefix_stmt, 2, normalized_tail);
             end;
-
-            if (not m_base_connection.reset(m_stmt_compound_tail_prefix_support)) or
-                (not m_base_connection.clear_bindings(m_stmt_compound_tail_prefix_support)) or
-                (not m_base_connection.BindText(m_stmt_compound_tail_prefix_support, 1,
-                prefix_pattern)) or
-                (not m_base_connection.BindText(m_stmt_compound_tail_prefix_support, 2,
-                normalized_tail)) then
+            if not prefix_bound then
             begin
                 Exit;
             end;
 
-            step_result := m_base_connection.step(m_stmt_compound_tail_prefix_support);
+            step_result := m_base_connection.step(prefix_stmt);
             if step_result = SQLITE_ROW then
             begin
-                path_count := m_base_connection.ColumnInt(
-                    m_stmt_compound_tail_prefix_support, 0);
-                total_weight := m_base_connection.ColumnInt(
-                    m_stmt_compound_tail_prefix_support, 1);
-                max_weight := m_base_connection.ColumnInt(
-                    m_stmt_compound_tail_prefix_support, 2);
+                path_count := m_base_connection.ColumnInt(prefix_stmt, 0);
+                total_weight := m_base_connection.ColumnInt(prefix_stmt, 1);
+                max_weight := m_base_connection.ColumnInt(prefix_stmt, 2);
                 prefix_support := calc_compound_tail_support_value(path_count,
                     total_weight, max_weight);
                 Result := Min(c_prefix_productivity_support_cap, prefix_support);
             end;
         finally
-            if m_stmt_compound_tail_prefix_support <> nil then
+            if prefix_stmt <> nil then
             begin
-                m_base_connection.reset(m_stmt_compound_tail_prefix_support);
-                m_base_connection.clear_bindings(m_stmt_compound_tail_prefix_support);
+                m_base_connection.reset(prefix_stmt);
+                m_base_connection.clear_bindings(prefix_stmt);
             end;
         end;
     end;

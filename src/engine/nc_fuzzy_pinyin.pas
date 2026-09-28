@@ -11,6 +11,10 @@ uses
     nc_types,
     nc_pinyin_parser;
 
+const
+    c_fuzzy_lookup_penalty_per_cost = 480;
+    c_fuzzy_single_display_penalty_per_cost = 96;
+
 type
     TncFuzzyPinyinSyllableVariant = record
         original_text: string;

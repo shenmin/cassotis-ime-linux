@@ -29,6 +29,7 @@ begin
     rank := 0;
     if (evidence.source <> okcs_base_exact) or (evidence.text = '') or
         (typed_units < 2) or (word_units < typed_units) then Exit;
+    if evidence.vertical_layer_kind = c_completion_layer_exact_only_specialist then Exit;
     attested := evidence.corpus_score >= 40;
     transition := (evidence.path_score >= 120) and (evidence.source_count >= 2);
     // Completing letters inside the final syllable is not guessing extra words.

@@ -423,7 +423,8 @@ cassotis_stage_neural_runtime() {
     local file_name
 
     install -d -m 0755 "$destination_dir/pinyin_transformer" \
-        "$destination_dir/local_completion" "$destination_dir/local_repair"
+        "$destination_dir/local_completion" "$destination_dir/local_repair" \
+        "$destination_dir/short_context"
     for file_name in libcassotis_pinyin_transformer_ort.so \
                      libonnxruntime.so.1.20.1 \
                      libonnxruntime_providers_shared.so; do
@@ -451,9 +452,15 @@ cassotis_stage_neural_runtime() {
     done
     for file_name in context_int8.onnx query_int8.onnx readings.json \
                      joint_query_int8.onnx joint_head_int8.onnx bilateral_head_int8.onnx \
+                     style_head.onnx style_phrases.bin style_manifest.json \
                      vocab.json runtime_manifest.json; do
         install -m 0644 "$source_dir/local_repair/$file_name" \
             "$destination_dir/local_repair/$file_name"
+    done
+    for file_name in exit0.int8.onnx exit1.int8.onnx exit2.int8.onnx exit3.int8.onnx \
+                     policy.bin tokenizer.bin runtime_manifest.json; do
+        install -m 0644 "$source_dir/short_context/$file_name" \
+            "$destination_dir/short_context/$file_name"
     done
 }
 
@@ -464,7 +471,8 @@ cassotis_atomic_install_neural_runtime() {
 
     install -d -m 0700 "$destination_dir" \
         "$destination_dir/pinyin_transformer" \
-        "$destination_dir/local_completion" "$destination_dir/local_repair"
+        "$destination_dir/local_completion" "$destination_dir/local_repair" \
+        "$destination_dir/short_context"
     for file_name in libcassotis_pinyin_transformer_ort.so \
                      libonnxruntime.so.1.20.1 \
                      libonnxruntime_providers_shared.so; do
@@ -491,9 +499,15 @@ cassotis_atomic_install_neural_runtime() {
     done
     for file_name in context_int8.onnx query_int8.onnx readings.json \
                      joint_query_int8.onnx joint_head_int8.onnx bilateral_head_int8.onnx \
+                     style_head.onnx style_phrases.bin style_manifest.json \
                      vocab.json runtime_manifest.json; do
         cassotis_atomic_install "$source_dir/local_repair/$file_name" \
             "$destination_dir/local_repair/$file_name" 0644
+    done
+    for file_name in exit0.int8.onnx exit1.int8.onnx exit2.int8.onnx exit3.int8.onnx \
+                     policy.bin tokenizer.bin runtime_manifest.json; do
+        cassotis_atomic_install "$source_dir/short_context/$file_name" \
+            "$destination_dir/short_context/$file_name" 0644
     done
 }
 
@@ -521,10 +535,21 @@ cassotis_remove_neural_runtime() {
         "$destination_dir/local_repair/joint_query_int8.onnx" \
         "$destination_dir/local_repair/joint_head_int8.onnx" \
         "$destination_dir/local_repair/bilateral_head_int8.onnx" \
+        "$destination_dir/local_repair/style_head.onnx" \
+        "$destination_dir/local_repair/style_phrases.bin" \
+        "$destination_dir/local_repair/style_manifest.json" \
         "$destination_dir/local_repair/readings.json" \
         "$destination_dir/local_repair/vocab.json" \
-        "$destination_dir/local_repair/runtime_manifest.json"
+        "$destination_dir/local_repair/runtime_manifest.json" \
+        "$destination_dir/short_context/exit0.int8.onnx" \
+        "$destination_dir/short_context/exit1.int8.onnx" \
+        "$destination_dir/short_context/exit2.int8.onnx" \
+        "$destination_dir/short_context/exit3.int8.onnx" \
+        "$destination_dir/short_context/policy.bin" \
+        "$destination_dir/short_context/tokenizer.bin" \
+        "$destination_dir/short_context/runtime_manifest.json"
     rmdir -- "$destination_dir/pinyin_transformer" \
         "$destination_dir/local_completion" "$destination_dir/local_repair" \
+        "$destination_dir/short_context" \
         2>/dev/null || true
 }

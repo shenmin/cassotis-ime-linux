@@ -117,6 +117,20 @@ Each candidate contains source, display kind, dictionary-weight/deletable
 flags, final score, dictionary weight, fuzzy cost and rule mask, text, and
 annotation.
 
+Display kind is a one-byte enum with the following wire values:
+
+| Value | Meaning |
+| ---: | --- |
+| 0 | Ordinary candidate |
+| 1 | Language-model compound candidate |
+| 2 | Selectable word-boundary prefix of a longer sentence candidate |
+
+Unknown display kinds are rejected. Version 0.9.0 adds value 2 without changing
+the candidate record layout. Older decoders reject results containing this
+value, so the engine and framework adapters must be upgraded and restarted
+together. Display kind is presentation metadata, not permission to delete or
+learn a candidate; the engine retains selection and learning policy.
+
 Adapters render only this result. A candidate is shown as deletable only when
 the engine marks a persistent user candidate deletable.
 

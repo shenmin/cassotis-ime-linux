@@ -13,6 +13,10 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <map>
+#include <set>
+#include <chrono>
+#include <condition_variable>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -67,6 +71,7 @@ void ConfigureSessionOptions(Ort::SessionOptions& options, int intra_threads) {
     // Avoid retaining a separate peak-sized allocation arena for each model.
     options.DisableMemPattern();
     options.DisableCpuMemArena();
+    options.AddConfigEntry("session.use_device_allocator_for_initializers", "1");
     // Avoid saturating U8S8 intermediates on x86 CPUs without VNNI. ORT
     // applies the exact U8U8 conversion only on affected CPUs; model files
     // and their quantization scales remain unchanged.
@@ -2899,4 +2904,6 @@ extern "C" CASSOTIS_EXPORT void nc_lcg_destroy(
     ReleaseUnusedHeapPages();
 }
 
+#include "nc_utf16_runtime.inc"
+#include "nc_short_context_runtime.h"
 #include "nc_local_repair_ort.inc"

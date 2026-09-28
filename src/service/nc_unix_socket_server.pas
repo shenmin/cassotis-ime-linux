@@ -45,6 +45,7 @@ implementation
 
 uses
     BaseUnix,
+    Linux,
     Unix,
     Sockets,
     nc_ipc_protocol,
@@ -55,6 +56,14 @@ const
     c_maximum_clients = 16;
     c_maximum_contexts_per_client = 256;
     c_receive_buffer_size = 64 * 1024;
+    // Linux uses the same atomic close-on-exec bit for open and socket.
+    c_socket_close_on_exec = O_CLOEXEC;
+
+function libc_accept4(socket_handle: LongInt; address: PSockAddr;
+    address_length: PSockLen; flags: LongInt): LongInt; cdecl;
+    external 'c' name 'accept4';
+function libc_errno_location: PLongInt; cdecl;
+    external 'c' name '__errno_location';
 
 type
     TncContextMapping = record
@@ -336,7 +345,7 @@ begin
     // this lock, concurrent adapters can both see no listener and each bind
     // after unlinking the other process's socket path.
     encoded_lock_path := UTF8Encode(FSocketPath + '.lock');
-    FLockFile := fpOpen(encoded_lock_path, O_CREAT or O_RDWR, &600);
+    FLockFile := fpOpen(encoded_lock_path, O_CREAT or O_RDWR or O_CLOEXEC, &600);
     if FLockFile < 0 then
         raise EncUnixSocketServerError.CreateFmt(
             'unable to open engine lock for %s: %s',
@@ -352,7 +361,7 @@ begin
     socket_address_length := SizeOf(socket_address.family) +
         Length(encoded_path) + 1;
 
-    probe_socket := fpSocket(AF_UNIX, SOCK_STREAM, 0);
+    probe_socket := fpSocket(AF_UNIX, SOCK_STREAM or c_socket_close_on_exec, 0);
     if probe_socket >= 0 then
     begin
         if fpConnect(probe_socket, PSockAddr(@socket_address),
@@ -365,7 +374,7 @@ begin
         fpClose(probe_socket);
     end;
     fpUnlink(encoded_path);
-    FListenSocket := fpSocket(AF_UNIX, SOCK_STREAM, 0);
+    FListenSocket := fpSocket(AF_UNIX, SOCK_STREAM or c_socket_close_on_exec, 0);
     if FListenSocket < 0 then
         raise EncUnixSocketServerError.CreateFmt('socket() failed: %s',
             [SysErrorMessage(fpGetErrNo)]);
@@ -410,9 +419,13 @@ procedure TncUnixSocketServer.AcceptClient;
 var
     client_socket: LongInt;
 begin
-    client_socket := fpAccept(FListenSocket, nil, nil);
+    // Model verification may fork on another thread. Setting FD_CLOEXEC after
+    // accept would leave a race in which its child retains a live IPC channel.
+    client_socket := libc_accept4(FListenSocket, nil, nil,
+        c_socket_close_on_exec);
     if client_socket < 0 then
     begin
+        fpSetErrNo(libc_errno_location^);
         if fpGetErrNo = ESysEINTR then
             Exit;
         raise EncUnixSocketServerError.CreateFmt('accept() failed: %s',

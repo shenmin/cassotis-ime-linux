@@ -558,7 +558,9 @@ gboolean cassotis_protocol_decode_engine_result(
             !reader_string(&reader, &candidate->text) ||
             !reader_string(&reader, &candidate->comment))
             goto fail;
-        if (source > 1 || display_kind > 1 || has_weight > 1 || deletable > 1) {
+        if (source > 1 ||
+            display_kind > CASSOTIS_CANDIDATE_SENTENCE_PREFIX ||
+            has_weight > 1 || deletable > 1) {
             g_set_error(reader.error, cassotis_protocol_error_quark(), 1,
                         "invalid candidate fields at index %u "
                         "(source=%u display_kind=%u has_weight=%u "

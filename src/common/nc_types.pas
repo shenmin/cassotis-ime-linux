@@ -28,6 +28,8 @@ const
     c_default_candidate_color_scheme = 0;
     c_min_candidate_color_scheme = 0;
     c_max_candidate_color_scheme = 5;
+    // Catalogue coverage is selectable by exact input, not predictive evidence.
+    c_completion_layer_exact_only_specialist = 4;
 
 type
     TncStringHelper = type helper for UnicodeString
@@ -56,7 +58,7 @@ type
     TncFuzzyPinyinRules = set of TncFuzzyPinyinRule;
 
     TncCandidateSource = (cs_rule, cs_user);
-    TncCandidateDisplayKind = (cdk_default, cdk_lm_compound);
+    TncCandidateDisplayKind = (cdk_default, cdk_lm_compound, cdk_sentence_prefix);
     TncInputMode = (im_chinese, im_english);
     TncDictionaryVariant = (dv_simplified, dv_traditional);
     TncPinyinInputScheme = (
@@ -131,6 +133,7 @@ type
         candidate_font_name: string;
         candidate_font_size: Integer;
         candidate_page_size: Integer;
+        candidate_expand_on_paging: Boolean;
         candidate_page_key_scheme: TncCandidatePageKeyScheme;
         one_key_completion_key: TncOneKeyCompletionKey;
         candidate_color_scheme: Integer;

@@ -22,8 +22,10 @@ archives are not redistributed in the IME package.
 - Copyright holder: THUNLP and THUOCL contributors
 
 THUOCL provides broad word-list and document-frequency signals. Filtered IT,
-idiom/allusion, and medical subsets are used only as isolated vertical-layer
-sources.
+idiom/allusion, medical and other specialist subsets are used as isolated
+vertical-layer sources. Catalogue-only specialist entries have low weights and
+are excluded from predictive completion; reviewed general-use terms remain
+eligible. See the admission and familiarity records in Cassotis Lexicon v1.29.0.
 
 ## jieba Dictionary
 
