@@ -98,8 +98,8 @@ model precision or candidate ranking rules. Compact exact-key caches and circula
 queues prevent cache bookkeeping from growing with continued typing. Large model
 weights and completion indexes use file-backed mappings; unused pages are released
 after five seconds without input, without unloading models or losing context.
-An 11,000-query, three-context native test measured 497.4 MiB on x86_64 and
-492.6 MiB on aarch64 after input became idle. These are measured resident values,
+An 11,000-query, three-context native test measured 495.8 MiB on x86_64 and
+494.6 MiB on aarch64 after input became idle. These are measured resident values,
 not a peak-memory limit or a guarantee for every workload; see
 [BENCHMARK.md](BENCHMARK.md) for the protocol and accuracy checks.
 Static completion stays available while background results are pending, and

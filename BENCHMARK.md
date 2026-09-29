@@ -154,45 +154,66 @@ the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
 
-## v0.9.1 Memory Qualification
+## v0.9.1 Native Measurements
 
 Native pre-release measurements on 2026-09-29 retained the v1.29.0 dictionary,
-model values, ranking policy and existing acceptance thresholds. The service
+model values and ranking policy. The only approved acceptance exception is the
+two-key production-completion difference documented below. The service
 test kept three input contexts alive through 11,000 queries (101,364 key
 events), mixing 10,000 short queries and 1,000 interleaved long queries.
 Models remained loaded. After six seconds without input, process RSS was:
 
 | Architecture | Active snapshot | Idle, contexts still alive | Idle PSS | Swap |
 | --- | ---: | ---: | ---: | ---: |
-| x86_64 | 540.3 MiB | 497.4 MiB | 483.8 MiB | 0 |
-| aarch64 | 538.9 MiB | 492.6 MiB | 483.5 MiB | 0 |
+| x86_64 | 539.7 MiB | 495.8 MiB | 489.1 MiB | 0 |
+| aarch64 | 540.0 MiB | 494.6 MiB | 487.4 MiB | 0 |
 
 These are workload measurements, not a universal 500 MiB cap. The active snapshot
 is not a peak measurement. Releasing file-backed pages reduces process residency
 but does not force the operating system to discard its shared file cache.
 Idle reclamation runs once after five seconds without input, retains model
 sessions and live context, and yields to new input. An independent 41-key resume
-check measured first-key/maximum latency of 27.353/46.553 ms on x86_64 and
-20.410/26.814 ms on aarch64. Process-cold tests did not clear OS file caches.
+check measured first-key/maximum latency of 18.029/73.777 ms on x86_64 and
+24.051/32.999 ms on aarch64. Process-cold tests did not clear OS file caches.
 
 Complete 16,300-case long and 65,000-case short tests, both with and without
 context, reproduced the v0.9.0 Top1/Top2 counts and every stable failure record.
-The 500-case completion smoke also preserved its exact result signature; this
-sample does not replace full release-completion qualification.
+Both complete 16,300-case long-completion tracks and the 65,000-case
+short-completion test also ran; their results are reported separately below.
 
 | Architecture | Track | Top1 | Top2 | Mean | P95 | Maximum |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| x86_64 | Long | 11,998 | 12,970 | 171.424 ms | 315 ms | 909 ms |
-| x86_64 | Short, no context | 60,384 | 63,212 | 7.017 ms | 18 ms | 56 ms |
-| x86_64 | Short, context | 61,971 | 63,568 | 13.459 ms | 37 ms | 97 ms |
-| aarch64 | Long | 11,992 | 12,969 | 64.907 ms | 119 ms | 416 ms |
-| aarch64 | Short, no context | 60,384 | 63,212 | 3.632 ms | 9 ms | 22 ms |
-| aarch64 | Short, context | 61,975 | 63,568 | 5.222 ms | 13 ms | 29 ms |
+| x86_64 | Long | 11,998 | 12,970 | 173.661 ms | 320 ms | 912 ms |
+| x86_64 | Short, no context | 60,384 | 63,212 | 7.099 ms | 19 ms | 53 ms |
+| x86_64 | Short, context | 61,971 | 63,568 | 13.568 ms | 38 ms | 91 ms |
+| aarch64 | Long | 11,992 | 12,969 | 64.522 ms | 118 ms | 416 ms |
+| aarch64 | Short, no context | 60,384 | 63,212 | 3.831 ms | 10 ms | 24 ms |
+| aarch64 | Short, context | 61,975 | 63,568 | 5.405 ms | 14 ms | 29 ms |
 
-Long-query mean latency increased by 6.5% / 4.5% compared with the previous
-x86_64 / aarch64 measurements; all unchanged quality and latency gates passed.
-Each architecture passed 507 native unit tests. Final v0.9.1 package and desktop
-qualification is separate from these engine-memory measurements.
+Long-query mean latency increased by 7.9% / 3.9% compared with the previous
+x86_64 / aarch64 measurements; all unchanged candidate-quality and latency
+gates passed. Each architecture passed 507 native unit tests. Package and desktop
+coverage is recorded separately in [COMPATIBILITY.md](COMPATIBILITY.md).
+
+| Architecture | Long-completion deadline | Hits | Saved keys | Mean | P95 | Maximum |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 50 ms, production | 421 | 977 | 101.776 ms | 277 ms | 640 ms |
+| x86_64 | 0, accuracy | 423 | 984 | 101.482 ms | 277 ms | 604 ms |
+| aarch64 | 50 ms, production | 423 | 979 | 40.853 ms | 101 ms | 338 ms |
+| aarch64 | 0, accuracy | 423 | 979 | 39.775 ms | 98 ms | 326 ms |
+
+The x86_64 production run saved two fewer keys than v0.9.0 (977 versus 979),
+one below the standing 978-key floor. This measured difference was explicitly
+accepted for v0.9.1 on 2026-09-29, with the original failed report retained.
+Only this release's x86_64 production saved-key check has an exception; the
+shared baseline, runtime deadlines, ranking policy and all other thresholds
+are unchanged. Deadline-free results remain within the original allowance
+against the Windows reference of 424 hits / 987 saved keys. Completion results
+are therefore not claimed to be identical to v0.9.0.
+
+Short completion remains unchanged on both architectures: 9,420 hits and
+24,006 saved keys, result signature `1349AAD4C2D7416C`. Mean/P95/maximum query
+latencies are 0.860/2/22 ms on x86_64 and 0.431/1/11 ms on aarch64.
 
 ## v0.9.0 Native Measurements
 

@@ -1,14 +1,31 @@
 # Compatibility
 
-## v0.9.1 Preparation
+## v0.9.1 Validation
 
 The memory-maintenance update retains the v1.29.0 engine/data baseline and both
-framework adapters. Native memory, complete long/short quality, cold-start and
-507 unit checks have passed on x86_64 and aarch64; see
+framework adapters. The following checks were completed on 2026-09-29.
+
+| Platform | Verified checks |
+| --- | --- |
+| Ubuntu x86_64 and aarch64 | 507 core tests per architecture; complete long-sentence, short-word and completion suites; cold-start, IPC recovery and sustained resident-memory checks |
+| Ubuntu x86_64 and aarch64 | Debian v0.9.0-to-v0.9.1 upgrade, removal/reinstallation, immediate GNOME discovery and unchanged personal-dictionary hashes |
+| Ubuntu x86_64 and aarch64 | Installed-package GTK 3/4 input through IBus and Fcitx 5, using Wayland and XWayland clients: eight combinations per architecture |
+| Ubuntu x86_64 and aarch64 | Relocated portable user installation with a read-only `/usr`, both native frameworks, upgrade/removal and retained user data |
+| SteamOS 3.8.14 x86_64, KDE X11, IBus 1.5.32 | User installation/upgrade, uninstall/reinstall, source discovery, settings launcher, Chinese/traditional/Ziguang input, Shift shortcuts and Tab completion |
+
+After 11,000 queries and six seconds of inactivity, engine RSS measured
+495.8 MiB on x86_64 and 494.6 MiB on aarch64, without swap. Complete long/short
+candidate accuracy did not decline relative to v0.9.0. The x86_64 production
+completion run saved 977 keys versus 979 previously; this two-key difference is
+an explicitly accepted v0.9.1 exception, not a change to the 50 ms runtime budget
+or other quality gates. Measurements and scope are recorded in
 [BENCHMARK.md](BENCHMARK.md) / [Chinese](BENCHMARK.CN.md).
-Final v0.9.1 package installation and desktop qualification are pending. The
-v0.9.0 coverage below is historical, not a claim that the new packages have
-already passed the same checks.
+
+SteamOS checks did not change filesystem protection; read-only `/usr` enforcement
+was exercised separately in Ubuntu namespaces. SteamOS Fcitx 5 and Gaming Mode,
+Chromium/Electron, standalone GNOME X11 sessions and mixed-DPI candidate placement
+are not newly qualified by these checks. Text-commit assertions do not replace
+visual candidate-placement checks. The v0.9.0 coverage below remains historical.
 
 ## v0.9.0 Validation
 
