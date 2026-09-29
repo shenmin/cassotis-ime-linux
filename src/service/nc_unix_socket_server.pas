@@ -13,6 +13,7 @@ interface
 uses
     SysUtils,
     Contnrs,
+    nc_idle_memory,
     nc_engine_service;
 
 type
@@ -28,6 +29,7 @@ type
         FShutdownRequested: Boolean;
         FClients: TObjectList;
         FNextInternalContextId: QWord;
+        FIdleMemory: TncIdleMemory;
         procedure PrepareSocketDirectory;
         procedure OpenSocket;
         procedure CloseSocket;
@@ -497,6 +499,10 @@ begin
         end;
 
         connection.Dispatcher.DispatchRequest(request, response);
+        // Status/completion polling must not keep an otherwise idle heap hot.
+        if not (request.message_type in [imt_hello, imt_ping, imt_get_state,
+            imt_poll_result]) then
+            FIdleMemory.NoteActivity(GetTickCount64);
         if mapping_created and (not ResponseSucceeded(response)) then
             connection.DestroyMappedContext(external_context_id)
         else if (request.message_type = imt_destroy_context) and
@@ -524,8 +530,12 @@ var
     selected_count: LongInt;
     client_index: Integer;
     connection: TncUnixClientConnection;
+    idle_delay: LongInt;
+    idle_timeout: TTimeVal;
+    timeout_pointer: PTimeVal;
 begin
     OpenSocket;
+    FIdleMemory.NoteActivity(GetTickCount64);
     WriteLn('cassotis-engine listening on ', FSocketPath);
     while not FShutdownRequested do
     begin
@@ -539,14 +549,33 @@ begin
             if connection.SocketHandle > maximum_socket then
                 maximum_socket := connection.SocketHandle;
         end;
+        idle_delay := FIdleMemory.DelayMs(GetTickCount64);
+        timeout_pointer := nil;
+        if idle_delay >= 0 then
+        begin
+            idle_timeout.tv_sec := idle_delay div 1000;
+            idle_timeout.tv_usec := (idle_delay mod 1000) * 1000;
+            timeout_pointer := @idle_timeout;
+        end;
         selected_count := fpSelect(maximum_socket + 1, @read_sockets,
-            nil, nil, nil);
+            nil, nil, timeout_pointer);
         if selected_count < 0 then
         begin
             if fpGetErrNo = ESysEINTR then
                 Continue;
             raise EncUnixSocketServerError.CreateFmt('select() failed: %s',
                 [SysErrorMessage(fpGetErrNo)]);
+        end;
+        if selected_count = 0 then
+        begin
+            // Poll descriptors first, so queued input wins over maintenance.
+            // After one pass, select blocks indefinitely until new activity.
+            if FIdleMemory.TakeDue(GetTickCount64) then
+            begin
+                FEngine.ReleaseIdleMemory;
+                nc_release_unused_heap_pages;
+            end;
+            Continue;
         end;
         if fpFD_ISSET(FListenSocket, read_sockets) <> 0 then
             AcceptClient;
@@ -555,7 +584,12 @@ begin
             connection := TncUnixClientConnection(FClients[client_index]);
             if (fpFD_ISSET(connection.SocketHandle, read_sockets) <> 0) and
                 (not ProcessClient(connection)) then
+            begin
+                // A short-lived status reader must not postpone maintenance.
+                if Length(connection.FContexts) > 0 then
+                    FIdleMemory.NoteActivity(GetTickCount64);
                 FClients.Delete(client_index);
+            end;
             if FShutdownRequested then
                 Break;
         end;

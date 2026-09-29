@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.9.1 - 2026-09-29
+
+- Reduced resident engine memory with compact exact-key caches and bounded
+  circular FIFO storage, preventing cache eviction queues from growing with
+  continued typing. Cache limits and eviction order are unchanged.
+- Stored large model weights and shared completion indexes in file-backed
+  mappings while preserving tensor precision, dictionary contents and ranking
+  rules. Models continue to load asynchronously.
+- Returned unused heap and completion-index pages after five seconds without
+  input, without unloading models or discarding live composition and context.
+  Typing resumes without waiting for a periodic cleanup task.
+- Hardened model packaging and upgrades with checksum-verified weight sidecars.
+  Keep the complete model directory together when deploying portable binaries.
+
 ## 0.9.0 - 2026-09-28
 
 - Updated the engine and simplified/traditional dictionaries to Cassotis IME

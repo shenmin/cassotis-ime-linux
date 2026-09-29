@@ -6,6 +6,9 @@ program cassotis_engine;
 
 uses
 {$IFDEF UNIX}
+    // Reuse libc's heap with SQLite and the native inference runtime.
+    cmem,
+    nc_memory_allocator,
     cthreads,
     cwstring,
 {$ENDIF}

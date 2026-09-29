@@ -138,6 +138,8 @@ begin
                 UTF8Decode(value.AsString)) then
                 raise Exception.Create('Short-context asset hash mismatch: ' + UTF8Encode(name));
         end;
+        validate_external_model_files(folder, manifest,
+            ['exit0.int8.onnx', 'exit1.int8.onnx', 'exit2.int8.onnx', 'exit3.int8.onnx']);
         m_module := LoadLibrary(UTF8Encode(IncludeTrailingPathDelimiter(m_directory) +
             'libcassotis_pinyin_transformer_ort.so'));
         if m_module = NilHandle then raise Exception.Create('Short-context runtime unavailable');

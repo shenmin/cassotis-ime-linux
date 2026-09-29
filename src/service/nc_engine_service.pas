@@ -84,6 +84,7 @@ type
             const generation_id: QWord): TncEngineResult; override;
         function ContextCount: Integer;
         procedure ClearContexts;
+        procedure ReleaseIdleMemory;
         function DictionaryReady: Boolean;
         function UserDictionaryReady: Boolean;
         function RemoveUserCandidate(const context_id: QWord;
@@ -921,6 +922,11 @@ end;
 function TncEngineService.ContextCount: Integer;
 begin
     Result := FContexts.Count;
+end;
+
+procedure TncEngineService.ReleaseIdleMemory;
+begin
+    if FLocalCompletionHost <> nil then FLocalCompletionHost.ReleaseIdlePages;
 end;
 
 procedure TncEngineService.ClearContexts;

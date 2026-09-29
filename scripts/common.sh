@@ -425,6 +425,9 @@ cassotis_stage_neural_runtime() {
     install -d -m 0755 "$destination_dir/pinyin_transformer" \
         "$destination_dir/local_completion" "$destination_dir/local_repair" \
         "$destination_dir/short_context"
+    cassotis_require_command python3
+    python3 "$cassotis_root/scripts/model_weights.py" --copy-weights \
+        "$source_dir" "$destination_dir" || return
     for file_name in libcassotis_pinyin_transformer_ort.so \
                      libonnxruntime.so.1.20.1 \
                      libonnxruntime_providers_shared.so; do
@@ -473,6 +476,11 @@ cassotis_atomic_install_neural_runtime() {
         "$destination_dir/pinyin_transformer" \
         "$destination_dir/local_completion" "$destination_dir/local_repair" \
         "$destination_dir/short_context"
+    cassotis_require_command python3
+    # Publish immutable weight files before models that reference them. Keep
+    # older versions available to loaders already opening the previous model.
+    python3 "$cassotis_root/scripts/model_weights.py" --copy-weights \
+        "$source_dir" "$destination_dir" || return
     for file_name in libcassotis_pinyin_transformer_ort.so \
                      libonnxruntime.so.1.20.1 \
                      libonnxruntime_providers_shared.so; do
@@ -514,6 +522,8 @@ cassotis_atomic_install_neural_runtime() {
 cassotis_remove_neural_runtime() {
     local destination_dir="$1"
 
+    cassotis_require_command python3
+    python3 "$cassotis_root/scripts/model_weights.py" --remove-weights "$destination_dir" || return
     rm -f -- \
         "$destination_dir/cassotis-neural-runtime-smoke" \
         "$destination_dir/libcassotis_pinyin_transformer_ort.so" \

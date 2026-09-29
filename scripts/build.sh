@@ -115,6 +115,10 @@ install -m 0644 \
     "$cassotis_root/data/models/short_context/runtime_manifest.json" \
     "$bin_dir/short_context/"
 
+cassotis_require_command python3
+python3 "$cassotis_root/scripts/model_weights.py" --pack \
+    "$cassotis_root/data/models" "$bin_dir"
+
 common_args=(
     -Mdelphiunicode
     -FcUTF8

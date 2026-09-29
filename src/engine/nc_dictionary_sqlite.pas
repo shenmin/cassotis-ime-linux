@@ -12,6 +12,8 @@ uses
     DateUtils,
     Generics.Collections,
     Generics.Defaults,
+    nc_compact_string_map,
+    nc_string_queue,
 
     nc_io_compat,
     nc_platform_compat,
@@ -54,30 +56,30 @@ type
         m_user_script_variant: TncDictionaryVariant;
         m_user_script_cache: TDictionary<string, string>;
         m_user_storage_text_cache: TDictionary<string, string>;
-        m_contains_popularity_cache: TDictionary<string, Integer>;
-        m_prefix_popularity_cache: TDictionary<string, Integer>;
+        m_contains_popularity_cache: TncCompactStringIntMap;
+        m_prefix_popularity_cache: TncCompactStringIntMap;
         m_pinyin_followup_popularity_cache: TDictionary<string, Integer>;
         m_base_text_prefix_bonus_cache: TDictionary<string, Integer>;
-        m_single_char_weight_cache: TDictionary<string, Integer>;
+        m_single_char_weight_cache: TncCompactStringIntMap;
         m_context_bonus_cache: TDictionary<string, Integer>;
         m_query_choice_bonus_cache: TDictionary<string, Integer>;
         m_context_query_choice_bonus_cache: TDictionary<string, Integer>;
         m_query_latest_choice_text_cache: TDictionary<string, string>;
-        m_query_path_bonus_cache: TDictionary<string, Integer>;
+        m_query_path_bonus_cache: TncCompactStringIntMap;
         m_query_path_bonus_cache_loaded: Boolean;
         m_base_query_path_pinyin_cache: TDictionary<string, Boolean>;
         m_base_query_path_pinyin_cache_loaded: Boolean;
-        m_lm_transition_bonus_cache: TDictionary<string, Integer>;
+        m_lm_transition_bonus_cache: TncCompactStringIntMap;
         m_exact_pair_path_evidence_cache:
             TDictionary<string, TncPairPathEvidenceList>;
         m_lm_transition_cache_loaded: Boolean;
         m_char_lm_entry_cache: TDictionary<string, TncCharLmCacheEntry>;
-        m_char_lm_cache_order: TQueue<string>;
+        m_char_lm_cache_order: TncStringQueue;
         m_char_lm_text_score_cache: TDictionary<string, Integer>;
-        m_char_lm_text_score_cache_order: TQueue<string>;
+        m_char_lm_text_score_cache_order: TncStringQueue;
         m_char_lm_short_context_text_score_cache:
             TDictionary<string, Integer>;
-        m_char_lm_short_context_text_score_cache_order: TQueue<string>;
+        m_char_lm_short_context_text_score_cache_order: TncStringQueue;
         m_char_lm_available: Integer;
         m_stmt_char_lm_entries_1: Psqlite3_stmt;
         m_stmt_char_lm_entries_8: Psqlite3_stmt;
@@ -88,9 +90,9 @@ type
         m_stmt_char_lm_entries_256: Psqlite3_stmt;
         m_stmt_char_lm_entries_400: Psqlite3_stmt;
         m_char_reverse_lm_entry_cache: TDictionary<string, TncCharLmCacheEntry>;
-        m_char_reverse_lm_cache_order: TQueue<string>;
+        m_char_reverse_lm_cache_order: TncStringQueue;
         m_char_reverse_lm_text_score_cache: TDictionary<string, Integer>;
-        m_char_reverse_lm_text_score_cache_order: TQueue<string>;
+        m_char_reverse_lm_text_score_cache_order: TncStringQueue;
         m_char_reverse_lm_available: Integer;
         m_stmt_char_reverse_lm_entries_1: Psqlite3_stmt;
         m_stmt_char_reverse_lm_entries_8: Psqlite3_stmt;
@@ -138,11 +140,11 @@ type
         m_candidate_penalty_cache: TDictionary<string, Integer>;
         m_candidate_penalty_pinyin_loaded_cache: TDictionary<string, Boolean>;
         m_lookup_result_cache: TDictionary<string, TncCandidateList>;
-        m_lookup_result_cache_order: TQueue<string>;
+        m_lookup_result_cache_order: TncStringQueue;
         m_exact_lookup_result_cache: TDictionary<string, TncCandidateList>;
-        m_exact_lookup_result_cache_order: TQueue<string>;
+        m_exact_lookup_result_cache_order: TncStringQueue;
         m_exact_component_lookup_cache: TDictionary<string, TncCandidateList>;
-        m_exact_component_lookup_cache_order: TQueue<string>;
+        m_exact_component_lookup_cache_order: TncStringQueue;
         m_base_exact_pinyin_bloom: TBytes;
         m_base_exact_pinyin_bloom_ready: Boolean;
         m_prefix_lookup_result_cache: TDictionary<string, TncCandidateList>;
@@ -168,7 +170,7 @@ type
         m_fuzzy_pinyin_enabled: Boolean;
         m_fuzzy_pinyin_rules: TncFuzzyPinyinRules;
         m_fuzzy_lookup_result_cache: TDictionary<string, TncCandidateList>;
-        m_fuzzy_lookup_result_cache_order: TQueue<string>;
+        m_fuzzy_lookup_result_cache_order: TncStringQueue;
         m_fuzzy_choice_bonus_cache: TDictionary<string, Integer>;
         m_fuzzy_choice_query_loaded_cache: TDictionary<string, Boolean>;
         m_debug_mode: Boolean;
@@ -2619,30 +2621,30 @@ begin
     m_stmt_record_query_path_insert := nil;
     m_base_connection := nil;
     m_user_connection := nil;
-    m_contains_popularity_cache := TDictionary<string, Integer>.Create;
-    m_prefix_popularity_cache := TDictionary<string, Integer>.Create;
+    m_contains_popularity_cache := TncCompactStringIntMap.Create;
+    m_prefix_popularity_cache := TncCompactStringIntMap.Create;
     m_pinyin_followup_popularity_cache := TDictionary<string, Integer>.Create;
     m_base_text_prefix_bonus_cache := TDictionary<string, Integer>.Create;
-    m_single_char_weight_cache := TDictionary<string, Integer>.Create;
+    m_single_char_weight_cache := TncCompactStringIntMap.Create;
     m_context_bonus_cache := TDictionary<string, Integer>.Create;
     m_query_choice_bonus_cache := TDictionary<string, Integer>.Create;
     m_context_query_choice_bonus_cache := TDictionary<string, Integer>.Create;
     m_query_latest_choice_text_cache := TDictionary<string, string>.Create;
-    m_query_path_bonus_cache := TDictionary<string, Integer>.Create;
+    m_query_path_bonus_cache := TncCompactStringIntMap.Create;
     m_query_path_bonus_cache_loaded := False;
     m_base_query_path_pinyin_cache := TDictionary<string, Boolean>.Create;
     m_base_query_path_pinyin_cache_loaded := False;
-    m_lm_transition_bonus_cache := TDictionary<string, Integer>.Create;
+    m_lm_transition_bonus_cache := TncCompactStringIntMap.Create;
     m_exact_pair_path_evidence_cache :=
         TDictionary<string, TncPairPathEvidenceList>.Create;
     m_lm_transition_cache_loaded := False;
     m_char_lm_entry_cache := TDictionary<string, TncCharLmCacheEntry>.Create;
-    m_char_lm_cache_order := TQueue<string>.Create;
+    m_char_lm_cache_order := TncStringQueue.Create;
     m_char_lm_text_score_cache := TDictionary<string, Integer>.Create;
-    m_char_lm_text_score_cache_order := TQueue<string>.Create;
+    m_char_lm_text_score_cache_order := TncStringQueue.Create;
     m_char_lm_short_context_text_score_cache :=
         TDictionary<string, Integer>.Create;
-    m_char_lm_short_context_text_score_cache_order := TQueue<string>.Create;
+    m_char_lm_short_context_text_score_cache_order := TncStringQueue.Create;
     m_char_lm_available := -1;
     m_stmt_char_lm_entries_1 := nil;
     m_stmt_char_lm_entries_8 := nil;
@@ -2654,10 +2656,10 @@ begin
     m_stmt_char_lm_entries_400 := nil;
     m_char_reverse_lm_entry_cache :=
         TDictionary<string, TncCharLmCacheEntry>.Create;
-    m_char_reverse_lm_cache_order := TQueue<string>.Create;
+    m_char_reverse_lm_cache_order := TncStringQueue.Create;
     m_char_reverse_lm_text_score_cache :=
         TDictionary<string, Integer>.Create;
-    m_char_reverse_lm_text_score_cache_order := TQueue<string>.Create;
+    m_char_reverse_lm_text_score_cache_order := TncStringQueue.Create;
     m_char_reverse_lm_available := -1;
     m_stmt_char_reverse_lm_entries_1 := nil;
     m_stmt_char_reverse_lm_entries_8 := nil;
@@ -2672,11 +2674,11 @@ begin
     m_candidate_penalty_cache := TDictionary<string, Integer>.Create;
     m_candidate_penalty_pinyin_loaded_cache := TDictionary<string, Boolean>.Create;
     m_lookup_result_cache := TDictionary<string, TncCandidateList>.Create;
-    m_lookup_result_cache_order := TQueue<string>.Create;
+    m_lookup_result_cache_order := TncStringQueue.Create;
     m_exact_lookup_result_cache := TDictionary<string, TncCandidateList>.Create;
-    m_exact_lookup_result_cache_order := TQueue<string>.Create;
+    m_exact_lookup_result_cache_order := TncStringQueue.Create;
     m_exact_component_lookup_cache := TDictionary<string, TncCandidateList>.Create;
-    m_exact_component_lookup_cache_order := TQueue<string>.Create;
+    m_exact_component_lookup_cache_order := TncStringQueue.Create;
     SetLength(m_base_exact_pinyin_bloom, 0);
     m_base_exact_pinyin_bloom_ready := False;
     m_prefix_lookup_result_cache := TDictionary<string, TncCandidateList>.Create;
@@ -2706,7 +2708,7 @@ begin
     m_fuzzy_pinyin_rules := [];
     m_fuzzy_lookup_result_cache :=
         TDictionary<string, TncCandidateList>.Create;
-    m_fuzzy_lookup_result_cache_order := TQueue<string>.Create;
+    m_fuzzy_lookup_result_cache_order := TncStringQueue.Create;
     m_fuzzy_choice_bonus_cache := TDictionary<string, Integer>.Create;
     m_fuzzy_choice_query_loaded_cache := TDictionary<string, Boolean>.Create;
     m_debug_mode := False;
@@ -5535,8 +5537,8 @@ begin
     // Keep mapped dictionary pages bounded alongside the optional model set.
     // Pages beyond the mapping still use the normal SQLite page cache; this
     // changes memory residency, not dictionary coverage or candidate ranking.
-    m_base_connection.exec('PRAGMA mmap_size=67108864;');
-    m_base_connection.exec('PRAGMA cache_size=-8192;');
+    m_base_connection.exec('PRAGMA mmap_size=2097152;');
+    m_base_connection.exec('PRAGMA cache_size=-2048;');
     m_base_connection.exec('PRAGMA temp_store=MEMORY;');
 end;
 
@@ -5656,6 +5658,7 @@ begin
         begin
             m_base_connection.finalize(stmt);
         end;
+        m_query_path_bonus_cache.TrimExcess;
     end;
 end;
 
@@ -5743,6 +5746,7 @@ begin
         begin
             m_base_connection.finalize(stmt);
         end;
+        m_lm_transition_bonus_cache.TrimExcess;
     end;
 end;
 
@@ -16217,7 +16221,7 @@ const
 var
     evicted_ngram: string;
     entry_cache: TDictionary<string, TncCharLmCacheEntry>;
-    cache_order: TQueue<string>;
+    cache_order: TncStringQueue;
 begin
     if reverse_model then
     begin
@@ -16265,7 +16269,7 @@ const
 var
     evicted_key: string;
     score_cache: TDictionary<string, Integer>;
-    cache_order: TQueue<string>;
+    cache_order: TncStringQueue;
     cache_max_entries: Integer;
 begin
     cache_max_entries := c_cache_max_entries;

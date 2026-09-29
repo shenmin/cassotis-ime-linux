@@ -53,6 +53,12 @@ Outputs in `build/bin/`:
 Settings are provided by `adapters/ibus/cassotis_settings.py`, installed as
 `cassotis-settings`. Pascal compilation output stays under `build/units/`.
 
+The build stores large model weights in file-backed `.weights` files alongside
+their `.onnx` graphs to reduce resident memory. Tensor values and precision are
+unchanged; source models are checked and the conversion is verified byte-for-byte.
+Keep each complete model directory together, including its generated manifest
+and weight files. The build and installation scripts handle this automatically.
+
 ## Install From Source
 
 Obtain matching simplified/traditional SQLite databases from

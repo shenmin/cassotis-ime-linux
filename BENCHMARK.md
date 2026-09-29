@@ -69,8 +69,10 @@ without VNNI. This does not change the model files or quantization scales.
 The local-repair ABI tests additionally exercise phonetic output constraints,
 finite confidence values, and context-cache reuse, replacement and clearing.
 Joint-head loading assigns distinct names to shared quantized constants to
-avoid runtime conversion collisions. Tensor bytes, operators and packaged
-model files remain unchanged.
+avoid runtime conversion collisions. Tensor bytes and operators remain unchanged.
+Since v0.9.1, large model tensors are packaged in checksum-verified external
+weight files; canonical reconstruction is byte-for-byte identical to the
+original models. This changes storage, not model precision or computation.
 
 Cold-start validation deliberately blocks native model initialization while
 testing the production IPC service: first-key candidates, selection/commit,
@@ -151,6 +153,46 @@ latency, and Linux process RSS/high-water marks. Memory events contain only
 the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
+
+## v0.9.1 Memory Qualification
+
+Native pre-release measurements on 2026-09-29 retained the v1.29.0 dictionary,
+model values, ranking policy and existing acceptance thresholds. The service
+test kept three input contexts alive through 11,000 queries (101,364 key
+events), mixing 10,000 short queries and 1,000 interleaved long queries.
+Models remained loaded. After six seconds without input, process RSS was:
+
+| Architecture | Active snapshot | Idle, contexts still alive | Idle PSS | Swap |
+| --- | ---: | ---: | ---: | ---: |
+| x86_64 | 540.3 MiB | 497.4 MiB | 483.8 MiB | 0 |
+| aarch64 | 538.9 MiB | 492.6 MiB | 483.5 MiB | 0 |
+
+These are workload measurements, not a universal 500 MiB cap. The active snapshot
+is not a peak measurement. Releasing file-backed pages reduces process residency
+but does not force the operating system to discard its shared file cache.
+Idle reclamation runs once after five seconds without input, retains model
+sessions and live context, and yields to new input. An independent 41-key resume
+check measured first-key/maximum latency of 27.353/46.553 ms on x86_64 and
+20.410/26.814 ms on aarch64. Process-cold tests did not clear OS file caches.
+
+Complete 16,300-case long and 65,000-case short tests, both with and without
+context, reproduced the v0.9.0 Top1/Top2 counts and every stable failure record.
+The 500-case completion smoke also preserved its exact result signature; this
+sample does not replace full release-completion qualification.
+
+| Architecture | Track | Top1 | Top2 | Mean | P95 | Maximum |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | Long | 11,998 | 12,970 | 171.424 ms | 315 ms | 909 ms |
+| x86_64 | Short, no context | 60,384 | 63,212 | 7.017 ms | 18 ms | 56 ms |
+| x86_64 | Short, context | 61,971 | 63,568 | 13.459 ms | 37 ms | 97 ms |
+| aarch64 | Long | 11,992 | 12,969 | 64.907 ms | 119 ms | 416 ms |
+| aarch64 | Short, no context | 60,384 | 63,212 | 3.632 ms | 9 ms | 22 ms |
+| aarch64 | Short, context | 61,975 | 63,568 | 5.222 ms | 13 ms | 29 ms |
+
+Long-query mean latency increased by 6.5% / 4.5% compared with the previous
+x86_64 / aarch64 measurements; all unchanged quality and latency gates passed.
+Each architecture passed 507 native unit tests. Final v0.9.1 package and desktop
+qualification is separate from these engine-memory measurements.
 
 ## v0.9.0 Native Measurements
 

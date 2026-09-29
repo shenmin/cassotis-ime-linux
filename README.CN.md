@@ -64,15 +64,18 @@
 
 ## 已验证发行环境
 
-v0.9.0 以言泉输入法和 Cassotis Lexicon v1.29.0 为行为和数据基线，
-重新构建 schema 24 字词库，简体、繁体基础库分别有 249,342 和 252,554 条记录。
+v0.9.1 保留言泉输入法和 Cassotis Lexicon v1.29.0 的行为与数据基线，
+继续使用 schema 24 字词库，简体、繁体基础库分别有 249,342 和 252,554 条记录。
 此数量包含 Unihan 等来源的单字读音条目及多字词条；同一字词可有多种读音记录，
 不等于去重后的词语数量。简体包含 23,918 条单字记录和 225,424 条多字记录，
 繁体包含 24,177 条单字记录和 228,377 条多字记录。
-相比 v0.8.0，新版加入短词上下文判别与文学用语修复，改进长句部分选择、短词组合
-召回和模糊音常用单字排序。补充读音不会重复累计同一文本的热度证据；扩充的专业
-词条保持低权重，仅参与完整匹配，不挤占预测补全。
-预计算拼音兼容关系与索引化尾词查询减少重复分配和扫描，保持既定匹配规则。
+本次维护更新主要降低常驻内存，不改变词库、模型精度和候选排序规则。
+通过紧凑的精确键缓存与循环队列，避免持续输入使缓存管理空间不断增长；
+大型模型权重与补全索引改用文件映射，停止输入五秒后归还未使用的内存页，
+不卸载模型，也不丢失当前上下文。
+在 11,000 次查询、三个同时存活的输入上下文测试中，停止输入后的常驻内存为
+x86_64 497.4 MiB、aarch64 492.6 MiB。这是实测值，不代表峰值上限或所有场景的
+固定承诺；测试方法和准确度复核见 [BENCHMARK.CN.md](BENCHMARK.CN.md)。
 等待后台结果时仍保留静态补全，模型置信不足时保持原有候选。
 模型加载与预热在后台完成，就绪前仍可通过词库和原有排序正常输入、上屏及
 使用静态补全，不让首次输入等待神经模型加载。
@@ -84,7 +87,7 @@ x86_64 与 aarch64 使用与 Windows 相同的 16,300 条长句和 65,000 条短
 桌面矩阵。桌面与输入框架的具体测试范围见
 [COMPATIBILITY.md](COMPATIBILITY.md)。
 
-v0.9.0 面向 amd64 与 arm64 提供 `.deb` 安装包和便携二进制包。验证环境为
+v0.9.1 面向 amd64 与 arm64 提供 `.deb` 安装包和便携二进制包。验证环境为
 两个架构的 Ubuntu 26.04.1 GNOME Wayland，结果记录在
 [BENCHMARK.CN.md](BENCHMARK.CN.md)。已发布安装包及校验信息请以
 [GitHub Releases](https://github.com/shenmin/cassotis-ime-linux/releases) 为准。
@@ -119,7 +122,7 @@ v0.9.0 面向 amd64 与 arm64 提供 `.deb` 安装包和便携二进制包。验
 
 ```bash
 arch="$(dpkg --print-architecture)"  # 输出 amd64 或 arm64
-package="cassotis-ime_0.9.0_${arch}.deb"
+package="cassotis-ime_0.9.1_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -154,10 +157,10 @@ sudo apt install "./${package}"
 
 ```bash
 arch="$(uname -m)"  # 输出 x86_64 或 aarch64
-archive="cassotis-ime-linux-0.9.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-0.9.1-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-0.9.0-${arch}"
+cd "cassotis-ime-linux-0.9.1-${arch}"
 ./install.sh --user --check &&
 ./install.sh --user
 ```
@@ -201,10 +204,10 @@ SteamOS 等只读系统请使用上面的[用户目录安装](#user-installation
 
 ```bash
 arch="$(uname -m)"  # 输出 x86_64 或 aarch64
-archive="cassotis-ime-linux-0.9.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-0.9.1-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-0.9.0-${arch}"
+cd "cassotis-ime-linux-0.9.1-${arch}"
 sudo ./install.sh
 ```
 

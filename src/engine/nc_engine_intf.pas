@@ -13,6 +13,7 @@ uses
     nc_io_compat,
     Generics.Collections,
     Generics.Defaults,
+    nc_string_queue,
     nc_platform_compat,
     nc_types,
     nc_candidate_presentation,
@@ -680,29 +681,29 @@ type
         m_document_context_model: TncDocumentContextModel;
         m_segment_left_context: string;
         m_context_pairs: TDictionary<string, Integer>;
-        m_context_order: TQueue<string>;
+        m_context_order: TncStringQueue;
         m_phrase_context_pairs: TDictionary<string, Integer>;
-        m_phrase_context_order: TQueue<string>;
+        m_phrase_context_order: TncStringQueue;
         m_phrase_context_last_seen: TDictionary<string, Int64>;
         m_session_text_counts: TDictionary<string, Integer>;
         m_session_text_last_seen: TDictionary<string, Int64>;
-        m_session_text_order: TQueue<string>;
+        m_session_text_order: TncStringQueue;
         m_session_query_choice_counts: TDictionary<string, Integer>;
         m_session_query_choice_last_seen: TDictionary<string, Int64>;
-        m_session_query_choice_order: TQueue<string>;
+        m_session_query_choice_order: TncStringQueue;
         m_session_query_latest_text: TDictionary<string, string>;
         m_session_query_path_choice_counts: TDictionary<string, Integer>;
         m_session_query_path_choice_last_seen: TDictionary<string, Int64>;
-        m_session_query_path_choice_order: TQueue<string>;
+        m_session_query_path_choice_order: TncStringQueue;
         m_session_query_path_penalty_counts: TDictionary<string, Integer>;
         m_session_query_path_penalty_last_seen: TDictionary<string, Int64>;
-        m_session_query_path_penalty_order: TQueue<string>;
+        m_session_query_path_penalty_order: TncStringQueue;
         m_session_ranked_query_paths: TDictionary<string, string>;
         m_session_ranked_query_path_scores: TDictionary<string, Integer>;
-        m_session_ranked_query_path_order: TQueue<string>;
+        m_session_ranked_query_path_order: TncStringQueue;
         m_session_context_query_choice_counts: TDictionary<string, Integer>;
         m_session_context_query_choice_last_seen: TDictionary<string, Int64>;
-        m_session_context_query_choice_order: TQueue<string>;
+        m_session_context_query_choice_order: TncStringQueue;
         m_session_context_query_latest_text: TDictionary<string, string>;
         m_session_commit_serial: Int64;
         m_last_output_commit_text: string;
@@ -1781,29 +1782,29 @@ begin
     m_document_context_model := TncDocumentContextModel.create;
     m_confirmed_segments := TList<TncConfirmedSegment>.Create;
     m_context_pairs := TDictionary<string, Integer>.Create;
-    m_context_order := TQueue<string>.Create;
+    m_context_order := TncStringQueue.Create;
     m_phrase_context_pairs := TDictionary<string, Integer>.Create;
-    m_phrase_context_order := TQueue<string>.Create;
+    m_phrase_context_order := TncStringQueue.Create;
     m_phrase_context_last_seen := TDictionary<string, Int64>.Create;
     m_session_text_counts := TDictionary<string, Integer>.Create;
     m_session_text_last_seen := TDictionary<string, Int64>.Create;
-    m_session_text_order := TQueue<string>.Create;
+    m_session_text_order := TncStringQueue.Create;
     m_session_query_choice_counts := TDictionary<string, Integer>.Create;
     m_session_query_choice_last_seen := TDictionary<string, Int64>.Create;
-    m_session_query_choice_order := TQueue<string>.Create;
+    m_session_query_choice_order := TncStringQueue.Create;
     m_session_query_latest_text := TDictionary<string, string>.Create;
     m_session_query_path_choice_counts := TDictionary<string, Integer>.Create;
     m_session_query_path_choice_last_seen := TDictionary<string, Int64>.Create;
-    m_session_query_path_choice_order := TQueue<string>.Create;
+    m_session_query_path_choice_order := TncStringQueue.Create;
     m_session_query_path_penalty_counts := TDictionary<string, Integer>.Create;
     m_session_query_path_penalty_last_seen := TDictionary<string, Int64>.Create;
-    m_session_query_path_penalty_order := TQueue<string>.Create;
+    m_session_query_path_penalty_order := TncStringQueue.Create;
     m_session_ranked_query_paths := TDictionary<string, string>.Create;
     m_session_ranked_query_path_scores := TDictionary<string, Integer>.Create;
-    m_session_ranked_query_path_order := TQueue<string>.Create;
+    m_session_ranked_query_path_order := TncStringQueue.Create;
     m_session_context_query_choice_counts := TDictionary<string, Integer>.Create;
     m_session_context_query_choice_last_seen := TDictionary<string, Int64>.Create;
-    m_session_context_query_choice_order := TQueue<string>.Create;
+    m_session_context_query_choice_order := TncStringQueue.Create;
     m_session_context_query_latest_text := TDictionary<string, string>.Create;
     m_session_commit_serial := 0;
     m_last_output_commit_text := '';

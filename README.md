@@ -86,20 +86,22 @@ cloud service, network connection, or GPU.
 
 ## Supported Release
 
-v0.9.0 follows Cassotis IME and Cassotis Lexicon v1.29.0, with fresh
+v0.9.1 retains the Cassotis IME and Cassotis Lexicon v1.29.0 baseline and
 schema-24 dictionaries containing 249,342 simplified and 252,554 traditional
 base records. These counts include single-character readings from Unihan and
 other sources as well as multi-character entries; a character or word may have
 multiple reading records, so these are not counts of distinct words. The
 simplified dictionary has 23,918 single-character and 225,424 multi-character
 records; the traditional dictionary has 24,177 and 228,377 respectively.
-Compared with v0.8.0, it adds contextual short-word disambiguation and literary
-phrase recovery, improves partial sentence selection and short-compound recall,
-and corrects fuzzy common-character ordering. Added readings no longer count the
-same text repeatedly as popularity evidence. Expanded specialist entries remain
-low-weight exact matches and do not crowd predictive completion.
-Precomputed pinyin compatibility and indexed compound-tail lookups avoid repeated
-allocation and scans without changing the intended matching rules.
+This maintenance update reduces resident memory without changing dictionaries,
+model precision or candidate ranking rules. Compact exact-key caches and circular
+queues prevent cache bookkeeping from growing with continued typing. Large model
+weights and completion indexes use file-backed mappings; unused pages are released
+after five seconds without input, without unloading models or losing context.
+An 11,000-query, three-context native test measured 497.4 MiB on x86_64 and
+492.6 MiB on aarch64 after input became idle. These are measured resident values,
+not a peak-memory limit or a guarantee for every workload; see
+[BENCHMARK.md](BENCHMARK.md) for the protocol and accuracy checks.
 Static completion stays available while background results are pending, and
 low-confidence model results leave existing candidates intact.
 Models load and warm up in the background. Dictionary candidates, ordinary
@@ -114,7 +116,7 @@ checks also cover native core and dictionary tests, package payloads, cold-start
 responsiveness and the automated IBus/Fcitx desktop matrix. See
 [COMPATIBILITY.md](COMPATIBILITY.md) for desktop and framework test coverage.
 
-The v0.9.0 release targets amd64 and arm64 with `.deb` packages and portable
+The v0.9.1 release targets amd64 and arm64 with `.deb` packages and portable
 binary archives. Qualification uses Ubuntu 26.04.1 GNOME Wayland on both
 architectures; results are recorded in [BENCHMARK.md](BENCHMARK.md).
 Use [GitHub Releases](https://github.com/shenmin/cassotis-ime-linux/releases)
@@ -154,7 +156,7 @@ metadata, and install it with APT:
 
 ```bash
 arch="$(dpkg --print-architecture)"  # amd64 or arm64
-package="cassotis-ime_0.9.0_${arch}.deb"
+package="cassotis-ime_0.9.1_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -193,10 +195,10 @@ composition, then open a terminal as the current desktop user. Run these command
 
 ```bash
 arch="$(uname -m)"  # x86_64 or aarch64
-archive="cassotis-ime-linux-0.9.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-0.9.1-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-0.9.0-${arch}"
+cd "cassotis-ime-linux-0.9.1-${arch}"
 ./install.sh --user --check &&
 ./install.sh --user
 ```
@@ -249,10 +251,10 @@ and compatible runtime libraries. For SteamOS and other read-only systems, use
 
 ```bash
 arch="$(uname -m)"  # x86_64 or aarch64
-archive="cassotis-ime-linux-0.9.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-0.9.1-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-0.9.0-${arch}"
+cd "cassotis-ime-linux-0.9.1-${arch}"
 sudo ./install.sh
 ```
 

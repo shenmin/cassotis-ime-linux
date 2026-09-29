@@ -112,6 +112,7 @@ type
             const error_text: PAnsiChar;
             const error_capacity: Integer): Integer; cdecl;
         TncLcgDestroy = procedure(const handle: Pointer); cdecl;
+        TncReleaseIdlePages = procedure; cdecl;
     private
         FBaseDirectory: string;
         FLock: TCriticalSection;
@@ -130,6 +131,7 @@ type
         FDestroyFunction: TncLcDestroy;
         FGeneratorRunFunction: TncLcgRun;
         FGeneratorDestroyFunction: TncLcgDestroy;
+        FReleaseIdlePages: TncReleaseIdlePages;
         FMinimumConfidence: Single;
         FResultTimeoutMs: QWord;
         FModelThreads: Integer;
@@ -159,6 +161,7 @@ type
         function GeneratorReady: Boolean;
         function LoadFinished: Boolean;
         function LastError: string;
+        procedure ReleaseIdlePages;
     end;
 
 implementation
@@ -472,6 +475,8 @@ begin
         'nc_lcg_run'));
     FGeneratorDestroyFunction := TncLcgDestroy(GetProcedureAddress(FModule,
         'nc_lcg_destroy'));
+    FReleaseIdlePages := TncReleaseIdlePages(GetProcedureAddress(FModule,
+        'nc_release_idle_index_pages'));
     if (not Assigned(create_function)) or (not Assigned(FRunFunction)) or
         (not Assigned(FDestroyFunction)) then
         raise EInvalidOp.Create('invalid local-completion wrapper ABI');
@@ -796,6 +801,18 @@ begin
         end;
     finally
         FLock.Release;
+    end;
+end;
+
+procedure TncLocalCompletionHost.ReleaseIdlePages;
+begin
+    // Never wait for loading or start a runtime merely to reclaim memory.
+    // This owner keeps the native module alive until the service stops.
+    if not FLock.TryEnter then Exit;
+    try
+        if FReady and Assigned(FReleaseIdlePages) then FReleaseIdlePages();
+    finally
+        FLock.Leave;
     end;
 end;
 

@@ -28,6 +28,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "nc_mapped_file.h"
 
 #if defined(__GLIBC__)
 #include <malloc.h>
@@ -38,6 +39,14 @@
 #endif
 
 #define CASSOTIS_EXPORT __attribute__((visibility("default")))
+
+extern "C" CASSOTIS_EXPORT void nc_release_idle_index_pages() noexcept {
+    try {
+        ReadOnlyMappedFile::ReleaseIdlePages();
+    } catch (...) {
+        // Memory advice is optional; never propagate an exception over the ABI.
+    }
+}
 
 namespace {
 
@@ -710,58 +719,6 @@ struct LocalCompletionCandidateData {
     int32_t anchor_total{1};
 };
 
-class ReadOnlyMappedFile {
-public:
-    ~ReadOnlyMappedFile() { Close(); }
-
-    bool Open(const char* path, std::string& error) {
-        Close();
-        file_ = open(path, O_RDONLY | O_CLOEXEC);
-        if (file_ < 0) {
-            error = "cannot open local-completion index: " +
-                std::string(std::strerror(errno));
-            return false;
-        }
-        struct stat metadata {};
-        if (fstat(file_, &metadata) != 0 || metadata.st_size <= 0) {
-            error = "cannot read local-completion index size";
-            Close();
-            return false;
-        }
-        size_ = static_cast<size_t>(metadata.st_size);
-        data_ = static_cast<const uint8_t*>(
-            mmap(nullptr, size_, PROT_READ, MAP_PRIVATE, file_, 0));
-        if (data_ == MAP_FAILED) {
-            data_ = nullptr;
-            error = "cannot map local-completion index: " +
-                std::string(std::strerror(errno));
-            Close();
-            return false;
-        }
-        return true;
-    }
-
-    void Close() {
-        if (data_ != nullptr) {
-            munmap(const_cast<uint8_t*>(data_), size_);
-            data_ = nullptr;
-        }
-        if (file_ >= 0) {
-            close(file_);
-            file_ = -1;
-        }
-        size_ = 0;
-    }
-
-    const uint8_t* data() const { return data_; }
-    size_t size() const { return size_; }
-
-private:
-    int file_{-1};
-    const uint8_t* data_{};
-    size_t size_{};
-};
-
 bool CheckedSection(uint64_t offset, uint64_t count, uint64_t item_size,
     uint64_t file_size) {
     return offset <= file_size && count <= file_size && item_size <= file_size &&
@@ -920,7 +877,9 @@ public:
         candidates_ = file_.data() + header_->candidate_offset;
         strings_ = reinterpret_cast<const char*>(file_.data() + header_->string_offset);
         strings_size_ = header_->file_size - header_->string_offset;
-        return ValidateSorted(error);
+        if (!ValidateSorted(error)) return false;
+        file_.FinishValidation();
+        return true;
     }
 
     const LocalCompletionIndexHeader& header() const { return *header_; }

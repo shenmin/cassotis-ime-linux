@@ -1,5 +1,15 @@
 # Compatibility
 
+## v0.9.1 Preparation
+
+The memory-maintenance update retains the v1.29.0 engine/data baseline and both
+framework adapters. Native memory, complete long/short quality, cold-start and
+507 unit checks have passed on x86_64 and aarch64; see
+[BENCHMARK.md](BENCHMARK.md) / [Chinese](BENCHMARK.CN.md).
+Final v0.9.1 package installation and desktop qualification are pending. The
+v0.9.0 coverage below is historical, not a claim that the new packages have
+already passed the same checks.
+
 ## v0.9.0 Validation
 
 The v1.29.0 engine/dictionary port and Linux 60 ms short-context inference budget
