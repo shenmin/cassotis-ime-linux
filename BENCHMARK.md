@@ -197,7 +197,7 @@ not ignored failures, and are not included in binary release assets.
 
 ## v1.0.0 Native Measurements
 
-Complete native runs on 2026-10-03/04 use the v1.31.0 engine and dictionaries.
+Complete native runs on 2026-10-04 use the v1.31.0 engine and dictionaries.
 Both Ubuntu 26.04.1 guests have eight virtual CPUs: x86_64 has 16 GiB RAM and
 aarch64 has 8 GiB. The x86_64 guest runs under VMware Workstation Pro 26.0.1
 on an Intel Core i5-12600K host, with AVX2/FMA but no exposed VNNI. The aarch64
@@ -214,12 +214,12 @@ Latencies include candidate processing, not model inference alone, and are in ms
 
 | Architecture | Track | Top1 | Top2 | Mean | Median | P95 | Maximum |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| x86_64 | Long | 12,940/16,300 (79.39%) | 13,534/16,300 (83.03%) | 112.732 | 112 | 175 | 462 |
-| aarch64 | Long | 12,946/16,300 (79.42%) | 13,537/16,300 (83.05%) | 98.178 | 97 | 159 | 490 |
-| x86_64 | Short, no context | 60,391/65,000 (92.91%) | 63,212/65,000 (97.25%) | 3.975 | 3 | 10 | 29 |
-| aarch64 | Short, no context | 60,391/65,000 (92.91%) | 63,212/65,000 (97.25%) | 3.890 | 3 | 10 | 25 |
-| x86_64 | Short, context | 63,036/65,000 (96.98%) | 64,104/65,000 (98.62%) | 7.975 | 7 | 19 | 46 |
-| aarch64 | Short, context | 63,038/65,000 (96.98%) | 64,104/65,000 (98.62%) | 6.513 | 6 | 16 | 36 |
+| x86_64 | Long | 12,940/16,300 (79.39%) | 13,534/16,300 (83.03%) | 114.695 | 114 | 178 | 486 |
+| aarch64 | Long | 12,946/16,300 (79.42%) | 13,537/16,300 (83.05%) | 98.099 | 97 | 159 | 472 |
+| x86_64 | Short, no context | 60,391/65,000 (92.91%) | 63,212/65,000 (97.25%) | 4.105 | 3 | 10 | 29 |
+| aarch64 | Short, no context | 60,391/65,000 (92.91%) | 63,212/65,000 (97.25%) | 3.950 | 3 | 10 | 27 |
+| x86_64 | Short, context | 63,036/65,000 (96.98%) | 64,104/65,000 (98.62%) | 8.286 | 8 | 20 | 42 |
+| aarch64 | Short, context | 63,038/65,000 (96.98%) | 64,104/65,000 (98.62%) | 6.638 | 6 | 16 | 31 |
 
 The separate single-threaded, deadline-free long accuracy pass records
 12,941/13,535 Top1/Top2 on x86_64 and 12,946/13,537 on aarch64. Production
@@ -235,8 +235,8 @@ The ambiguous short-word subset contains 11,728 cases:
 | x86_64 | On | 10,491/11,728 (89.45%) | 11,196/11,728 (95.46%) |
 | aarch64 | On | 10,489/11,728 (89.44%) | 11,197/11,728 (95.47%) |
 
-Candidate-suite peak RSS/high-water marks are 500,408/503,636 KiB on x86_64
-and 510,432/513,804 KiB on aarch64. These describe this particular benchmark,
+Candidate-suite peak RSS/high-water marks are 507,800/511,428 KiB on x86_64
+and 509,348/513,060 KiB on aarch64. These describe this particular benchmark,
 not idle memory or a universal process-peak bound.
 
 ### Short One-Key Completion
@@ -251,8 +251,8 @@ The background character-LM deadline remains 120 ms.
 
 | Architecture | Key P95 | Settled mean | Settled median | Settled P95 | Settled maximum |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| x86_64 | 1.404 ms | 2.888 ms | 0.762 ms | 15.847 ms | 30.855 ms |
-| aarch64 | 1.287 ms | 2.236 ms | 0.665 ms | 12.357 ms | 29.452 ms |
+| x86_64 | 1.441 ms | 2.926 ms | 0.776 ms | 16.180 ms | 30.855 ms |
+| aarch64 | 1.306 ms | 2.247 ms | 0.670 ms | 12.302 ms | 26.804 ms |
 
 Settled-display latency includes an applied asynchronous rerank; it is not a
 synchronous keystroke stall.
@@ -266,8 +266,8 @@ earlier latency-calibration run.
 
 | Architecture | Track | Predictive prompts | Hits | Saved keys |
 | --- | --- | ---: | ---: | ---: |
-| x86_64 | Production, 120 ms | 15,814/16,300 (97.02%) | 3,513/16,300 (21.55%) | 7,478 |
-| aarch64 | Production, 120 ms | 15,815/16,300 (97.02%) | 3,535/16,300 (21.69%) | 7,506 |
+| x86_64 | Production, 120 ms | 15,814/16,300 (97.02%) | 3,514/16,300 (21.56%) | 7,479 |
+| aarch64 | Production, 120 ms | 15,816/16,300 (97.03%) | 3,536/16,300 (21.69%) | 7,508 |
 | x86_64 | Deadline-free | 15,814/16,300 (97.02%) | 3,513/16,300 (21.55%) | 7,478 |
 | aarch64 | Deadline-free | 15,816/16,300 (97.03%) | 3,536/16,300 (21.69%) | 7,508 |
 
@@ -277,10 +277,10 @@ All values below are in ms.
 
 | Architecture | Track | Mean | Median | P95 | Maximum |
 | --- | --- | ---: | ---: | ---: | ---: |
-| x86_64 | Production, 120 ms | 109.311 | 110 | 193 | 416 |
-| aarch64 | Production, 120 ms | 90.508 | 87 | 170 | 447 |
-| x86_64 | Deadline-free | 233.632 | 244 | 379 | 629 |
-| aarch64 | Deadline-free | 159.986 | 165 | 268 | 500 |
+| x86_64 | Production, 120 ms | 111.048 | 112 | 196 | 416 |
+| aarch64 | Production, 120 ms | 87.549 | 85 | 164 | 402 |
+| x86_64 | Deadline-free | 235.263 | 247 | 380 | 618 |
+| aarch64 | Deadline-free | 154.919 | 161 | 262 | 490 |
 
 Both architectures pass the complete production and deadline-free completion
 gates with unchanged quality floors. The calibrated latency ceilings are not

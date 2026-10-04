@@ -145,7 +145,7 @@ status.
 
 ## Benchmarks
 
-Complete native measurements on 2026-10-03/04 use Ubuntu 26.04.1 virtual
+Complete native measurements on 2026-10-04 use Ubuntu 26.04.1 virtual
 machines with eight vCPUs: x86_64 has 16 GiB RAM and aarch64 has 8 GiB.
 The x86_64 host is an Intel Core i5-12600K; aarch64 runs on Apple silicon.
 These are each machine's results, not a controlled hardware comparison.
@@ -160,12 +160,12 @@ character-LM budget. All latency columns are in ms.
 
 | Architecture | Track | Top1 | Top2 | Mean | Median | P95 | Maximum |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| x86_64 | Long | 12,940/16,300 (79.39%) | 13,534/16,300 (83.03%) | 112.732 | 112 | 175 | 462 |
-| aarch64 | Long | 12,946/16,300 (79.42%) | 13,537/16,300 (83.05%) | 98.178 | 97 | 159 | 490 |
-| x86_64 | Short, no context | 60,391/65,000 (92.91%) | 63,212/65,000 (97.25%) | 3.975 | 3 | 10 | 29 |
-| aarch64 | Short, no context | 60,391/65,000 (92.91%) | 63,212/65,000 (97.25%) | 3.890 | 3 | 10 | 25 |
-| x86_64 | Short, context | 63,036/65,000 (96.98%) | 64,104/65,000 (98.62%) | 7.975 | 7 | 19 | 46 |
-| aarch64 | Short, context | 63,038/65,000 (96.98%) | 64,104/65,000 (98.62%) | 6.513 | 6 | 16 | 36 |
+| x86_64 | Long | 12,940/16,300 (79.39%) | 13,534/16,300 (83.03%) | 114.695 | 114 | 178 | 486 |
+| aarch64 | Long | 12,946/16,300 (79.42%) | 13,537/16,300 (83.05%) | 98.099 | 97 | 159 | 472 |
+| x86_64 | Short, no context | 60,391/65,000 (92.91%) | 63,212/65,000 (97.25%) | 4.105 | 3 | 10 | 29 |
+| aarch64 | Short, no context | 60,391/65,000 (92.91%) | 63,212/65,000 (97.25%) | 3.950 | 3 | 10 | 27 |
+| x86_64 | Short, context | 63,036/65,000 (96.98%) | 64,104/65,000 (98.62%) | 8.286 | 8 | 20 | 42 |
+| aarch64 | Short, context | 63,038/65,000 (96.98%) | 64,104/65,000 (98.62%) | 6.638 | 6 | 16 | 31 |
 
 ### Short One-Key Completion
 
@@ -175,8 +175,8 @@ reported separately.
 
 | Architecture | Hits | Average saved keys per hit | Stable / eligible pairs | Key P95 | Settled P95 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| x86_64 | 10,336/12,831 (80.55%) | 2.638 | 2,123/2,185 (97.16%) | 1.404 ms | 15.847 ms |
-| aarch64 | 10,336/12,831 (80.55%) | 2.638 | 2,122/2,185 (97.12%) | 1.287 ms | 12.357 ms |
+| x86_64 | 10,336/12,831 (80.55%) | 2.638 | 2,123/2,185 (97.16%) | 1.441 ms | 16.180 ms |
+| aarch64 | 10,336/12,831 (80.55%) | 2.638 | 2,122/2,185 (97.12%) | 1.306 ms | 12.302 ms |
 
 ### Long One-Key Completion
 
@@ -187,8 +187,8 @@ visible completion; all latency columns are in ms.
 
 | Architecture | Hits | Predictive coverage | Saved keys | Mean | Median | P95 | Maximum |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| x86_64 | 3,513/16,300 (21.55%) | 15,814/16,300 (97.02%) | 7,478 | 109.311 | 110 | 193 | 416 |
-| aarch64 | 3,535/16,300 (21.69%) | 15,815/16,300 (97.02%) | 7,506 | 90.508 | 87 | 170 | 447 |
+| x86_64 | 3,514/16,300 (21.56%) | 15,814/16,300 (97.02%) | 7,479 | 111.048 | 112 | 196 | 416 |
+| aarch64 | 3,536/16,300 (21.69%) | 15,816/16,300 (97.03%) | 7,508 | 87.549 | 85 | 164 | 402 |
 
 ## Install
 

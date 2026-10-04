@@ -1,5 +1,34 @@
 # Compatibility
 
+## v1.0.0 Validation
+
+The shared character-language-model update uses the v1.31.0 engine and
+dictionary baseline. Native qualification and installed-package checks were
+completed on 2026-10-04.
+
+| Platform | Verified checks |
+| --- | --- |
+| Ubuntu 26.04.1 x86_64 and aarch64, GNOME Wayland | 543 core tests per architecture; complete long-sentence and short-word candidate suites; production and deadline-free long completion; short completion; cold-start, inference cancellation, repeatability and IPC recovery |
+| Ubuntu x86_64 and aarch64 | Debian v0.9.1-to-v1.0.0 upgrade, removal/reinstallation, immediate GNOME discovery and unchanged personal-dictionary hashes |
+| Ubuntu x86_64 and aarch64 | Installed-package GTK 3/4 input through IBus and Fcitx 5, with Wayland and XWayland clients: eight combinations per architecture |
+| Ubuntu x86_64 and aarch64 | Relocated portable user installation with a read-only `/usr`, both native frameworks, upgrade/removal and retained user data |
+| SteamOS 3.8.14 x86_64, KDE X11, IBus 1.5.32 | User installation/upgrade, uninstall/reinstall, source discovery, settings launcher, Chinese/traditional/Ziguang input, bare Shift and Shift-letter handling, English punctuation and Tab completion |
+
+All four complete quality suites passed on both architectures. Production uses
+a 100 ms foreground character-model budget and a separate 120 ms background
+completion budget; neither is a ceiling on the whole query. Models load
+asynchronously, and dictionary candidates remain available during initialization.
+Accuracy, latency, cold-start and memory measurements are published in
+[BENCHMARK.md](BENCHMARK.md) / [Chinese](BENCHMARK.CN.md).
+
+SteamOS installation did not require `sudo`, system-directory writes or changes
+to filesystem protection. Enforcement of a read-only `/usr` was also exercised
+in Ubuntu namespaces. No SteamOS corpus-performance result is claimed.
+SteamOS Fcitx 5 and Gaming Mode, Chromium/Electron, standalone GNOME X11
+sessions and mixed-DPI candidate placement are not newly qualified by these
+checks. Text-commit assertions do not replace visual candidate-placement checks.
+Previous version coverage below remains historical.
+
 ## v0.9.1 Validation
 
 The memory-maintenance update retains the v1.29.0 engine/data baseline and both
