@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 - 2026-10-04
+
+- Aligned the engine and dictionaries with Cassotis IME and Cassotis Lexicon
+  v1.31.0. Replaced the RBT3 short-context models with a shared character
+  language model for long-sentence ranking, contextual short-word selection
+  and completion, without requiring a GPU or network service.
+- Added asynchronous short-word completion reranking and learned long-completion
+  selection over dictionary tails, next-word recall and predicted characters.
+  Pending work is bounded and stale results cannot replace the current input.
+- Preserved mixed-abbreviation matches and validated completion tails against
+  individual syllables rather than accepting an incompatible partial reading.
+- Kept model verification and loading off the first-key path and retained
+  file-backed weights, foreground inference priority and idle memory release.
+- Added checksum-verified assembly of numbered character-model files during
+  builds and updated upgrade/removal handling for superseded model assets.
 
 ## 0.9.1 - 2026-09-29
 

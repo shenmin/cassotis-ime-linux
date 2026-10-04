@@ -24,10 +24,7 @@ MODELS = (
     "local_repair/context_int8.onnx",
     "local_repair/query_int8.onnx",
     "local_repair/joint_query_int8.onnx",
-    "short_context/exit0.int8.onnx",
-    "short_context/exit1.int8.onnx",
-    "short_context/exit2.int8.onnx",
-    "short_context/exit3.int8.onnx",
+    "char_lm/char_lm.onnx",
 )
 # The small repair heads are loaded from in-memory compatibility graphs, so
 # external paths cannot be resolved for those models. Keep their storage inline.
@@ -232,19 +229,19 @@ def copy_weights(source: Path, destination: Path) -> None:
             atomic_write(destination / path.relative_to(source), path.read_bytes())
 
 
-def update_short_manifest(source: Path, destination: Path) -> None:
-    folder = destination / "short_context"
-    manifest = json.loads((source / "short_context/runtime_manifest.json").read_text(encoding="utf-8"))
+def update_char_manifest(source: Path, destination: Path, canonical_model: Path) -> None:
+    folder = destination / "char_lm"
+    manifest = json.loads((source / "char_lm/runtime_manifest.json").read_text(encoding="utf-8"))
     files = manifest["files"]
-    expected = {f"exit{i}.int8.onnx" for i in range(4)} | {"tokenizer.bin", "policy.bin"}
+    expected = {"char_lm.onnx", "char_lm_vocab.bin"}
     if set(files) != expected:
-        raise ValueError("unexpected canonical short-context manifest")
+        raise ValueError("unexpected canonical character LM manifest")
     manifest["canonical_files"] = dict(files)
     external = {}
     for name in sorted(expected):
-        original = source / "short_context" / name
+        original = canonical_model if name == "char_lm.onnx" else source / "char_lm" / name
         if hashlib.sha256(original.read_bytes()).hexdigest() != files[name]:
-            raise ValueError("canonical short-context asset hash mismatch: " + name)
+            raise ValueError("canonical character LM asset hash mismatch: " + name)
         path = folder / name
         files[name] = hashlib.sha256(path.read_bytes()).hexdigest()
         if name.endswith(".onnx"):
@@ -257,7 +254,10 @@ def update_short_manifest(source: Path, destination: Path) -> None:
 
 
 def remove_weights(root: Path) -> None:
-    for relative in MODELS:
+    # Older user-prefix installations may retain mapped RBT3 sidecars until
+    # uninstall. They are not part of the current build or copy manifest.
+    legacy_models = tuple(f"short_context/exit{i}.int8.onnx" for i in range(4))
+    for relative in (*MODELS, *legacy_models):
         model = root / relative
         for path in model.parent.glob(model.name + ".*.weights"):
             if owned_weight(model, path.name) and (path.is_file() or path.is_symlink()):
@@ -279,12 +279,17 @@ def main():
         if args.destination is None:
             parser.error("destination is required")
         if args.pack:
+            from char_lm_model_parts import assemble
             if args.source.resolve() == args.destination.resolve():
                 parser.error("canonical source and runtime destination must differ")
-            for relative in MODELS:
-                count = pack_model(args.source / relative, args.destination / relative)
-                print(f"[weights] {relative}: {count} external tensors; exact round trip")
-            update_short_manifest(args.source, args.destination)
+            args.destination.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(prefix="char-lm-", dir=args.destination.parent) as temporary:
+                canonical = assemble(args.source / "char_lm", Path(temporary) / "char_lm.onnx")
+                for relative in MODELS:
+                    original = canonical if relative == "char_lm/char_lm.onnx" else args.source / relative
+                    count = pack_model(original, args.destination / relative)
+                    print(f"[weights] {relative}: {count} external tensors; exact round trip")
+                update_char_manifest(args.source, args.destination, canonical)
         else:
             copy_weights(args.source, args.destination)
 

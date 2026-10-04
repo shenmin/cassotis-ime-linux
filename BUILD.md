@@ -53,6 +53,12 @@ Outputs in `build/bin/`:
 Settings are provided by `adapters/ibus/cassotis_settings.py`, installed as
 `cassotis-settings`. Pascal compilation output stays under `build/units/`.
 
+The character language model is stored as numbered `char_lm.onnx.NNN` files.
+The build verifies that the parts are contiguous, joins them automatically,
+and checks the joined SHA-256 against the runtime manifest. No Git LFS setup
+or manual model download is needed. Keep all parts and the vocabulary together
+when obtaining the source; the joined graph is a generated, ignored file.
+
 The build stores large model weights in file-backed `.weights` files alongside
 their `.onnx` graphs to reduce resident memory. Tensor values and precision are
 unchanged; source models are checked and the conversion is verified byte-for-byte.

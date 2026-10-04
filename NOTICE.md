@@ -37,12 +37,11 @@ Its source attribution, modification notice, and license are provided in
 release documentation. The model uses local pinyin constraints and a bounded
 in-memory context cache; its upstream license remains unchanged.
 
-The contextual short-word model is derived from `hfl/rbt3`, distributed under
-Apache-2.0. It compares two base-dictionary candidates with shared early-exit
-encoders and a conservative context-evidence veto. Attribution and modification
-notices are in `third_party/rbt3/NOTICE` (source) and `third-party/rbt3/NOTICE`
-(binary documentation); the Apache-2.0 license text is provided alongside
-the MacBERT notices. Inference is local and does not transmit typed text.
+The shared character language model and vocabulary are supplied by
+[Cassotis IME](https://github.com/shenmin/cassotis-ime). Architecture,
+quantization settings and runtime asset checksums are recorded in
+`data/models/char_lm/runtime_manifest.json`. One local session is shared by
+candidate ranking and completion; inference does not transmit typed text.
 
 Literary phrase recovery uses public-domain fragments from
 [Chinese Poetry](https://github.com/chinese-poetry/chinese-poetry/tree/b8594f81a89752241442f2ce267d6f66f96704ee)

@@ -140,6 +140,9 @@ type
         m_candidate_penalty_cache: TDictionary<string, Integer>;
         m_candidate_penalty_pinyin_loaded_cache: TDictionary<string, Boolean>;
         m_lookup_result_cache: TDictionary<string, TncCandidateList>;
+        m_mixed_abbreviation_cache: TDictionary<string, TncCandidateList>;
+        m_word_completion_cache: TDictionary<string, TncOneKeyCompletionList>;
+        m_next_character_cache: TDictionary<string, TArray<string>>;
         m_lookup_result_cache_order: TncStringQueue;
         m_exact_lookup_result_cache: TDictionary<string, TncCandidateList>;
         m_exact_lookup_result_cache_order: TncStringQueue;
@@ -310,6 +313,16 @@ type
             out results: TncCandidateList): Boolean; override;
         function lookup_full_pinyin_prefix(const pinyin_prefix: string;
             out results: TncCandidateList): Boolean; override;
+        function lookup_mixed_abbreviation_words(const pinyin: string;
+            out results: TncCandidateList): Boolean; override;
+        function lookup_word_completions(const syllables: TArray<string>;
+            const max_syllables, limit: Integer;
+            out results: TncOneKeyCompletionList): Boolean; override;
+        function lookup_next_characters(const tail: string; const limit: Integer;
+            out characters: TArray<string>): Boolean; override;
+        function lookup_words_starting_with(const prefix: string;
+            const min_length, max_length, limit: Integer;
+            out results: TncOneKeyCompletionList): Boolean; override;
         function lookup_candidate_prefix_completions(const pinyin_prefix: string;
             out results: TncOneKeyCompletionList): Boolean; override;
         function lookup_one_key_completions(const pinyin_prefix: string;
@@ -2674,6 +2687,9 @@ begin
     m_candidate_penalty_cache := TDictionary<string, Integer>.Create;
     m_candidate_penalty_pinyin_loaded_cache := TDictionary<string, Boolean>.Create;
     m_lookup_result_cache := TDictionary<string, TncCandidateList>.Create;
+    m_mixed_abbreviation_cache := TDictionary<string, TncCandidateList>.Create;
+    m_word_completion_cache := TDictionary<string, TncOneKeyCompletionList>.Create;
+    m_next_character_cache := TDictionary<string, TArray<string>>.Create;
     m_lookup_result_cache_order := TncStringQueue.Create;
     m_exact_lookup_result_cache := TDictionary<string, TncCandidateList>.Create;
     m_exact_lookup_result_cache_order := TncStringQueue.Create;
@@ -2896,6 +2912,21 @@ begin
     begin
         m_lookup_result_cache.Free;
         m_lookup_result_cache := nil;
+    end;
+    if m_mixed_abbreviation_cache <> nil then
+    begin
+        m_mixed_abbreviation_cache.Free;
+        m_mixed_abbreviation_cache := nil;
+    end;
+    if m_word_completion_cache <> nil then
+    begin
+        m_word_completion_cache.Free;
+        m_word_completion_cache := nil;
+    end;
+    if m_next_character_cache <> nil then
+    begin
+        m_next_character_cache.Free;
+        m_next_character_cache := nil;
     end;
     if m_lookup_result_cache_order <> nil then
     begin
@@ -3577,6 +3608,477 @@ begin
         m_prefix_lookup_result_cache.AddOrSetValue(normalized_prefix,
             Copy(results, 0, Length(results)));
     end;
+end;
+
+function TncSqliteDictionary.lookup_word_completions(const syllables: TArray<string>;
+    const max_syllables, limit: Integer; out results: TncOneKeyCompletionList): Boolean;
+const
+    c_cache_limit = 4096;
+    // Heavier words sharing the leading letters (e.g. "xiang..." for "xian")
+    // fail the syllable check, so read more rows than are returned.
+    c_scan_limit = 400;
+    base_sql =
+        'SELECT pinyin, text, weight FROM dict_base ' +
+        'WHERE pinyin >= ?1 AND pinyin < ?2 AND weight > 0 AND ' +
+        '(comment IS NULL OR comment = '''') ' +
+        'ORDER BY weight DESC, text ASC LIMIT ?3';
+var
+    cache_key, prefix, upper_bound, stored_pinyin, text_value, remainder: string;
+    parser: TncPinyinParser;
+    list: TList<TncOneKeyCompletion>;
+    seen: TDictionary<string, Boolean>;
+    item: TncOneKeyCompletion;
+    stmt: Psqlite3_stmt;
+    step_result, idx, unit_idx, units, weight: Integer;
+    aligned: Boolean;
+begin
+    SetLength(results, 0);
+    Result := False;
+    if (Length(syllables) = 0) or (limit <= 0) or (max_syllables <= Length(syllables)) then
+        Exit;
+    prefix := '';
+    for idx := 0 to High(syllables) do
+    begin
+        if not nc_is_canonical_pinyin_syllable(LowerCase(Trim(syllables[idx]))) then
+            Exit;
+        prefix := prefix + LowerCase(Trim(syllables[idx]));
+    end;
+    cache_key := '';
+    for idx := 0 to High(syllables) do
+    begin
+        if idx > 0 then cache_key := cache_key + '''';
+        cache_key := cache_key + LowerCase(syllables[idx]);
+    end;
+    cache_key := cache_key + '|' + IntToStr(max_syllables) + '|' + IntToStr(limit);
+    if (m_word_completion_cache <> nil) and
+        m_word_completion_cache.TryGetValue(cache_key, results) then
+    begin
+        results := Copy(results, 0, Length(results));
+        Exit(Length(results) > 0);
+    end;
+    if (not ensure_open) or (not m_base_ready) then
+        Exit;
+    upper_bound := Copy(prefix, 1, Length(prefix) - 1) + Chr(Ord(prefix[Length(prefix)]) + 1);
+
+    parser := TncPinyinParser.create;
+    list := TList<TncOneKeyCompletion>.Create;
+    seen := TDictionary<string, Boolean>.Create;
+    stmt := nil;
+    try
+        if m_base_connection.prepare(base_sql, stmt) and
+            m_base_connection.BindText(stmt, 1, prefix) and
+            m_base_connection.BindText(stmt, 2, upper_bound) and
+            m_base_connection.BindInt(stmt, 3, c_scan_limit) then
+        begin
+            step_result := m_base_connection.step(stmt);
+            while (step_result = SQLITE_ROW) and (list.Count < limit) do
+            begin
+                stored_pinyin := LowerCase(m_base_connection.ColumnText(stmt, 0));
+                text_value := Trim(m_base_connection.ColumnText(stmt, 1));
+                weight := m_base_connection.ColumnInt(stmt, 2);
+                step_result := m_base_connection.step(stmt);
+                units := 0;
+                idx := 1;
+                while idx <= Length(text_value) do
+                begin
+                    if (Ord(text_value[idx]) >= $D800) and (Ord(text_value[idx]) <= $DBFF) then
+                        Inc(idx);
+                    Inc(idx);
+                    Inc(units);
+                end;
+                if (text_value = '') or seen.ContainsKey(text_value) or
+                    (units <= Length(syllables)) or (units > max_syllables) then
+                    Continue;
+                // The typed syllables must end at a syllable boundary: the rest
+                // parses into exactly the word's remaining characters (e.g.
+                // "xiangfa" leaves "gfa" after "xian"). An apostrophe after the
+                // prefix marks the boundary; one inside it moves the boundary.
+                remainder := Copy(stored_pinyin, Length(prefix) + 1, MaxInt);
+                if (Pos('''', Copy(stored_pinyin, 1, Length(prefix))) > 0) then
+                    Continue;
+                remainder := StringReplace(remainder, '''', '', [rfReplaceAll]);
+                if not nc_word_completion_remainder_fits(parser, remainder,
+                    units - Length(syllables)) then
+                    Continue;
+                // The letters alone do not fix the boundaries: "xi'nan" and
+                // 新安县 (xin'an'xian) share "xinan". Each typed syllable must be
+                // a reading of its own character.
+                aligned := True;
+                for unit_idx := 0 to High(syllables) do
+                    if not single_char_matches_pinyin(LowerCase(Trim(syllables[unit_idx])),
+                        Copy(text_value, unit_idx + 1, 1)) then
+                    begin
+                        aligned := False;
+                        Break;
+                    end;
+                if not aligned then
+                    Continue;
+                seen.Add(text_value, True);
+                item := Default(TncOneKeyCompletion);
+                item.text := text_value;
+                item.full_pinyin := prefix + remainder;
+                item.weight := weight;
+                item.source := okcs_base_exact;
+                list.Add(item);
+            end;
+        end;
+    finally
+        if stmt <> nil then
+            m_base_connection.finalize(stmt);
+        seen.Free;
+        SetLength(results, list.Count);
+        for idx := 0 to list.Count - 1 do
+            results[idx] := list[idx];
+        list.Free;
+        parser.Free;
+    end;
+    if m_word_completion_cache <> nil then
+    begin
+        if m_word_completion_cache.Count >= c_cache_limit then
+            m_word_completion_cache.Clear;
+        m_word_completion_cache.AddOrSetValue(cache_key, Copy(results, 0, Length(results)));
+    end;
+    Result := Length(results) > 0;
+end;
+
+function TncSqliteDictionary.lookup_next_characters(const tail: string;
+    const limit: Integer; out characters: TArray<string>): Boolean;
+const
+    c_cache_limit = 8192;
+    next_sql =
+        'SELECT ngram FROM dict_base_char_lm WHERE ngram > ?1 AND ngram < ?2 AND ' +
+        'length(ngram) = ?3 ORDER BY score DESC, ngram ASC LIMIT ?4';
+var
+    cache_key, ngram, ch: string;
+    stmt: Psqlite3_stmt;
+    step_result: Integer;
+    list: TList<string>;
+begin
+    SetLength(characters, 0);
+    Result := False;
+    if (tail = '') or (limit <= 0) then
+        Exit;
+    cache_key := tail + #1 + IntToStr(limit);
+    if (m_next_character_cache <> nil) and
+        m_next_character_cache.TryGetValue(cache_key, characters) then
+    begin
+        characters := Copy(characters, 0, Length(characters));
+        Exit(Length(characters) > 0);
+    end;
+    if (not ensure_open) or (not m_base_ready) then
+        Exit;
+    list := TList<string>.Create;
+    stmt := nil;
+    try
+        // Read a few extra rows: sentence markers are not characters to type.
+        if m_base_connection.prepare(next_sql, stmt) and
+            m_base_connection.BindText(stmt, 1, tail) and
+            m_base_connection.BindText(stmt, 2, tail + #$FFFF) and
+            m_base_connection.BindInt(stmt, 3, Length(tail) + 1) and
+            m_base_connection.BindInt(stmt, 4, limit + 2) then
+        begin
+            step_result := m_base_connection.step(stmt);
+            while (step_result = SQLITE_ROW) and (list.Count < limit) do
+            begin
+                ngram := m_base_connection.ColumnText(stmt, 0);
+                step_result := m_base_connection.step(stmt);
+                if Length(ngram) <> Length(tail) + 1 then
+                    Continue;
+                ch := Copy(ngram, Length(ngram), 1);
+                if (ch < #$4E00) or list.Contains(ch) then
+                    Continue;
+                list.Add(ch);
+            end;
+        end;
+    finally
+        if stmt <> nil then
+            m_base_connection.finalize(stmt);
+        characters := list.ToArray;
+        list.Free;
+    end;
+    if m_next_character_cache <> nil then
+    begin
+        if m_next_character_cache.Count >= c_cache_limit then
+            m_next_character_cache.Clear;
+        m_next_character_cache.AddOrSetValue(cache_key, Copy(characters, 0, Length(characters)));
+    end;
+    Result := Length(characters) > 0;
+end;
+
+function TncSqliteDictionary.lookup_words_starting_with(const prefix: string;
+    const min_length, max_length, limit: Integer;
+    out results: TncOneKeyCompletionList): Boolean;
+const
+    c_cache_limit = 8192;
+    words_sql =
+        'SELECT pinyin, text, weight FROM dict_base WHERE text >= ?1 AND text < ?2 AND ' +
+        'weight > 0 AND (comment IS NULL OR comment = '''') AND ' +
+        'length(text) BETWEEN ?3 AND ?4 ORDER BY weight DESC, text ASC LIMIT ?5';
+var
+    cache_key, text_value: string;
+    stmt: Psqlite3_stmt;
+    step_result, idx: Integer;
+    list: TList<TncOneKeyCompletion>;
+    item: TncOneKeyCompletion;
+begin
+    SetLength(results, 0);
+    Result := False;
+    if (prefix = '') or (limit <= 0) or (min_length < 1) or (max_length < min_length) then
+        Exit;
+    cache_key := #2 + prefix + #1 + IntToStr(min_length) + #1 + IntToStr(max_length) + #1 +
+        IntToStr(limit);
+    if (m_word_completion_cache <> nil) and
+        m_word_completion_cache.TryGetValue(cache_key, results) then
+    begin
+        results := Copy(results, 0, Length(results));
+        Exit(Length(results) > 0);
+    end;
+    if (not ensure_open) or (not m_base_ready) then
+        Exit;
+    list := TList<TncOneKeyCompletion>.Create;
+    stmt := nil;
+    try
+        if m_base_connection.prepare(words_sql, stmt) and
+            m_base_connection.BindText(stmt, 1, prefix) and
+            m_base_connection.BindText(stmt, 2, prefix + #$FFFF) and
+            m_base_connection.BindInt(stmt, 3, min_length) and
+            m_base_connection.BindInt(stmt, 4, max_length) and
+            m_base_connection.BindInt(stmt, 5, limit * 2) then
+        begin
+            step_result := m_base_connection.step(stmt);
+            while (step_result = SQLITE_ROW) and (list.Count < limit) do
+            begin
+                text_value := Trim(m_base_connection.ColumnText(stmt, 1));
+                item := Default(TncOneKeyCompletion);
+                item.full_pinyin := StringReplace(LowerCase(m_base_connection.ColumnText(stmt, 0)),
+                    '''', '', [rfReplaceAll]);
+                item.weight := m_base_connection.ColumnInt(stmt, 2);
+                step_result := m_base_connection.step(stmt);
+                if (text_value = '') or (item.full_pinyin = '') then
+                    Continue;
+                // The first (heaviest) reading of each text.
+                idx := 0;
+                while (idx < list.Count) and (list[idx].text <> text_value) do
+                    Inc(idx);
+                if idx < list.Count then
+                    Continue;
+                item.text := text_value;
+                item.source := okcs_base_exact;
+                list.Add(item);
+            end;
+        end;
+    finally
+        if stmt <> nil then
+            m_base_connection.finalize(stmt);
+        SetLength(results, list.Count);
+        for idx := 0 to list.Count - 1 do
+            results[idx] := list[idx];
+        list.Free;
+    end;
+    if m_word_completion_cache <> nil then
+    begin
+        if m_word_completion_cache.Count >= c_cache_limit then
+            m_word_completion_cache.Clear;
+        m_word_completion_cache.AddOrSetValue(cache_key, Copy(results, 0, Length(results)));
+    end;
+    Result := Length(results) > 0;
+end;
+
+function TncSqliteDictionary.lookup_mixed_abbreviation_words(const pinyin: string;
+    out results: TncCandidateList): Boolean;
+const
+    c_cache_limit = 4096;
+    c_word_limit = 8;
+    base_sql =
+        'SELECT b.pinyin, b.text, b.comment, b.weight ' +
+        'FROM dict_jianpin j INNER JOIN dict_base b ON b.id = j.word_id ' +
+        'WHERE j.jianpin = ?1 ORDER BY b.weight DESC, b.text ASC LIMIT 512';
+    user_sql =
+        'SELECT pinyin, text, weight FROM dict_user WHERE pinyin LIKE ?1 ' +
+        'ORDER BY weight DESC, last_used DESC, text ASC LIMIT 256';
+var
+    query_key, like_pattern, jianpin_key, initial_value, candidate_pinyin, text_value: string;
+    parser: TncPinyinParser;
+    syllables: TncPinyinParseResult;
+    tokens: TncMixedQueryTokenList;
+    reconstructed: string;
+    has_full, has_initial: Boolean;
+    idx, merge_pass: Integer;
+    ch: Char;
+    stmt: Psqlite3_stmt;
+    step_result: Integer;
+    list: TList<TncCandidate>;
+    seen: TDictionary<string, Boolean>;
+    item: TncCandidate;
+
+    function text_units(const value: string): Integer;
+    var
+        position: Integer;
+    begin
+        Result := 0;
+        position := 1;
+        while position <= Length(value) do
+        begin
+            if (Ord(value[position]) >= $D800) and (Ord(value[position]) <= $DBFF) and
+                (position < Length(value)) then
+                Inc(position);
+            Inc(position);
+            Inc(Result);
+        end;
+    end;
+
+    procedure add_word(const value, word_pinyin, comment: string; const weight: Integer;
+        const source: TncCandidateSource);
+    begin
+        if (value = '') or (comment <> '') or seen.ContainsKey(value) or
+            (list.Count >= c_word_limit) or (text_units(value) <> Length(tokens)) or
+            (not candidate_matches_mixed_jianpin(parser, word_pinyin, tokens)) then
+            Exit;
+        seen.Add(value, True);
+        item := Default(TncCandidate);
+        item.text := value;
+        item.source := source;
+        item.score := weight;
+        item.has_dict_weight := True;
+        item.dict_weight := weight;
+        list.Add(item);
+    end;
+
+begin
+    SetLength(results, 0);
+    Result := False;
+    query_key := LowerCase(Trim(pinyin));
+    if (query_key = '') or (Length(query_key) > 48) then
+        Exit;
+    for ch in query_key do
+        if not CharInSet(ch, ['a' .. 'z']) then
+            Exit;
+    if (m_mixed_abbreviation_cache <> nil) and
+        m_mixed_abbreviation_cache.TryGetValue(query_key, results) then
+    begin
+        results := Copy(results, 0, Length(results));
+        Exit(Length(results) > 0);
+    end;
+    if not ensure_open then
+        Exit;
+
+    // A mixed reading keeps valid syllables and treats every lone consonant
+    // (including n, m and r, which are also syllables) as an abbreviation.
+    parser := TncPinyinParser.create;
+    list := TList<TncCandidate>.Create;
+    seen := TDictionary<string, Boolean>.Create;
+    try
+      // "zh" typed as abbreviations may be z+h (two words) or zh (one word).
+      for merge_pass := 0 to 1 do
+      begin
+        if list.Count > 0 then
+            Break;
+        syllables := parser.parse(query_key);
+        if merge_pass = 0 then
+            nc_merge_abbreviated_retroflex_initials(syllables)
+        else if (Pos('zh', query_key) = 0) and (Pos('ch', query_key) = 0) and
+            (Pos('sh', query_key) = 0) then
+            Break;
+        SetLength(tokens, Length(syllables));
+        reconstructed := '';
+        has_full := False;
+        has_initial := False;
+        jianpin_key := '';
+        like_pattern := '';
+        for idx := 0 to High(syllables) do
+        begin
+            reconstructed := reconstructed + syllables[idx].text;
+            if ((Length(syllables[idx].text) = 1) and is_initial_letter(syllables[idx].text[1])) or
+                (syllables[idx].text = 'zh') or (syllables[idx].text = 'ch') or
+                (syllables[idx].text = 'sh') then
+            begin
+                tokens[idx].kind := mqt_initial;
+                tokens[idx].text := syllables[idx].text;
+                has_initial := True;
+                like_pattern := like_pattern + syllables[idx].text + '%';
+            end
+            else if is_valid_candidate_syllable(syllables[idx].text) then
+            begin
+                tokens[idx].kind := mqt_full;
+                tokens[idx].text := syllables[idx].text;
+                has_full := True;
+                like_pattern := like_pattern + syllables[idx].text;
+            end
+            else
+            begin
+                SetLength(tokens, 0);
+                Break;
+            end;
+            initial_value := extract_syllable_initial(syllables[idx].text);
+            if initial_value = '' then
+                initial_value := syllables[idx].text;
+            jianpin_key := jianpin_key + initial_value[1];
+        end;
+        if (Length(tokens) >= 2) and has_full and has_initial and
+            SameText(reconstructed, query_key) then
+        begin
+            if m_user_ready then
+            begin
+                stmt := nil;
+                try
+                    if m_user_connection.prepare(user_sql, stmt) and
+                        m_user_connection.BindText(stmt, 1, like_pattern) then
+                    begin
+                        step_result := m_user_connection.step(stmt);
+                        while step_result = SQLITE_ROW do
+                        begin
+                            candidate_pinyin := m_user_connection.ColumnText(stmt, 0);
+                            text_value := m_user_connection.ColumnText(stmt, 1);
+                            add_word(text_value, StringReplace(candidate_pinyin, '''', '', [rfReplaceAll]),
+                                '', m_user_connection.ColumnInt(stmt, 2), cs_user);
+                            step_result := m_user_connection.step(stmt);
+                        end;
+                    end;
+                finally
+                    if stmt <> nil then
+                        m_user_connection.finalize(stmt);
+                end;
+            end;
+            if m_base_ready then
+            begin
+                stmt := nil;
+                try
+                    if m_base_connection.prepare(base_sql, stmt) and
+                        m_base_connection.BindText(stmt, 1, jianpin_key) then
+                    begin
+                        step_result := m_base_connection.step(stmt);
+                        while (step_result = SQLITE_ROW) and (list.Count < c_word_limit) do
+                        begin
+                            candidate_pinyin := m_base_connection.ColumnText(stmt, 0);
+                            text_value := m_base_connection.ColumnText(stmt, 1);
+                            add_word(text_value, StringReplace(candidate_pinyin, '''', '', [rfReplaceAll]),
+                                m_base_connection.ColumnText(stmt, 2),
+                                m_base_connection.ColumnInt(stmt, 3), cs_rule);
+                            step_result := m_base_connection.step(stmt);
+                        end;
+                    end;
+                finally
+                    if stmt <> nil then
+                        m_base_connection.finalize(stmt);
+                end;
+            end;
+        end;
+      end;
+        SetLength(results, list.Count);
+        for idx := 0 to list.Count - 1 do
+            results[idx] := list[idx];
+    finally
+        seen.Free;
+        list.Free;
+        parser.Free;
+    end;
+    if m_mixed_abbreviation_cache <> nil then
+    begin
+        if m_mixed_abbreviation_cache.Count >= c_cache_limit then
+            m_mixed_abbreviation_cache.Clear;
+        m_mixed_abbreviation_cache.AddOrSetValue(query_key, Copy(results, 0, Length(results)));
+    end;
+    Result := Length(results) > 0;
 end;
 
 function TncSqliteDictionary.lookup_candidate_prefix_completions(
@@ -10826,6 +11328,18 @@ begin
     if m_lookup_result_cache <> nil then
     begin
         m_lookup_result_cache.Clear;
+    end;
+    if m_mixed_abbreviation_cache <> nil then
+    begin
+        m_mixed_abbreviation_cache.Clear;
+    end;
+    if m_word_completion_cache <> nil then
+    begin
+        m_word_completion_cache.Clear;
+    end;
+    if m_next_character_cache <> nil then
+    begin
+        m_next_character_cache.Clear;
     end;
     if m_lookup_result_cache_order <> nil then
     begin

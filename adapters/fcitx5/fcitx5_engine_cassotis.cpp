@@ -667,8 +667,9 @@ void CassotisFcitxState::pollAsyncResult() {
     }
     if (result.handled) {
         renderResult(&result);
-        resultPollPending_ = false;
-        resultPollAttempts_ = 0;
+        resultPollPending_ = result.async_pending;
+        if (!resultPollPending_)
+            resultPollAttempts_ = 0;
     }
     cassotis_engine_result_clear(&result);
 }

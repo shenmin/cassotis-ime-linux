@@ -424,7 +424,7 @@ cassotis_stage_neural_runtime() {
 
     install -d -m 0755 "$destination_dir/pinyin_transformer" \
         "$destination_dir/local_completion" "$destination_dir/local_repair" \
-        "$destination_dir/short_context"
+        "$destination_dir/char_lm"
     cassotis_require_command python3
     python3 "$cassotis_root/scripts/model_weights.py" --copy-weights \
         "$source_dir" "$destination_dir" || return
@@ -460,10 +460,9 @@ cassotis_stage_neural_runtime() {
         install -m 0644 "$source_dir/local_repair/$file_name" \
             "$destination_dir/local_repair/$file_name"
     done
-    for file_name in exit0.int8.onnx exit1.int8.onnx exit2.int8.onnx exit3.int8.onnx \
-                     policy.bin tokenizer.bin runtime_manifest.json; do
-        install -m 0644 "$source_dir/short_context/$file_name" \
-            "$destination_dir/short_context/$file_name"
+    for file_name in char_lm.onnx char_lm_vocab.bin runtime_manifest.json; do
+        install -m 0644 "$source_dir/char_lm/$file_name" \
+            "$destination_dir/char_lm/$file_name"
     done
 }
 
@@ -475,7 +474,7 @@ cassotis_atomic_install_neural_runtime() {
     install -d -m 0700 "$destination_dir" \
         "$destination_dir/pinyin_transformer" \
         "$destination_dir/local_completion" "$destination_dir/local_repair" \
-        "$destination_dir/short_context"
+        "$destination_dir/char_lm"
     cassotis_require_command python3
     # Publish immutable weight files before models that reference them. Keep
     # older versions available to loaders already opening the previous model.
@@ -512,10 +511,9 @@ cassotis_atomic_install_neural_runtime() {
         cassotis_atomic_install "$source_dir/local_repair/$file_name" \
             "$destination_dir/local_repair/$file_name" 0644
     done
-    for file_name in exit0.int8.onnx exit1.int8.onnx exit2.int8.onnx exit3.int8.onnx \
-                     policy.bin tokenizer.bin runtime_manifest.json; do
-        cassotis_atomic_install "$source_dir/short_context/$file_name" \
-            "$destination_dir/short_context/$file_name" 0644
+    for file_name in char_lm.onnx char_lm_vocab.bin runtime_manifest.json; do
+        cassotis_atomic_install "$source_dir/char_lm/$file_name" \
+            "$destination_dir/char_lm/$file_name" 0644
     done
 }
 
@@ -551,6 +549,9 @@ cassotis_remove_neural_runtime() {
         "$destination_dir/local_repair/readings.json" \
         "$destination_dir/local_repair/vocab.json" \
         "$destination_dir/local_repair/runtime_manifest.json" \
+        "$destination_dir/char_lm/char_lm.onnx" \
+        "$destination_dir/char_lm/char_lm_vocab.bin" \
+        "$destination_dir/char_lm/runtime_manifest.json" \
         "$destination_dir/short_context/exit0.int8.onnx" \
         "$destination_dir/short_context/exit1.int8.onnx" \
         "$destination_dir/short_context/exit2.int8.onnx" \
@@ -560,6 +561,6 @@ cassotis_remove_neural_runtime() {
         "$destination_dir/short_context/runtime_manifest.json"
     rmdir -- "$destination_dir/pinyin_transformer" \
         "$destination_dir/local_completion" "$destination_dir/local_repair" \
-        "$destination_dir/short_context" \
+        "$destination_dir/short_context" "$destination_dir/char_lm" \
         2>/dev/null || true
 }

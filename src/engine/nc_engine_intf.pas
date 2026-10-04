@@ -23,6 +23,7 @@ uses
     nc_local_repair_guard,
     nc_short_particle_evidence,
     nc_short_context_ranker,
+    nc_char_lm,
     nc_dictionary_sqlite,
     nc_document_context_model,
     nc_pinyin_parser,
@@ -408,6 +409,22 @@ type
 
     TncLongFinalCandidateDebugArray = TArray<TncLongFinalCandidateDebug>;
 
+    TncLongNeuralCompletionCandidate = record
+        suffix_text: string;
+        suffix_pinyin_path: string;
+        suffix_path: string;
+        base_rank: Integer;
+        replace_units: Integer;
+        score: Single;
+        // A dictionary word continuing the last replace_units typed syllables
+        // (the word cut by the input end); tail_rank is its weight rank.
+        tail_word: Boolean;
+        tail_rank: Integer;
+    end;
+
+    TncLongNeuralCompletionCandidateArray =
+        TArray<TncLongNeuralCompletionCandidate>;
+
     TncLongNeuralCompletionRequest = record
         query_prefix: string;
         query_syllables: string;
@@ -419,19 +436,23 @@ type
         top2_text: string;
         top2_path: string;
         top2_anchor_path: string;
+        // Tail words on top1, weighed by the continuation policy beside the
+        // model's pool.
+        tail_candidates: TncLongNeuralCompletionCandidateArray;
     end;
 
-    TncLongNeuralCompletionCandidate = record
-        suffix_text: string;
-        suffix_pinyin_path: string;
-        suffix_path: string;
-        base_rank: Integer;
-        replace_units: Integer;
-        score: Single;
+    { The LM one-key completion rerank, run off the keystroke path: the engine
+      shows its lexical choice (incumbent) at once and the host replaces it
+      when the ranker prefers another pool entry. }
+    TncOneKeyRerankRequest = record
+        query_prefix: string;
+        context: string;
+        typed_units: Integer;
+        incumbent: Integer;
+        incumbent_text: string;
+        incumbent_pinyin: string;
+        candidates: TArray<TncCharLmCompletionCandidate>;
     end;
-
-    TncLongNeuralCompletionCandidateArray =
-        TArray<TncLongNeuralCompletionCandidate>;
 
     TncLongNeuralCompletionResult = record
         suffix_text: string;
@@ -440,7 +461,13 @@ type
         base_rank: Integer;
         replace_units: Integer;
         confidence: Single;
+        // Pool mode only: the ranker's ABSTAIN score beside candidates.
+        abstain_score: Single;
         candidates: TncLongNeuralCompletionCandidateArray;
+        // The suffix is the LM's next character after the base, preceded by
+        // the re-read typed tail when replace_units > 0; suffix_pinyin_path
+        // is empty and the engine reads the character from the dictionary.
+        lm_next: Boolean;
     end;
 
     TncLongGeneratedCandidate = record
@@ -637,6 +664,9 @@ type
         m_one_key_completion_score: Integer;
         m_exact_tail_completion_checked: Boolean;
         m_long_neural_completion_request: TncLongNeuralCompletionRequest;
+        m_one_key_rerank_request: TncOneKeyRerankRequest;
+        m_one_key_rerank_pool: TncOneKeyCompletionList;
+        m_has_one_key_rerank_request: Boolean;
         m_has_long_neural_completion_request: Boolean;
         m_long_neural_completion_prefix_locked: Boolean;
         m_completion_feedback_origin_prefix: string;
@@ -837,6 +867,13 @@ type
         m_runtime_long_retained_exact_edges: TncLongRetainedExactEdgeArray;
         m_long_neural_reranker: IncLongNeuralReranker;
         m_short_context_reranker: IncShortContextReranker;
+        m_char_lm: IncCharLm;
+        m_char_lm_long_enabled: Boolean;
+        m_char_lm_short_enabled: Boolean;
+        // The last final complete ranking of the current lookup, in the
+        // ranking's input order with each candidate's final rank.
+        m_char_lm_long_pool: TncCandidateList;
+        m_char_lm_long_pool_ranks: TArray<Integer>;
         m_long_local_repair: IncLongLocalRepair;
         m_long_local_repair_policy: IncLongLocalRepairPolicy;
         m_long_joint_repair: IncLongJointRepair;
@@ -849,6 +886,8 @@ type
         m_local_repair_baseline_text: string;
         m_local_repair_validated: TncValidatedRepairPath;
         m_repaired_completion_query_key: string;
+        // The input whose long completion was rebuilt from the settled page.
+        m_visible_completion_key: string;
         m_debug_capture_local_repair: Boolean;
         m_debug_local_repair_guard: TncLocalRepairGuardDebug;
         m_long_complete_pool_pairwise_text: string;
@@ -907,6 +946,28 @@ type
             const page_size: Integer): string;
         function long_visible_candidate_pool_cache_is_current(
             const page_size: Integer): Boolean;
+        procedure promote_char_lm_candidate(var candidates: TncCandidateList;
+            var source_indices: TArray<Integer>; const value: TncCandidate;
+            const source, page_size: Integer; const complete_units: Integer = 0);
+        function apply_char_lm_long_top(var candidates: TncCandidateList;
+            var source_indices: TArray<Integer>; const expected_units: Integer;
+            const page_size: Integer): Boolean;
+        function apply_char_lm_short_top(var candidates: TncCandidateList;
+            var source_indices: TArray<Integer>; const context, query: string;
+            const page_size: Integer): Boolean;
+        function apply_mixed_abbreviation_top(var candidates: TncCandidateList;
+            var source_indices: TArray<Integer>; const page_size: Integer): Boolean;
+        function build_tail_word_candidates(const syllables: TncPinyinParseResult;
+            const top_text: string): TncLongNeuralCompletionCandidateArray;
+        function build_next_word_candidates(const top_text: string;
+            const first_rank: Integer): TncLongNeuralCompletionCandidateArray;
+        procedure prepare_fallback_continuation_request(
+            const completion: TncOneKeyCompletion);
+        procedure prepare_decoded_continuation_request(const model: IncCharLm;
+            const context: string);
+        procedure prepare_one_key_rerank(const completions: TncOneKeyCompletionList;
+            const engine_lm_scores: TArray<Integer>; const engine_lm_context: string;
+            const incumbent, typed_units: Integer);
         function get_current_page_candidate_count(
             const page_size: Integer): Integer;
         function get_page_count_internal(const page_size: Integer): Integer;
@@ -924,6 +985,7 @@ type
             const completion: TncOneKeyCompletion): TncOneKeyCompletion;
         function get_one_key_completion_for_commit: TncOneKeyCompletion;
         procedure refresh_validated_prefix_completion;
+        procedure refresh_visible_prefix_completion;
         function get_source_rank(const source: TncCandidateSource): Integer;
         function get_context_variants(const context_text: string): TArray<string>;
         function get_session_text_bonus(const candidate_text: string): Integer;
@@ -1164,6 +1226,8 @@ type
         procedure set_long_neural_reranker(
             const reranker: IncLongNeuralReranker);
         procedure set_short_context_reranker(const reranker: IncShortContextReranker);
+        procedure set_char_lm(const model: IncCharLm; const long_enabled: Boolean;
+            const short_enabled: Boolean = False);
         function detach_dictionary_provider: TncDictionaryProvider;
         procedure adopt_ready_dictionary_provider(
             const dictionary: TncDictionaryProvider);
@@ -1236,6 +1300,12 @@ type
         function apply_long_neural_completion(
             const request: TncLongNeuralCompletionRequest;
             const completion_result: TncLongNeuralCompletionResult): Boolean;
+        { The pending one-key rerank for the visible lexical completion. }
+        function get_one_key_rerank_request(out request: TncOneKeyRerankRequest): Boolean;
+        { Shows candidates[chosen] of a still-current request instead of the
+          incumbent; False when the input or the completion moved on. }
+        function apply_one_key_rerank(const request: TncOneKeyRerankRequest;
+            const chosen: Integer): Boolean;
         function get_page_index: Integer;
         function get_page_count: Integer;
         function get_selected_index: Integer;
@@ -5276,6 +5346,16 @@ begin
     m_short_context_reranker := reranker;
 end;
 
+procedure TncEngine.set_char_lm(const model: IncCharLm; const long_enabled: Boolean;
+    const short_enabled: Boolean);
+begin
+    m_char_lm := model;
+    m_char_lm_long_enabled := long_enabled and (model <> nil);
+    m_char_lm_short_enabled := short_enabled and (model <> nil);
+    SetLength(m_char_lm_long_pool, 0);
+    SetLength(m_char_lm_long_pool_ranks, 0);
+end;
+
 procedure TncEngine.set_long_neural_reranker(
     const reranker: IncLongNeuralReranker);
 begin
@@ -6032,6 +6112,9 @@ begin
         Default(TncLongNeuralCompletionRequest);
     m_has_long_neural_completion_request := False;
     m_long_neural_completion_prefix_locked := False;
+    m_one_key_rerank_request := Default(TncOneKeyRerankRequest);
+    SetLength(m_one_key_rerank_pool, 0);
+    m_has_one_key_rerank_request := False;
 end;
 
 procedure TncEngine.clear_one_key_completion_feedback_target;
@@ -6447,6 +6530,56 @@ begin
         completion, Result);
 end;
 
+
+procedure TncEngine.refresh_visible_prefix_completion;
+var
+    previous, completion: TncOneKeyCompletion;
+    syllables: TncPinyinParseResult;
+    query_key, visible_key, visible_top: string;
+    score, idx: Integer;
+begin
+    // build_candidates prepares the long completion from the internal ranking;
+    // the display stages may then promote another complete reading to the top
+    // of the page. Tab continues what the user sees, so rebuild it once from
+    // the settled page when its first complete reading differs.
+    if (m_page_index <> 0) or (m_dictionary = nil) or m_has_pending_commit or
+        (m_confirmed_text <> '') or
+        (not visible_candidates_cache_is_current(get_candidate_page_size)) or
+        (Length(m_visible_candidates_cache) = 0) then
+        Exit;
+    visible_key := m_composition_text + #1 + m_last_lookup_key;
+    if visible_key = m_visible_completion_key then
+        Exit;
+    m_visible_completion_key := visible_key;
+    // Lexical and document completions are separate lanes, and an applied
+    // asynchronous continuation already answers this input.
+    if (m_one_key_completion.text <> '') and
+        (m_one_key_completion.source <> okcs_long_transition) then
+        Exit;
+    syllables := get_effective_compact_pinyin_syllables(m_composition_text, False);
+    visible_top := '';
+    for idx := 0 to High(m_visible_candidates_cache) do
+        if (Trim(m_visible_candidates_cache[idx].comment) = '') and
+            (Trim(m_visible_candidates_cache[idx].text) <> '') and
+            (get_candidate_text_unit_count(Trim(m_visible_candidates_cache[idx].text)) =
+            Length(syllables)) then
+        begin
+            visible_top := Trim(m_visible_candidates_cache[idx].text);
+            Break;
+        end;
+    if (visible_top = '') or (m_has_long_neural_completion_request and
+        SameText(m_long_neural_completion_request.top1_text, visible_top)) then
+        Exit;
+    previous := m_one_key_completion;
+    query_key := normalize_pinyin_text(m_composition_text);
+    clear_one_key_completion;
+    if try_refresh_long_one_key_completion(syllables, query_key, previous, completion, score) then
+    begin
+        m_one_key_completion := completion;
+        m_one_key_completion_query_prefix := query_key;
+        m_one_key_completion_score := score;
+    end;
+end;
 
 procedure TncEngine.refresh_validated_prefix_completion;
 var
@@ -6963,6 +7096,17 @@ begin
     style_prefix := False;
     corrected_path := '';
     if m_dictionary <> nil then adopt_corrected_prefix;
+    // Tab continues the reading the user sees. The display stages may promote
+    // a better complete reading than the internal ranking, so use the settled
+    // first page when it belongs to this input.
+    if (not corrected_prefix) and (m_page_index = 0) and
+        visible_candidates_cache_is_current(get_candidate_page_size) and
+        (Length(m_visible_candidates_cache) > 0) and
+        (Length(m_visible_candidates_cache) = Length(m_visible_candidate_source_indices_cache)) then
+    begin
+        completion_candidates := m_visible_candidates_cache;
+        completion_sources := Copy(m_visible_candidate_source_indices_cache);
+    end;
     // A failed alignment check must not silently revive the obsolete draft.
     if style_prefix and not corrected_prefix then Exit;
     if has_validated_completion_prefix and (not corrected_prefix)
@@ -7094,6 +7238,15 @@ begin
             m_long_neural_completion_request.top2_path := second_path;
             m_long_neural_completion_request.top2_anchor_path :=
                 top2_anchor_path;
+        end;
+        if (m_char_lm <> nil) and m_char_lm_long_enabled and (not corrected_prefix) then
+        begin
+            m_long_neural_completion_request.tail_candidates :=
+                build_tail_word_candidates(syllables,
+                m_long_neural_completion_request.top1_text);
+            m_long_neural_completion_request.tail_candidates :=
+                m_long_neural_completion_request.tail_candidates +
+                build_next_word_candidates(m_long_neural_completion_request.top1_text, 1);
         end;
         m_has_long_neural_completion_request := True;
         m_long_neural_completion_prefix_locked := corrected_prefix;
@@ -9055,11 +9208,22 @@ begin
     m_one_key_completion := completions[best_idx];
     m_one_key_completion_query_prefix := compact_query;
     m_one_key_completion_score := scores[best_idx];
+    if has_char_lm then
+        prepare_one_key_rerank(completions, char_lm_scores, context_value, best_idx,
+            Length(syllables))
+    else
+        prepare_one_key_rerank(completions, nil, context_value, best_idx, Length(syllables));
     apply_long_completion;
 end;
 
 procedure TncEngine.refresh_exact_tail_completion;
-var completion: TncOneKeyCompletion;
+const
+    // As the long continuation request.
+    c_exact_tail_context_length = 12;
+var
+    completion: TncOneKeyCompletion;
+    context_value: string;
+    model: IncCharLm;
 begin
     if (m_one_key_completion.text <> '') and
         (m_one_key_completion.source <> okcs_exact_tail_fallback) then Exit;
@@ -9079,13 +9243,126 @@ begin
     m_exact_tail_completion_checked := True;
     m_one_key_completion := Default(TncOneKeyCompletion);
     // Read the settled visible prefix. Never run candidate ranking from Tab.
+    if m_segment_left_context <> '' then
+        context_value := m_segment_left_context
+    else if m_external_left_context <> '' then
+        context_value := m_external_left_context
+    else
+        context_value := m_left_context;
+    if (m_char_lm <> nil) and m_char_lm_long_enabled then
+        model := m_char_lm
+    else
+        model := nil;
+    context_value := trim_left_context_to_sentence(context_value, c_exact_tail_context_length);
     if nc_try_exact_tail_completion(m_dictionary, m_composition_text,
-        m_visible_candidates_cache, completion) then
+        m_visible_candidates_cache, completion, model, context_value) then
     begin
         m_one_key_completion := completion;
         m_one_key_completion_query_prefix := normalize_pinyin_text(m_composition_text);
         m_one_key_completion_score := Low(Integer);
+        prepare_fallback_continuation_request(completion);
+    end
+    else if model <> nil then
+        prepare_decoded_continuation_request(model, context_value);
+end;
+
+procedure TncEngine.prepare_decoded_continuation_request(const model: IncCharLm;
+    const context: string);
+var
+    reading: TncOneKeyCompletion;
+    syllables: TncPinyinParseResult;
+    text, path: string;
+    idx: Integer;
+begin
+    // Neither a long request nor an exact-tail reading: continue from the first
+    // complete visible reading (one word covering the input), else from the
+    // rest after the visible head word read as several words. The reading is
+    // only a base for the continuation; nothing is shown until one is chosen.
+    if m_has_long_neural_completion_request or (m_one_key_completion.text <> '') or
+        (Length(m_visible_candidates_cache) <> Length(m_visible_candidate_source_indices_cache)) then
+        Exit;
+    // Parse the composition itself: an apostrophe fixes a syllable boundary
+    // (xin'an vs xi'nan) that the normalized letters no longer carry.
+    syllables := get_effective_compact_pinyin_syllables(m_composition_text, False);
+    text := '';
+    path := '';
+    for idx := 0 to High(m_visible_candidates_cache) do
+        if (Trim(m_visible_candidates_cache[idx].comment) = '') and
+            (Trim(m_visible_candidates_cache[idx].text) <> '') and
+            (get_candidate_text_unit_count(Trim(m_visible_candidates_cache[idx].text)) =
+            Length(syllables)) then
+        begin
+            text := Trim(m_visible_candidates_cache[idx].text);
+            path := Trim(get_segment_path_for_candidate(m_visible_candidates_cache[idx],
+                m_visible_candidate_source_indices_cache[idx]));
+            if path = '' then
+                path := text;
+            Break;
+        end;
+    if (text = '') and not nc_decode_tail_reading(m_dictionary, m_composition_text,
+        m_visible_candidates_cache, model, context, text, path) then
+        Exit;
+    reading := Default(TncOneKeyCompletion);
+    reading.text := text;
+    reading.path_text := path;
+    prepare_fallback_continuation_request(reading);
+end;
+
+procedure TncEngine.prepare_fallback_continuation_request(
+    const completion: TncOneKeyCompletion);
+const
+    // Same floor as the long continuation request.
+    c_min_syllables = 4;
+    c_context_length = 12;
+var
+    syllables: TncPinyinParseResult;
+    request: TncLongNeuralCompletionRequest;
+    query_syllable_text, syllable_text, context_value: string;
+    idx: Integer;
+begin
+    // A short visible top (a word heading a four-syllable input) leaves no
+    // complete candidate for the long continuation request. The exact-tail
+    // reading covers the whole input, so continue from it: the model's pool,
+    // tail words and next words, weighed by the same LM policy.
+    if m_has_long_neural_completion_request or (m_char_lm = nil) or
+        (not m_char_lm_long_enabled) or (completion.text = '') or
+        (completion.path_text = '') then
+        Exit;
+    // Parse the composition itself: an apostrophe fixes a syllable boundary
+    // (xin'an vs xi'nan) that the normalized letters no longer carry.
+    syllables := get_effective_compact_pinyin_syllables(m_composition_text, False);
+    if (Length(syllables) < c_min_syllables) or
+        (nc_char_lm_code_point_count(completion.text) <> Length(syllables)) or
+        (Length(completion.text) <> Length(syllables)) then
+        Exit;
+    query_syllable_text := '';
+    for idx := 0 to High(syllables) do
+    begin
+        syllable_text := normalize_pinyin_text(syllables[idx].text);
+        if not nc_is_canonical_pinyin_syllable(syllable_text) then
+            Exit;
+        if query_syllable_text <> '' then
+            query_syllable_text := query_syllable_text + '''';
+        query_syllable_text := query_syllable_text + syllable_text;
     end;
+    if m_segment_left_context <> '' then
+        context_value := m_segment_left_context
+    else if m_external_left_context <> '' then
+        context_value := m_external_left_context
+    else
+        context_value := m_left_context;
+    request := Default(TncLongNeuralCompletionRequest);
+    request.query_prefix := normalize_pinyin_text(m_composition_text);
+    request.query_syllables := query_syllable_text;
+    request.context_text := trim_left_context_to_sentence(context_value, c_context_length);
+    request.top1_text := completion.text;
+    request.top1_path := completion.path_text;
+    request.top1_anchor_path := completion.path_text;
+    request.tail_candidates := build_tail_word_candidates(syllables, completion.text) +
+        build_next_word_candidates(completion.text, 1);
+    m_long_neural_completion_request := request;
+    m_has_long_neural_completion_request := True;
+    m_long_neural_completion_prefix_locked := False;
 end;
 
 function TncEngine.get_one_key_completion_for_commit: TncOneKeyCompletion;
@@ -9191,6 +9468,8 @@ var
     build_started_at: UInt64;
 begin
     build_started_at := nc_monotonic_tick_ms;
+    // A fresh page may promote a different reading; let Tab follow it again.
+    m_visible_completion_key := '';
     build_candidates_core;
 
     // Candidate visibility is more important than the optional Tab hint during
@@ -9274,6 +9553,7 @@ var
     incremental_partial_reuse_applied: Boolean;
     multi_syllable_cap_limit: Integer;
     normalized_lookup_text: string;
+    mixed_abbreviation_words: TncCandidateList;
     repeated_two_syllable_query: Boolean;
     single_char_partial_min_count: Integer;
     runtime_phrase_added: Boolean;
@@ -123762,7 +124042,11 @@ var
         load_literal_user_candidates_local;
         has_safe_trailing_initial_typing_state :=
             detect_safe_trailing_initial_typing_state(m_composition_text);
-        if (not has_safe_trailing_initial_typing_state) and (not is_full_pinyin_key(lookup_text)) then
+        // A mixed full/abbreviated input (e.g. "nhaoma") that spells a whole
+        // dictionary word is not an adjacent-swap typo.
+        if (not has_safe_trailing_initial_typing_state) and (not is_full_pinyin_key(lookup_text)) and
+            not ((m_dictionary <> nil) and
+            m_dictionary.lookup_mixed_abbreviation_words(lookup_text, mixed_abbreviation_words)) then
         begin
             normalized_lookup_text := normalize_adjacent_swap_typo(lookup_text);
             if (normalized_lookup_text <> '') and (not SameText(normalized_lookup_text, lookup_text)) then
@@ -140723,6 +141007,8 @@ begin
     end;
     SetLength(m_debug_long_final_candidates, 0);
     SetLength(m_debug_long_ranking_stages, 0);
+    SetLength(m_char_lm_long_pool, 0);
+    SetLength(m_char_lm_long_pool_ranks, 0);
     ranking_stage_capture_count := 0;
     bidirectional_top1_swapped := False;
     settled_top2_feature_cache_valid := False;
@@ -141972,6 +142258,14 @@ begin
 
     flush_ranking_stages;
 
+    { The character LM reranks this same final pool once the visible list is
+      settled (apply_char_lm_long_top). }
+    if m_char_lm_long_enabled then
+    begin
+        m_char_lm_long_pool := Copy(legacy_candidates, 0, candidate_count);
+        m_char_lm_long_pool_ranks := Copy(final_ranks, 0, candidate_count);
+    end;
+
     { Final-state snapshots are an audit/training surface only. Building the
       large per-candidate records in normal input duplicates both the shadow
       and final ranking work without affecting candidate order. }
@@ -142250,6 +142544,461 @@ begin
         get_long_visible_candidate_pool_cache_key(page_size)) and
         (m_long_visible_candidate_pool_source_signature =
         get_candidate_state_signature);
+end;
+
+procedure TncEngine.promote_char_lm_candidate(var candidates: TncCandidateList;
+    var source_indices: TArray<Integer>; const value: TncCandidate;
+    const source, page_size: Integer; const complete_units: Integer);
+const
+    // Long input shows at most two complete sentences (the complete-pool rule);
+    // a promotion from the internal pool must not add a third.
+    c_long_visible_complete_limit = 2;
+
+    procedure promote_in(var list: TncCandidateList; var sources: TArray<Integer>;
+        const keep_length: Boolean);
+    var
+        idx, count, moved_source, complete_count: Integer;
+        moved: TncCandidate;
+    begin
+        count := Length(list);
+        moved := value;
+        moved_source := source;
+        for idx := 0 to High(list) do
+            if (Trim(list[idx].comment) = '') and (Trim(list[idx].text) = Trim(value.text)) then
+            begin
+                moved := list[idx];
+                moved_source := sources[idx];
+                Delete(list, idx, 1);
+                Delete(sources, idx, 1);
+                Break;
+            end;
+        Insert(moved, list, 0);
+        Insert(moved_source, sources, 0);
+        if complete_units > 0 then
+        begin
+            complete_count := 0;
+            idx := 0;
+            while idx < Length(list) do
+            begin
+                if (Trim(list[idx].text) <> '') and (Trim(list[idx].comment) = '') and
+                    (get_candidate_text_unit_count(Trim(list[idx].text)) = complete_units) then
+                begin
+                    Inc(complete_count);
+                    if complete_count > c_long_visible_complete_limit then
+                    begin
+                        Delete(list, idx, 1);
+                        Delete(sources, idx, 1);
+                        Continue;
+                    end;
+                end;
+                Inc(idx);
+            end;
+        end;
+        // A full page keeps its size; a short page may grow by the insert.
+        if keep_length and (Length(list) > count) and (count >= page_size) then
+        begin
+            SetLength(list, count);
+            SetLength(sources, count);
+        end;
+    end;
+
+var
+    pool: TncCandidateList;
+    sources: TArray<Integer>;
+begin
+    // The frozen paging pool keeps later pages consistent with this page.
+    if long_visible_candidate_pool_cache_is_current(page_size) and
+        (Length(m_long_visible_candidate_pool_cache) =
+        Length(m_long_visible_candidate_pool_source_indices_cache)) then
+    begin
+        pool := Copy(m_long_visible_candidate_pool_cache);
+        sources := Copy(m_long_visible_candidate_pool_source_indices_cache);
+        promote_in(pool, sources, False);
+        m_long_visible_candidate_pool_cache := pool;
+        m_long_visible_candidate_pool_source_indices_cache := sources;
+    end;
+    promote_in(candidates, source_indices, True);
+end;
+
+function TncEngine.apply_char_lm_long_top(var candidates: TncCandidateList;
+    var source_indices: TArray<Integer>; const expected_units: Integer;
+    const page_size: Integer): Boolean;
+var
+    texts: TArray<string>;
+    chosen: string;
+    idx: Integer;
+begin
+    Result := False;
+    try
+        // Explicit user choices and forced tops keep their place.
+        if (not m_char_lm_long_enabled) or (m_char_lm = nil) or
+            (m_page_index <> 0) or m_candidate_navigation_started or
+            m_has_forced_visible_top_candidate or (Length(candidates) = 0) or
+            (Length(candidates) <> Length(source_indices)) or
+            (candidates[0].source = cs_user) or (Length(m_char_lm_long_pool) = 0) then
+            Exit;
+        SetLength(texts, Length(m_char_lm_long_pool));
+        for idx := 0 to High(texts) do
+            texts[idx] := m_char_lm_long_pool[idx].text;
+        if not nc_char_lm_choose_long_top(m_char_lm, '', texts,
+            m_char_lm_long_pool_ranks, candidates[0].text, expected_units, chosen) then
+            Exit;
+        // The final pool can hold complete paths the visible merge left out.
+        idx := 0;
+        while (idx < Length(m_char_lm_long_pool)) and
+            ((Trim(m_char_lm_long_pool[idx].text) <> chosen) or
+            (Trim(m_char_lm_long_pool[idx].comment) <> '')) do
+            Inc(idx);
+        if idx >= Length(m_char_lm_long_pool) then
+            Exit;
+        promote_char_lm_candidate(candidates, source_indices,
+            m_char_lm_long_pool[idx], -1, page_size, expected_units);
+        Result := True;
+    finally
+        SetLength(m_char_lm_long_pool, 0);
+        SetLength(m_char_lm_long_pool_ranks, 0);
+    end;
+end;
+
+function TncEngine.apply_char_lm_short_top(var candidates: TncCandidateList;
+    var source_indices: TArray<Integer>; const context, query: string;
+    const page_size: Integer): Boolean;
+var
+    texts: TArray<string>;
+    positions: TArray<Integer>;
+    text: string;
+    idx, other, best: Integer;
+    value: TncCandidate;
+begin
+    Result := False;
+    // Without left context the dev set gains nothing (+3 of 4,489 cases) and
+    // the no-context benchmark track loses; keep dictionary order there.
+    if (not m_char_lm_short_enabled) or (m_char_lm = nil) or (Trim(context) = '') or
+        (Length(candidates) < 2) or (Length(candidates) <> Length(source_indices)) or
+        (candidates[0].source = cs_user) then
+        Exit;
+    // Learned query choices keep their place, as in nc_rerank_short_context.
+    if (m_dictionary <> nil) and (Trim(candidates[0].comment) = '') and
+        ((m_dictionary.get_query_choice_bonus(query, Trim(candidates[0].text)) > 0) or
+        (m_dictionary.get_context_query_choice_bonus(context, query,
+        Trim(candidates[0].text)) > 0)) then
+        Exit;
+    // The competition group is the exact entries for the whole input. A
+    // prefix completion (e.g. "luoxianguan" for "luoxia") has no comment
+    // either, but it is not an alternative reading and must not win here.
+    if m_dictionary = nil then
+        Exit;
+    for idx := 0 to High(candidates) do
+    begin
+        if Length(texts) >= c_char_lm_short_limit then
+            Break;
+        text := Trim(candidates[idx].text);
+        if (text = '') or (Trim(candidates[idx].comment) <> '') or
+            not (m_dictionary.is_base_entry(query, text) or m_dictionary.is_user_entry(query, text)) then
+            Continue;
+        other := 0;
+        while (other < Length(texts)) and (texts[other] <> text) do
+            Inc(other);
+        if other < Length(texts) then
+            Continue;
+        texts := texts + [text];
+        positions := positions + [idx];
+    end;
+    // Only reorder within the group when the visible top belongs to it.
+    if (Length(positions) < 2) or (positions[0] <> 0) or
+        not nc_char_lm_choose_short_top(m_char_lm, context, texts, best) or
+        (positions[best] = 0) then
+        Exit;
+    value := candidates[positions[best]];
+    promote_char_lm_candidate(candidates, source_indices, value,
+        source_indices[positions[best]], page_size);
+    Result := True;
+end;
+
+function TncEngine.apply_mixed_abbreviation_top(var candidates: TncCandidateList;
+    var source_indices: TArray<Integer>; const page_size: Integer): Boolean;
+const
+    c_mixed_visible_limit = 5;
+var
+    words: TncCandidateList;
+    texts: TArray<string>;
+    order: TArray<Integer>;
+    lookup_text, context: string;
+    idx, count, best, chosen, complete_units: Integer;
+    found: Boolean;
+    value: TncCandidate;
+begin
+    // Full and abbreviated syllables mixed in one input ("xiannrou" for
+    // xian + n + rou): whole-word dictionary matches go first, as common
+    // input methods do. Valid full pinyin (e.g. "tamen") keeps its order.
+    Result := False;
+    if (m_dictionary = nil) or (m_page_index <> 0) or m_candidate_navigation_started or
+        m_has_forced_visible_top_candidate or (Length(candidates) <> Length(source_indices)) or
+        (Pos('''', m_composition_text) > 0) or is_shuangpin_input or is_fuzzy_pinyin_active then
+        Exit;
+    lookup_text := normalize_pinyin_text(m_composition_text);
+    if (lookup_text = '') or is_full_pinyin_key(lookup_text) or
+        not m_dictionary.lookup_mixed_abbreviation_words(lookup_text, words) then
+        Exit;
+    count := Min(Length(words), c_mixed_visible_limit);
+    // An explicit user word at the top that is not a match keeps its place.
+    if (Length(candidates) > 0) and (candidates[0].source = cs_user) and
+        (Trim(candidates[0].comment) = '') then
+    begin
+        found := False;
+        for idx := 0 to count - 1 do
+            if Trim(candidates[0].text) = words[idx].text then
+                found := True;
+        if not found then
+            Exit;
+    end;
+    SetLength(order, count);
+    for idx := 0 to count - 1 do
+        order[idx] := idx;
+    // The shared LM picks the first match (with the left context when any);
+    // the user's own words, listed first by the dictionary, keep that place.
+    if (count >= 2) and (words[0].source <> cs_user) and (m_char_lm <> nil) and
+        m_char_lm_short_enabled then
+    begin
+        if m_segment_left_context <> '' then
+            context := m_segment_left_context
+        else if m_external_left_context <> '' then
+            context := m_external_left_context
+        else
+            context := m_left_context;
+        SetLength(texts, count);
+        for idx := 0 to count - 1 do
+            texts[idx] := words[idx].text;
+        if nc_char_lm_choose_short_top(m_char_lm, context, texts, best) and (best > 0) then
+        begin
+            chosen := order[best];
+            Delete(order, best, 1);
+            Insert(chosen, order, 0);
+        end;
+    end;
+    if (Length(candidates) > 0) and (Trim(candidates[0].comment) = '') and
+        (Trim(candidates[0].text) = words[order[0]].text) then
+        Exit;
+    complete_units := nc_char_lm_code_point_count(words[order[0]].text);
+    if complete_units >= c_char_lm_long_min_units then
+    begin
+        // Long input keeps the long-sentence page shape: one promoted word.
+        promote_char_lm_candidate(candidates, source_indices, words[order[0]], -1,
+            page_size, complete_units);
+        Exit(True);
+    end;
+    for idx := count - 1 downto 0 do
+    begin
+        value := words[order[idx]];
+        promote_char_lm_candidate(candidates, source_indices, value, -1, page_size);
+    end;
+    Result := True;
+end;
+
+function TncEngine.build_tail_word_candidates(const syllables: TncPinyinParseResult;
+    const top_text: string): TncLongNeuralCompletionCandidateArray;
+const
+    // Chosen on the Tab dev set: up to three typed syllables of the cut word,
+    // the heaviest completions of each, and at most six syllables per word.
+    c_tail_max_replace = 3;
+    c_tail_word_limit = 32;
+    c_tail_max_syllables = 6;
+var
+    typed: TArray<string>;
+    words: TncOneKeyCompletionList;
+    item: TncLongNeuralCompletionCandidate;
+    replace, idx: Integer;
+begin
+    SetLength(Result, 0);
+    // One character per syllable, so the replaced characters are the tail.
+    if (m_dictionary = nil) or (Length(syllables) < 2) or
+        (nc_char_lm_code_point_count(top_text) <> Length(syllables)) or
+        (Length(top_text) <> Length(syllables)) then
+        Exit;
+    for replace := 1 to Min(c_tail_max_replace, Length(syllables) - 1) do
+    begin
+        SetLength(typed, replace);
+        for idx := 0 to replace - 1 do
+            typed[idx] := normalize_pinyin_text(
+                syllables[Length(syllables) - replace + idx].text);
+        // A trailing initial (still being typed) is not a complete syllable.
+        if not nc_is_canonical_pinyin_syllable(typed[replace - 1]) then
+            Exit;
+        if not m_dictionary.lookup_word_completions(typed, c_tail_max_syllables,
+            c_tail_word_limit, words) then
+            Continue;
+        for idx := 0 to High(words) do
+        begin
+            item := Default(TncLongNeuralCompletionCandidate);
+            item.suffix_text := words[idx].text;
+            item.suffix_pinyin_path := words[idx].full_pinyin;
+            item.suffix_path := words[idx].text;
+            item.base_rank := 1;
+            item.replace_units := replace;
+            item.tail_word := True;
+            item.tail_rank := idx + 1;
+            Result := Result + [item];
+        end;
+    end;
+end;
+
+function TncEngine.build_next_word_candidates(const top_text: string;
+    const first_rank: Integer): TncLongNeuralCompletionCandidateArray;
+const
+    // Chosen on the Tab dev set: the characters that most often follow the
+    // last two decoded characters, then the heaviest words starting with the
+    // first few of them. They continue top1 without replacing any syllable.
+    c_next_character_limit = 8;
+    c_next_word_characters = 3;
+    c_next_words_per_character = 3;
+var
+    characters: TArray<string>;
+    words: TncOneKeyCompletionList;
+    candidates: TncLongNeuralCompletionCandidateArray;
+    rank, idx, word_idx: Integer;
+
+    procedure add(const word: TncOneKeyCompletion);
+    var
+        item: TncLongNeuralCompletionCandidate;
+    begin
+        item := Default(TncLongNeuralCompletionCandidate);
+        item.suffix_text := word.text;
+        item.suffix_pinyin_path := word.full_pinyin;
+        item.suffix_path := word.text;
+        item.base_rank := 1;
+        item.replace_units := 0;
+        item.tail_word := True;
+        item.tail_rank := rank;
+        Inc(rank);
+        candidates := candidates + [item];
+    end;
+
+begin
+    SetLength(candidates, 0);
+    Result := candidates;
+    if (m_dictionary = nil) or (Length(top_text) < 2) or
+        (not m_dictionary.lookup_next_characters(Copy(top_text, Length(top_text) - 1, 2),
+        c_next_character_limit, characters)) then
+        Exit;
+    rank := first_rank;
+    // Each character alone, with its heaviest reading.
+    for idx := 0 to High(characters) do
+        if m_dictionary.lookup_words_starting_with(characters[idx], 1, 1, 1, words) then
+            add(words[0]);
+    for idx := 0 to Min(c_next_word_characters, Length(characters)) - 1 do
+        if m_dictionary.lookup_words_starting_with(characters[idx], 2, 4,
+            c_next_words_per_character, words) then
+            for word_idx := 0 to High(words) do
+                add(words[word_idx]);
+    Result := candidates;
+end;
+
+procedure TncEngine.prepare_one_key_rerank(const completions: TncOneKeyCompletionList;
+    const engine_lm_scores: TArray<Integer>; const engine_lm_context: string;
+    const incumbent, typed_units: Integer);
+var
+    request: TncOneKeyRerankRequest;
+    lm_scores: TArray<Integer>;
+    texts: TArray<string>;
+    idx: Integer;
+begin
+    m_has_one_key_rerank_request := False;
+    if (m_char_lm = nil) or (not m_char_lm_short_enabled) or
+        (Length(completions) < 2) or (incumbent < 0) or
+        (incumbent > High(completions)) then
+        Exit;
+    // The engine n-gram context score is a feature; compute it when the
+    // established ranker did not.
+    lm_scores := engine_lm_scores;
+    if Length(lm_scores) <> Length(completions) then
+    begin
+        SetLength(texts, Length(completions));
+        for idx := 0 to High(completions) do
+            texts[idx] := completions[idx].text;
+        if (not get_cached_char_lm_scores(texts, lm_scores, clsm_context,
+            engine_lm_context)) or (Length(lm_scores) <> Length(completions)) then
+        begin
+            lm_scores := nil;
+            SetLength(lm_scores, Length(completions));
+        end;
+    end;
+    request := Default(TncOneKeyRerankRequest);
+    SetLength(request.candidates, Length(completions));
+    for idx := 0 to High(completions) do
+    begin
+        request.candidates[idx].text := Trim(completions[idx].text);
+        request.candidates[idx].pool_rank := idx + 1;
+        request.candidates[idx].weight := completions[idx].weight;
+        request.candidates[idx].popularity_prior := completions[idx].popularity_prior;
+        request.candidates[idx].corpus_score := completions[idx].corpus_score;
+        request.candidates[idx].engine_lm_score := lm_scores[idx];
+        request.candidates[idx].source_count := completions[idx].source_count;
+        request.candidates[idx].prefix_anchored := completions[idx].prefix_anchored;
+        request.candidates[idx].feedback_count := completions[idx].feedback_count;
+        request.candidates[idx].feedback_reject_count := completions[idx].feedback_reject_count;
+    end;
+    // The user's accept and reject records protect the incumbent as in the
+    // established ranker; without an eligible challenger nothing can change.
+    idx := 0;
+    while (idx < Length(completions)) and ((idx = incumbent) or
+        not nc_char_lm_completion_may_replace(request.candidates[idx],
+        request.candidates[incumbent])) do
+        Inc(idx);
+    if idx = Length(completions) then
+        Exit;
+    if m_segment_left_context <> '' then
+        request.context := m_segment_left_context
+    else if m_external_left_context <> '' then
+        request.context := m_external_left_context
+    else
+        request.context := m_left_context;
+    request.query_prefix := m_one_key_completion_query_prefix;
+    request.typed_units := typed_units;
+    request.incumbent := incumbent;
+    request.incumbent_text := completions[incumbent].text;
+    request.incumbent_pinyin := completions[incumbent].full_pinyin;
+    m_one_key_rerank_request := request;
+    m_one_key_rerank_pool := Copy(completions);
+    m_has_one_key_rerank_request := True;
+end;
+
+function TncEngine.get_one_key_rerank_request(out request: TncOneKeyRerankRequest): Boolean;
+begin
+    request := Default(TncOneKeyRerankRequest);
+    Result := m_has_one_key_rerank_request and
+        (m_one_key_completion.text = m_one_key_rerank_request.incumbent_text) and
+        (m_one_key_completion.full_pinyin = m_one_key_rerank_request.incumbent_pinyin) and
+        (m_one_key_completion_query_prefix = m_one_key_rerank_request.query_prefix);
+    if Result then
+        request := m_one_key_rerank_request;
+end;
+
+function TncEngine.apply_one_key_rerank(const request: TncOneKeyRerankRequest;
+    const chosen: Integer): Boolean;
+begin
+    Result := False;
+    if (not m_has_one_key_rerank_request) or (chosen < 0) or
+        (chosen > High(m_one_key_rerank_pool)) or (chosen = request.incumbent) or
+        (request.query_prefix <> m_one_key_rerank_request.query_prefix) or
+        (request.incumbent <> m_one_key_rerank_request.incumbent) or
+        (request.incumbent_text <> m_one_key_rerank_request.incumbent_text) or
+        (request.incumbent_pinyin <> m_one_key_rerank_request.incumbent_pinyin) or
+        (request.context <> m_one_key_rerank_request.context) or
+        (m_one_key_completion_query_prefix <> request.query_prefix) or
+        (m_one_key_completion.text <> request.incumbent_text) or
+        (m_one_key_completion.full_pinyin <> request.incumbent_pinyin) or
+        (request.incumbent > High(m_one_key_rerank_pool)) then
+        Exit;
+    // Re-check the user's records on the engine's own pool.
+    if (m_one_key_rerank_pool[chosen].feedback_count <
+        m_one_key_rerank_pool[request.incumbent].feedback_count) or
+        (m_one_key_rerank_pool[chosen].feedback_reject_count >
+        m_one_key_rerank_pool[request.incumbent].feedback_reject_count) then
+        Exit;
+    m_one_key_completion := m_one_key_rerank_pool[chosen];
+    m_one_key_completion_score := m_one_key_rerank_pool[chosen].weight;
+    m_has_one_key_rerank_request := False;
+    Result := True;
 end;
 
 function TncEngine.get_current_page_candidate_count(
@@ -159334,6 +160083,7 @@ var
     short_context_promoted_exact_text: string;
     short_context_promoted_exact_lead: Integer;
     short_context_swapped: Boolean;
+    char_lm_context: string;
     promoted_repeated_initial_count: Integer;
     repeated_initial_display_source_candidates: TncCandidateList;
     explicit_apostrophe_entry_top_partial_candidate: TncCandidate;
@@ -192615,6 +193365,8 @@ var
             // Whole-query lexical/user exacts were already boundary-validated
             // and ordered above. Sentence models rank composed paths, not a
             // replacement for an exact entry that happens to be a long word.
+            SetLength(m_char_lm_long_pool, 0);
+            SetLength(m_char_lm_long_pool_ranks, 0);
             if (expected_units < c_long_sentence_full_path_min_syllables) or
                 (Length(protected_full_query_exacts) = 0) then
             begin
@@ -192668,7 +193420,23 @@ var
                 else
                     short_context_swapped := nc_rerank_short_context(m_short_context_reranker, m_dictionary,
                         m_left_context, normalized_pinyin, Result, visible_source_indices);
+                if m_segment_left_context <> '' then
+                    char_lm_context := m_segment_left_context
+                else if m_external_left_context <> '' then
+                    char_lm_context := m_external_left_context
+                else
+                    char_lm_context := m_left_context;
+                // Like the short-context swap, a promotion freezes later pages.
+                if apply_char_lm_short_top(Result, visible_source_indices,
+                    char_lm_context, normalized_pinyin, visible_page_size) then
+                    short_context_swapped := True;
             end;
+            if apply_char_lm_long_top(Result, visible_source_indices, expected_units,
+                visible_page_size) then
+                short_context_swapped := True;
+            if apply_mixed_abbreviation_top(Result, visible_source_indices,
+                visible_page_size) then
+                short_context_swapped := True;
             if (Length(Result) > 0) and
                 (Trim(Result[0].comment) = '') and
                 (get_candidate_text_unit_count(Trim(Result[0].text)) =
@@ -192690,7 +193458,8 @@ var
                 end;
             end;
             if short_context_swapped and long_visible_candidate_pool_cache_is_current(visible_page_size) then
-                for page_idx := 0 to 1 do
+                for page_idx := 0 to Min(1, Min(High(Result),
+                    High(m_long_visible_candidate_pool_cache))) do
                 begin
                     m_long_visible_candidate_pool_cache[page_idx] := Result[page_idx];
                     m_long_visible_candidate_pool_source_indices_cache[page_idx] := visible_source_indices[page_idx];
@@ -193506,6 +194275,7 @@ begin
         refresh_validated_prefix_completion;
         m_repaired_completion_query_key := m_local_repair_query_key;
     end;
+    refresh_visible_prefix_completion;
     refresh_exact_tail_completion;
     Result := project_validated_prefix_completion(m_one_key_completion);
     if Result.text <> m_one_key_completion.text then
@@ -193579,6 +194349,8 @@ var
     segment_units: Integer;
     repaired_units: Integer;
     syllable_count: Integer;
+    tail_pinyin: string;
+    result_path: string;
 
     function same_request(const left_value,
         right_value: TncLongNeuralCompletionRequest): Boolean;
@@ -193598,6 +194370,96 @@ var
             SameText(left_value.top2_path, right_value.top2_path) and
             SameText(left_value.top2_anchor_path,
             right_value.top2_anchor_path);
+    end;
+
+    // Phonetic-only requests keep the model's text recall off, but a next word
+    // the engine itself offered from the dictionary may continue top1.
+    function is_dictionary_next_word: Boolean;
+    var
+        candidate_idx: Integer;
+    begin
+        Result := False;
+        if completion_result.base_rank <> 1 then
+            Exit;
+        for candidate_idx := 0 to High(request.tail_candidates) do
+            if (request.tail_candidates[candidate_idx].replace_units = 0) and
+                (request.tail_candidates[candidate_idx].suffix_text =
+                Trim(completion_result.suffix_text)) and
+                SameText(request.tail_candidates[candidate_idx].suffix_pinyin_path,
+                completion_result.suffix_pinyin_path) then
+                Exit(True);
+    end;
+
+    // A tail word straddles the replaced units: its first `replaced` characters
+    // must each read as the typed syllable at that position (the letters alone
+    // do not fix the boundaries: "xi'nan" vs 新安县); the rest continues.
+    function split_tail_word(const word_pinyin, word_text: string;
+        const replaced, units: Integer; out continuation: string): Boolean;
+    var
+        typed: TArray<string>;
+        typed_prefix: string;
+        first_typed, syllable_idx: Integer;
+        parser: TncPinyinParser;
+    begin
+        Result := False;
+        continuation := '';
+        typed := request.query_syllables.Split([''''], TStringSplitOptions.ExcludeEmpty);
+        first_typed := Length(typed) - (completion_result.replace_units - repaired_units);
+        if (replaced < 1) or (units <= replaced) or (first_typed < 0) or
+            (first_typed + replaced > Length(typed)) then
+            Exit;
+        if Length(word_text) <> units then
+            Exit;
+        typed_prefix := '';
+        for syllable_idx := first_typed to first_typed + replaced - 1 do
+        begin
+            if not m_dictionary.single_char_matches_pinyin(normalize_pinyin_text(typed[syllable_idx]),
+                word_text[syllable_idx - first_typed + 1]) then
+                Exit;
+            typed_prefix := typed_prefix + normalize_pinyin_text(typed[syllable_idx]);
+        end;
+        if not word_pinyin.StartsWith(typed_prefix, True) then
+            Exit;
+        continuation := Copy(word_pinyin, Length(typed_prefix) + 1, MaxInt);
+        parser := TncPinyinParser.create;
+        try
+            Result := nc_word_completion_remainder_fits(parser, continuation, units - replaced);
+        finally
+            parser.Free;
+        end;
+    end;
+
+    // An LM next character: each re-read character spells its typed syllable,
+    // and the next character takes its heaviest dictionary reading.
+    function resolve_lm_next(out text, continuation, path: string): Boolean;
+    var
+        typed: TArray<string>;
+        value, reread, next_char: string;
+        readings: TncOneKeyCompletionList;
+        unit_idx, first_typed: Integer;
+    begin
+        Result := False;
+        value := Trim(completion_result.suffix_text);
+        typed := request.query_syllables.Split([''''], TStringSplitOptions.ExcludeEmpty);
+        first_typed := Length(typed) - completion_result.replace_units;
+        if (first_typed < 0) or (Length(value) <> completion_result.replace_units + 1) then
+            Exit;
+        reread := Copy(value, 1, completion_result.replace_units);
+        next_char := Copy(value, Length(value), 1);
+        for unit_idx := 0 to completion_result.replace_units - 1 do
+            if not m_dictionary.single_char_matches_pinyin(
+                normalize_pinyin_text(typed[first_typed + unit_idx]), reread[unit_idx + 1]) then
+                Exit;
+        if (not m_dictionary.lookup_words_starting_with(next_char, 1, 1, 1, readings)) or
+            (Length(readings) = 0) or (readings[0].text <> next_char) or
+            (readings[0].full_pinyin = '') then
+            Exit;
+        text := value;
+        continuation := readings[0].full_pinyin;
+        path := next_char;
+        if reread <> '' then
+            path := reread + #3 + next_char;
+        Result := True;
     end;
 
     function trim_path_tail(const path_value: string;
@@ -193669,7 +194531,8 @@ begin
         (completion_result.replace_units < 0) or
         (completion_result.replace_units > 6) or
         (request.phonetic_only and
-        (completion_result.replace_units = 0)) then
+        (completion_result.replace_units = 0) and
+        (not is_dictionary_next_word)) then
     begin
         Exit;
     end;
@@ -193699,56 +194562,75 @@ begin
         Exit;
     end;
 
-    suffix_segments := completion_result.suffix_path.Split([#3],
-        TStringSplitOptions.ExcludeEmpty);
-    pinyin_segments := completion_result.suffix_pinyin_path.Split([#3],
-        TStringSplitOptions.ExcludeEmpty);
-    if (Length(suffix_segments) < 1) or (Length(suffix_segments) > 3) or
-        (Length(pinyin_segments) <> Length(suffix_segments)) then
+    result_path := completion_result.suffix_path;
+    if completion_result.lm_next then
     begin
-        Exit;
-    end;
-    suffix_text := '';
-    suffix_pinyin := '';
-    continuation_pinyin := '';
-    syllable_count := 0;
-    repaired_units := 0;
-    for segment_idx := 0 to High(suffix_segments) do
+        if not resolve_lm_next(suffix_text, continuation_pinyin, result_path) then
+            Exit;
+    end
+    else
     begin
-        segment_text := Trim(suffix_segments[segment_idx]);
-        segment_pinyin := normalize_pinyin_text(
-            pinyin_segments[segment_idx]);
-        if (segment_text = '') or (segment_pinyin = '') or
-            (not m_dictionary.is_base_entry(segment_pinyin,
-            segment_text)) then
+        suffix_segments := completion_result.suffix_path.Split([#3],
+            TStringSplitOptions.ExcludeEmpty);
+        pinyin_segments := completion_result.suffix_pinyin_path.Split([#3],
+            TStringSplitOptions.ExcludeEmpty);
+        if (Length(suffix_segments) < 1) or (Length(suffix_segments) > 3) or
+            (Length(pinyin_segments) <> Length(suffix_segments)) then
         begin
             Exit;
         end;
-        segment_units := get_effective_compact_pinyin_unit_count(
-            segment_pinyin);
-        Inc(syllable_count, segment_units);
-        suffix_text := suffix_text + segment_text;
-        suffix_pinyin := suffix_pinyin + segment_pinyin;
-        if repaired_units < completion_result.replace_units then
+        suffix_text := '';
+        suffix_pinyin := '';
+        continuation_pinyin := '';
+        syllable_count := 0;
+        repaired_units := 0;
+        for segment_idx := 0 to High(suffix_segments) do
         begin
-            Inc(repaired_units, segment_units);
-            if repaired_units > completion_result.replace_units then
+            segment_text := Trim(suffix_segments[segment_idx]);
+            segment_pinyin := normalize_pinyin_text(
+                pinyin_segments[segment_idx]);
+            if (segment_text = '') or (segment_pinyin = '') or
+                (not m_dictionary.is_base_entry(segment_pinyin,
+                segment_text)) then
             begin
                 Exit;
             end;
-        end
-        else
-        begin
-            continuation_pinyin := continuation_pinyin + segment_pinyin;
+            segment_units := get_effective_compact_pinyin_unit_count(
+                segment_pinyin);
+            Inc(syllable_count, segment_units);
+            suffix_text := suffix_text + segment_text;
+            suffix_pinyin := suffix_pinyin + segment_pinyin;
+            if repaired_units < completion_result.replace_units then
+            begin
+                if repaired_units + segment_units > completion_result.replace_units then
+                begin
+                    if not split_tail_word(segment_pinyin, segment_text,
+                        completion_result.replace_units - repaired_units,
+                        nc_char_lm_code_point_count(segment_text), tail_pinyin) then
+                    begin
+                        Exit;
+                    end;
+                    repaired_units := completion_result.replace_units;
+                    continuation_pinyin := continuation_pinyin + tail_pinyin;
+                end
+                else
+                begin
+                    Inc(repaired_units, segment_units);
+                end;
+            end
+            else
+            begin
+                continuation_pinyin := continuation_pinyin + segment_pinyin;
+            end;
         end;
-    end;
-    if (syllable_count < 1) or (syllable_count > 6) or
-        (repaired_units <> completion_result.replace_units) or
-        (continuation_pinyin = '') or
-        (not SameText(suffix_text,
-        Trim(completion_result.suffix_text))) then
-    begin
-        Exit;
+        if (syllable_count < 1) or (syllable_count > 6) or
+            (repaired_units <> completion_result.replace_units) or
+            (continuation_pinyin = '') or
+            (not SameText(suffix_text,
+            Trim(completion_result.suffix_text))) then
+        begin
+            Exit;
+        end;
     end;
     if (m_one_key_completion.source = okcs_long_transition) and
         (Length(suffix_text) = 1) and
@@ -193804,7 +194686,7 @@ begin
             m_one_key_completion.path_text + #3;
     end;
     m_one_key_completion.path_text := m_one_key_completion.path_text +
-        completion_result.suffix_path;
+        result_path;
     m_one_key_completion.weight := Round(
         completion_result.confidence * 1000.0);
     m_one_key_completion.prefix_anchored := True;

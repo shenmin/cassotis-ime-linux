@@ -11,11 +11,12 @@ uses
     Classes,
     SyncObjs,
     Dynlibs,
-    nc_engine_intf;
+    nc_engine_intf,
+    nc_char_lm;
 
 const
     // Completed background results beyond this deadline are discarded.
-    c_nc_local_completion_result_timeout_ms = 50;
+    c_nc_local_completion_result_timeout_ms = 120;
 
 type
     TncLocalCompletionHost = class;
@@ -27,17 +28,26 @@ type
         request: TncLongNeuralCompletionRequest;
     end;
 
+    TncLocalCompletionModelOutput = record
+        accepted, use_pool, generated, failed: Boolean;
+        elapsed_ms: QWord;
+        result: TncLongNeuralCompletionResult;
+        suffix_text, suffix_pinyin, suffix_path: string;
+        base_rank, replace_units: Integer;
+        confidence: Single;
+    end;
+
     TncLocalCompletionPrefetchCache = record
     private
-        FValid, FAccepted: Boolean;
+        FValid: Boolean;
         FTask: TncLocalCompletionTask;
-        FResult: TncLongNeuralCompletionResult;
+        FOutput: TncLocalCompletionModelOutput;
     public
         procedure Clear;
         procedure Remember(const task: TncLocalCompletionTask;
-            const accepted: Boolean; const value: TncLongNeuralCompletionResult);
-        function Take(const task: TncLocalCompletionTask; out accepted: Boolean;
-            out value: TncLongNeuralCompletionResult): Boolean;
+            const output: TncLocalCompletionModelOutput);
+        function Take(const task: TncLocalCompletionTask;
+            out output: TncLocalCompletionModelOutput): Boolean;
     end;
 
     TncLocalCompletionFinished = record
@@ -136,13 +146,17 @@ type
         FResultTimeoutMs: QWord;
         FModelThreads: Integer;
         FCaptureCandidatePool: Boolean;
+        FCharLm: IncCharLm;
         FReady: Boolean;
         FLoadFinished: Boolean;
         FLastError: string;
         procedure WorkerExecute;
         procedure LoadRuntime;
         function PopTask(out task: TncLocalCompletionTask): Boolean;
-        function RunTask(const task: TncLocalCompletionTask;
+        function RunModel(const task: TncLocalCompletionTask;
+            out output: TncLocalCompletionModelOutput): Boolean;
+        function FinishTask(const task: TncLocalCompletionTask;
+            const output: TncLocalCompletionModelOutput;
             out completion_result: TncLongNeuralCompletionResult): Boolean;
         procedure StoreFinished(const task: TncLocalCompletionTask;
             const accepted: Boolean;
@@ -162,6 +176,7 @@ type
         function LoadFinished: Boolean;
         function LastError: string;
         procedure ReleaseIdlePages;
+        procedure set_char_lm(const model: IncCharLm);
     end;
 
 implementation
@@ -169,7 +184,9 @@ implementation
 uses
     Math,
     fpjson,
-    jsonparser;
+    jsonparser,
+    nc_pinyin_parser,
+    nc_types;
 
 const
     c_model_threads = 4;
@@ -187,24 +204,22 @@ end;
 procedure TncLocalCompletionPrefetchCache.Clear;
 begin
     FValid := False;
-    FAccepted := False;
     FTask := Default(TncLocalCompletionTask);
-    FResult := Default(TncLongNeuralCompletionResult);
+    FOutput := Default(TncLocalCompletionModelOutput);
 end;
 
 procedure TncLocalCompletionPrefetchCache.Remember(const task: TncLocalCompletionTask;
-    const accepted: Boolean; const value: TncLongNeuralCompletionResult);
+    const output: TncLocalCompletionModelOutput);
 begin
     Clear;
     if not task.prefetch_only then Exit;
     FTask := task;
-    FResult := value;
-    FAccepted := accepted;
+    FOutput := output;
     FValid := True;
 end;
 
 function TncLocalCompletionPrefetchCache.Take(const task: TncLocalCompletionTask;
-    out accepted: Boolean; out value: TncLongNeuralCompletionResult): Boolean;
+    out output: TncLocalCompletionModelOutput): Boolean;
 begin
     Result := FValid and not task.prefetch_only and
         (task.context_id = FTask.context_id) and
@@ -219,12 +234,10 @@ begin
         (task.request.top2_text = FTask.request.top2_text) and
         (task.request.top2_path = FTask.request.top2_path) and
         (task.request.top2_anchor_path = FTask.request.top2_anchor_path);
-    accepted := False;
-    value := Default(TncLongNeuralCompletionResult);
+    output := Default(TncLocalCompletionModelOutput);
     if Result then
     begin
-        accepted := FAccepted;
-        value := FResult;
+        output := FOutput;
     end;
     // One worker-owned slot, consumed at most once by the matching real request.
     Clear;
@@ -533,10 +546,12 @@ begin
     end;
 end;
 
-function TncLocalCompletionHost.RunTask(
+function TncLocalCompletionHost.RunModel(
     const task: TncLocalCompletionTask;
-    out completion_result: TncLongNeuralCompletionResult): Boolean;
+    out output: TncLocalCompletionModelOutput): Boolean;
 var
+    completion_result: TncLongNeuralCompletionResult;
+    char_lm: IncCharLm;
     context_utf8: UTF8String;
     query_utf8: UTF8String;
     top1_text_utf8: UTF8String;
@@ -564,8 +579,8 @@ var
     pool_idx: Integer;
     second_score: Single;
     started_at: QWord;
-    elapsed_ms: QWord;
 begin
+    output := Default(TncLocalCompletionModelOutput);
     completion_result := Default(TncLongNeuralCompletionResult);
     FillChar(suffix_text, SizeOf(suffix_text), 0);
     FillChar(suffix_pinyin, SizeOf(suffix_pinyin), 0);
@@ -583,7 +598,13 @@ begin
     pool_abstain_score := 0.0;
     pool_candidate_count := 0;
     started_at := GetTickCount64;
-    if FCaptureCandidatePool and Assigned(FRunPoolFunction) then
+    FLock.Acquire;
+    try
+        char_lm := FCharLm;
+    finally FLock.Release; end;
+    output.use_pool := (FCaptureCandidatePool or (char_lm <> nil)) and
+        Assigned(FRunPoolFunction);
+    if output.use_pool then
     begin
         FillChar(pool_suffix_texts, SizeOf(pool_suffix_texts), 0);
         FillChar(pool_suffix_pinyins, SizeOf(pool_suffix_pinyins), 0);
@@ -606,6 +627,7 @@ begin
         begin
             pool_candidate_count := EnsureRange(pool_candidate_count, 0,
                 c_completion_pool_capacity);
+            completion_result.abstain_score := pool_abstain_score;
             SetLength(completion_result.candidates, pool_candidate_count);
             for pool_idx := 0 to pool_candidate_count - 1 do
             begin
@@ -686,26 +708,226 @@ begin
         begin
             base_rank := 1;
             replace_units := 0;
+            output.generated := True;
         end;
     end;
-    elapsed_ms := GetTickCount64 - started_at;
+    output.elapsed_ms := GetTickCount64 - started_at;
     if (not Result) and (error_buffer[0] <> #0) then
     begin
+        output.failed := True;
         Disable(ansi_buffer_text(error_buffer));
         Exit;
     end;
-    if Result and (FResultTimeoutMs > 0) and
-        (elapsed_ms > FResultTimeoutMs) then
+    output.accepted := Result;
+    output.result := completion_result;
+    output.suffix_text := ansi_buffer_text(suffix_text);
+    output.suffix_pinyin := ansi_buffer_text(suffix_pinyin);
+    output.suffix_path := ansi_buffer_text(suffix_path);
+    output.base_rank := base_rank;
+    output.replace_units := replace_units;
+    output.confidence := confidence;
+end;
+
+// A tail word's first replace_units syllables are exactly the last typed
+// syllables (the word does not lengthen a syllable that may still be typed).
+function tail_reread_is_exact(const query_syllables, word_pinyin, word_text: string;
+    const replace_units: Integer): Boolean;
+var
+    typed: TArray<string>;
+    parsed: TncPinyinParseResult;
+    parser: TncPinyinParser;
+    idx: Integer;
+begin
+    Result := False;
+    typed := query_syllables.Split([''''], TStringSplitOptions.ExcludeEmpty);
+    if (replace_units < 1) or (replace_units > Length(typed)) then
+        Exit;
+    parser := TncPinyinParser.create;
+    try
+        parsed := parser.parse(LowerCase(StringReplace(StringReplace(word_pinyin,
+            #3, '', [rfReplaceAll]), '''', '', [rfReplaceAll])));
+    finally
+        parser.Free;
+    end;
+    if Length(parsed) <> nc_char_lm_code_point_count(word_text) then
+        Exit;
+    for idx := 0 to replace_units - 1 do
+        if not SameText(parsed[idx].text, typed[Length(typed) - replace_units + idx]) then
+            Exit;
+    Result := True;
+end;
+
+function TncLocalCompletionHost.FinishTask(const task: TncLocalCompletionTask;
+    const output: TncLocalCompletionModelOutput;
+    out completion_result: TncLongNeuralCompletionResult): Boolean;
+var
+    started_at: UInt64;
+    char_lm: IncCharLm;
+
+    // Replaces the ranker/generator decision with the character LM policy.
+    // Leaves the decision untouched when the LM cannot score (busy, not ready).
+    procedure apply_char_lm_policy;
+    var
+        candidates: TArray<TncCharLmContinuation>;
+        sources: TArray<Integer>;
+        item, chosen: TncCharLmContinuation;
+        base, next_char: string;
+        idx, other, best: Integer;
+        probability: Double;
+    begin
+        // Tail words from the engine join the pool after the model's ranked
+        // candidates, so reports see them and results can refer to them.
+        for idx := 0 to High(task.request.tail_candidates) do
+        begin
+            other := 0;
+            while (other < Length(completion_result.candidates)) and
+                ((completion_result.candidates[other].replace_units <>
+                task.request.tail_candidates[idx].replace_units) or
+                (completion_result.candidates[other].base_rank <> 1) or
+                (completion_result.candidates[other].suffix_text <>
+                task.request.tail_candidates[idx].suffix_text)) do
+                Inc(other);
+            if other = Length(completion_result.candidates) then
+            begin
+                SetLength(completion_result.candidates, other + 1);
+                completion_result.candidates[other] := task.request.tail_candidates[idx];
+            end;
+        end;
+        for idx := 0 to High(completion_result.candidates) do
+        begin
+            case completion_result.candidates[idx].base_rank of
+                1: base := task.request.top1_text;
+                2: base := task.request.top2_text;
+            else
+                Continue;
+            end;
+            if (base = '') or (completion_result.candidates[idx].suffix_text = '') or
+                (completion_result.candidates[idx].replace_units < 0) or
+                (completion_result.candidates[idx].replace_units >= Length(base)) then
+                Continue;
+            item := Default(TncCharLmContinuation);
+            item.base_text := Copy(base, 1, Length(base) -
+                completion_result.candidates[idx].replace_units);
+            item.suffix_text := completion_result.candidates[idx].suffix_text;
+            item.full_base_text := base;
+            item.base_rank := completion_result.candidates[idx].base_rank;
+            item.replace_units := completion_result.candidates[idx].replace_units;
+            if completion_result.candidates[idx].tail_word then
+            begin
+                item.tail_word := True;
+                item.tail_rank := completion_result.candidates[idx].tail_rank;
+                item.exact_reread := tail_reread_is_exact(task.request.query_syllables,
+                    completion_result.candidates[idx].suffix_pinyin_path,
+                    item.suffix_text, item.replace_units);
+            end
+            else
+            begin
+                item.rank := idx + 1;
+                item.score := completion_result.candidates[idx].score;
+                item.abstain_score := completion_result.abstain_score;
+            end;
+            SetLength(candidates, Length(candidates) + 1);
+            candidates[High(candidates)] := item;
+            SetLength(sources, Length(sources) + 1);
+            sources[High(sources)] := idx;
+        end;
+        if output.generated and (task.request.top1_text <> '') and (output.suffix_text <> '') then
+        begin
+            item := Default(TncCharLmContinuation);
+            item.base_text := task.request.top1_text;
+            item.suffix_text := output.suffix_text;
+            item.full_base_text := task.request.top1_text;
+            item.base_rank := 1;
+            item.generator := True;
+            idx := 0;
+            while (idx < Length(candidates)) and (candidates[idx].base_text +
+                candidates[idx].suffix_text <> item.base_text + item.suffix_text) do
+                Inc(idx);
+            if idx = Length(candidates) then
+            begin
+                SetLength(candidates, Length(candidates) + 1);
+            candidates[High(candidates)] := item;
+                SetLength(sources, Length(sources) + 1);
+            sources[High(sources)] := -1;
+            end;
+        end;
+        if (Length(candidates) = 0) or not nc_char_lm_choose_continuation(char_lm,
+            task.request.context_text, candidates, task.request.phonetic_only, chosen, best,
+            probability) then
+            Exit;
+        completion_result.suffix_text := '';
+        completion_result.suffix_pinyin_path := '';
+        completion_result.suffix_path := '';
+        completion_result.base_rank := 0;
+        completion_result.replace_units := 0;
+        completion_result.lm_next := False;
+        completion_result.confidence := probability;
+        Result := probability >= c_char_lm_tab_min_probability;
+        if not Result then
+            Exit;
+        if best < 0 then
+        begin
+            // An LM next character: the engine reads it and checks the re-read
+            // typed tail before showing it.
+            next_char := Copy(chosen.suffix_text, chosen.replace_units + 1, MaxInt);
+            completion_result.suffix_text := chosen.suffix_text;
+            completion_result.suffix_path := next_char;
+            if chosen.replace_units > 0 then
+                completion_result.suffix_path := Copy(chosen.suffix_text, 1,
+                    chosen.replace_units) + #3 + next_char;
+            completion_result.base_rank := chosen.base_rank;
+            completion_result.replace_units := chosen.replace_units;
+            completion_result.lm_next := True;
+        end
+        else if sources[best] >= 0 then
+        begin
+            completion_result.suffix_text := completion_result.candidates[sources[best]].suffix_text;
+            completion_result.suffix_pinyin_path :=
+                completion_result.candidates[sources[best]].suffix_pinyin_path;
+            completion_result.suffix_path := completion_result.candidates[sources[best]].suffix_path;
+            completion_result.base_rank := completion_result.candidates[sources[best]].base_rank;
+            completion_result.replace_units := completion_result.candidates[sources[best]].replace_units;
+        end
+        else
+        begin
+            completion_result.suffix_text := output.suffix_text;
+            completion_result.suffix_pinyin_path := output.suffix_pinyin;
+            completion_result.suffix_path := output.suffix_path;
+            completion_result.base_rank := 1;
+        end;
+    end;
+
+begin
+    Result := output.accepted;
+    completion_result := output.result;
+    if output.failed then
         Exit(False);
+    started_at := GetTickCount64;
+    FLock.Acquire;
+    try
+        char_lm := FCharLm;
+    finally
+        FLock.Release;
+    end;
+    if output.use_pool and (char_lm <> nil) then
+    begin
+        apply_char_lm_policy;
+    end;
+    // The deadline covers the model and the policy, prefetched or not.
+    if Result and (FResultTimeoutMs > 0) and
+        (output.elapsed_ms + (GetTickCount64 - started_at) > FResultTimeoutMs) then
+    begin
+        Result := False;
+        Exit;
+    end;
     if Result and (completion_result.suffix_text = '') then
     begin
-        completion_result.suffix_text := ansi_buffer_text(suffix_text);
-        completion_result.suffix_pinyin_path :=
-            ansi_buffer_text(suffix_pinyin);
-        completion_result.suffix_path := ansi_buffer_text(suffix_path);
-        completion_result.base_rank := base_rank;
-        completion_result.replace_units := replace_units;
-        completion_result.confidence := confidence;
+        completion_result.suffix_text := output.suffix_text;
+        completion_result.suffix_pinyin_path := output.suffix_pinyin;
+        completion_result.suffix_path := output.suffix_path;
+        completion_result.base_rank := output.base_rank;
+        completion_result.replace_units := output.replace_units;
+        completion_result.confidence := output.confidence;
     end;
 end;
 
@@ -727,6 +949,7 @@ end;
 procedure TncLocalCompletionHost.WorkerExecute;
 var
     task: TncLocalCompletionTask;
+    output: TncLocalCompletionModelOutput;
     completion_result: TncLongNeuralCompletionResult;
     accepted: Boolean;
 begin
@@ -749,14 +972,15 @@ begin
             if not PopTask(task) then
                 Continue;
         end;
-        if not FPrefetchCache.Take(task, accepted, completion_result) then
-            accepted := RunTask(task, completion_result);
         if task.prefetch_only then
         begin
-            FPrefetchCache.Remember(task, accepted, completion_result);
+            RunModel(task, output);
+            FPrefetchCache.Remember(task, output);
             if not Ready then Break;
             Continue;
         end;
+        if not FPrefetchCache.Take(task, output) then RunModel(task, output);
+        accepted := FinishTask(task, output, completion_result);
         StoreFinished(task, accepted, completion_result);
         if not Ready then
             Break;
@@ -814,6 +1038,14 @@ begin
     finally
         FLock.Leave;
     end;
+end;
+
+procedure TncLocalCompletionHost.set_char_lm(const model: IncCharLm);
+begin
+    FLock.Acquire;
+    try
+        FCharLm := model;
+    finally FLock.Release; end;
 end;
 
 function TncLocalCompletionHost.Ready: Boolean;

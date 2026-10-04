@@ -29,6 +29,8 @@ type
         FModifierShortcutAction: TncShortcutAction;
         FModifierShortcutKeyCode: Word;
     public
+        LongCompletionPending: Boolean;
+        OneKeyRerankPending: Boolean;
         constructor Create(const context_id: QWord);
         function AdvanceGeneration(const generation_id: QWord): Boolean;
         procedure Reset;
@@ -94,7 +96,14 @@ function TncEngineContext.AdvanceGeneration(const generation_id: QWord): Boolean
 begin
     Result := generation_id >= FGeneration;
     if Result then
+    begin
+        if generation_id <> FGeneration then
+        begin
+            LongCompletionPending := False;
+            OneKeyRerankPending := False;
+        end;
         FGeneration := generation_id;
+    end;
 end;
 
 procedure TncEngineContext.Reset;
@@ -108,6 +117,8 @@ end;
 
 procedure TncEngineContext.ClearComposition;
 begin
+    LongCompletionPending := False;
+    OneKeyRerankPending := False;
     FComposition := '';
     SetLength(FCandidates, 0);
     FSelectedIndex := -1;

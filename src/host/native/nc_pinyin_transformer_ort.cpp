@@ -62,13 +62,22 @@ std::mutex& InitializationMutex() {
     return value;
 }
 
-int EffectiveThreadCount(int requested_threads) {
+int BoundThreadCount(int requested_threads, unsigned int available) {
+#if defined(__x86_64__) || defined(__i386__)
+    // Small, sequential inference graphs share the CPU with decoding and the
+    // background LM. More workers can increase latency through contention.
+    const int requested = std::clamp(requested_threads, 1, 4);
+#else
     const int requested = std::max(1, requested_threads);
-    const unsigned int available = std::thread::hardware_concurrency();
+#endif
     if (available == 0) {
         return requested;
     }
-    return std::min(requested, static_cast<int>(available));
+    return static_cast<int>(std::min(static_cast<unsigned int>(requested), available));
+}
+
+int EffectiveThreadCount(int requested_threads) {
+    return BoundThreadCount(requested_threads, std::thread::hardware_concurrency());
 }
 
 void ConfigureSessionOptions(Ort::SessionOptions& options, int intra_threads) {
@@ -2864,5 +2873,5 @@ extern "C" CASSOTIS_EXPORT void nc_lcg_destroy(
 }
 
 #include "nc_utf16_runtime.inc"
-#include "nc_short_context_runtime.h"
+#include "nc_char_lm_ort.inc"
 #include "nc_local_repair_ort.inc"

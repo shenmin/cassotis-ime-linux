@@ -19,3 +19,4 @@
 *.pyo
 __pycache__/
 *~
+/data/models/char_lm/char_lm.onnx

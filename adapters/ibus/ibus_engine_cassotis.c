@@ -419,7 +419,10 @@ static gboolean poll_async_result(gpointer user_data)
                   result.error_text != NULL ? result.error_text : "");
     if (result.handled) {
         render_result(self, &result);
+        const gboolean pending = result.async_pending;
         cassotis_engine_result_clear(&result);
+        if (pending)
+            return G_SOURCE_CONTINUE;
         self->result_poll_id = 0;
         return G_SOURCE_REMOVE;
     }

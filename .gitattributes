@@ -1,6 +1,7 @@
 *.sh text eol=lf
 *.bin binary
 *.onnx binary
+*.onnx.[0-9][0-9][0-9] binary
 *.so binary
 *.so.* binary
 # Preserve reviewed model bytes, including CRLF line endings.
