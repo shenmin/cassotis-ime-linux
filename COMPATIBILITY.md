@@ -1,5 +1,25 @@
 # Compatibility
 
+## v1.0.1 Punctuation Fix
+
+The shared IBus/Fcitx 5 key mapping now converts resolved Shift+number-row
+symbols before applying the selected punctuation mode. Chinese punctuation
+with half-width characters produces `（` and `）` from Shift+9 and Shift+0.
+English punctuation, ordinary digits and modified application shortcuts retain
+their existing behavior.
+
+Regression coverage includes both native adapters, all ten shifted number-row
+symbols, half/full-width modes and Shift release after a composition commit.
+Package qualification covers Ubuntu x86_64 and aarch64, both frameworks and
+GTK 3/4 Wayland/XWayland clients, alongside upgrade and user-install checks.
+The reported Arch Linux Obsidian/VS Code environment and SteamOS are not
+newly qualified for this patch. Text assertions do not establish visual
+candidate-placement correctness.
+
+Models, dictionaries and ranking are unchanged from v1.0.0. The benchmark
+tables and historical measurements below retain their original version and
+date; no new corpus benchmark result is claimed for this punctuation patch.
+
 ## v1.0.0 Validation
 
 The shared character-language-model update uses the v1.31.0 engine and
