@@ -352,6 +352,7 @@ function TncEngineService.KeyEventToVirtualKey(
     out key_state: TncKeyState): Boolean;
 var
     value: WideChar;
+    shifted_digit_index: Integer;
 begin
     key_code := 0;
     key_state.shift_down := km_shift in key_event.modifiers;
@@ -410,6 +411,14 @@ begin
         Exit(False);
 
     value := key_event.text[1];
+    shifted_digit_index := Pos(value, '!@#$%^&*()');
+    if shifted_digit_index > 0 then
+    begin
+        // Frameworks send resolved symbols; the engine expects digit + Shift.
+        key_code := Ord('0') + (shifted_digit_index mod 10);
+        key_state.shift_down := True;
+        Exit(True);
+    end;
     if ((value >= 'a') and (value <= 'z')) then
         key_code := Ord(value) - Ord('a') + Ord('A')
     else if ((value >= 'A') and (value <= 'Z')) or

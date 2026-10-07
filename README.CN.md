@@ -68,7 +68,10 @@
 
 ## 已验证发行环境
 
-v1.0.0 对齐言泉输入法和 Cassotis Lexicon v1.31.0 的行为与数据基线，
+v1.0.1 修复 IBus 与 Fcitx 5 中 Shift+数字行的中文标点转换，包括开启半角字符时
+仍应输出的中文圆括号。词库、模型和候选排序行为保持与 v1.0.0 一致。
+
+引擎对齐言泉输入法和 Cassotis Lexicon v1.31.0 的行为与数据基线，
 使用 schema 24 字词库，简体、繁体基础库分别有 249,362 和 252,574 条记录。
 此数量包含 Unihan 等来源的单字读音条目及多字词条；同一字词可有多种读音记录，
 不等于去重后的词语数量。简体包含 23,918 条单字记录和 225,444 条多字记录，
@@ -90,7 +93,7 @@ x86_64 与 aarch64 分别原生测量 16,300 条长句和 65,000 条短词，
 桌面矩阵。桌面与输入框架的具体测试范围见
 [COMPATIBILITY.md](COMPATIBILITY.md)。
 
-v1.0.0 面向 amd64 与 arm64 提供 `.deb` 安装包和便携二进制包。验证环境为
+v1.0.1 面向 amd64 与 arm64 提供 `.deb` 安装包和便携二进制包。验证环境为
 两个架构的 Ubuntu 26.04.1 GNOME Wayland，结果记录在
 [BENCHMARK.CN.md](BENCHMARK.CN.md)。已发布安装包及校验信息请以
 [GitHub Releases](https://github.com/shenmin/cassotis-ime-linux/releases) 为准。
@@ -169,7 +172,7 @@ x86_64 的物理主机为 Intel Core i5-12600K，aarch64 运行在 Apple silicon
 
 ```bash
 arch="$(dpkg --print-architecture)"  # 输出 amd64 或 arm64
-package="cassotis-ime_1.0.0_${arch}.deb"
+package="cassotis-ime_1.0.1_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -204,10 +207,10 @@ sudo apt install "./${package}"
 
 ```bash
 arch="$(uname -m)"  # 输出 x86_64 或 aarch64
-archive="cassotis-ime-linux-1.0.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-1.0.1-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-1.0.0-${arch}"
+cd "cassotis-ime-linux-1.0.1-${arch}"
 ./install.sh --user --check &&
 ./install.sh --user
 ```
@@ -251,10 +254,10 @@ SteamOS 等只读系统请使用上面的[用户目录安装](#user-installation
 
 ```bash
 arch="$(uname -m)"  # 输出 x86_64 或 aarch64
-archive="cassotis-ime-linux-1.0.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-1.0.1-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-1.0.0-${arch}"
+cd "cassotis-ime-linux-1.0.1-${arch}"
 sudo ./install.sh
 ```
 

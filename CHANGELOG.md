@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1 - 2026-10-07
+
+- Fixed Chinese punctuation entered with Shift and the number row in both
+  IBus and Fcitx 5. Resolved symbols such as `(` and `)` now reach the engine's
+  punctuation rules instead of passing through as ASCII in Chinese mode.
+- Preserved English punctuation, half-width digits, modifier shortcuts and
+  Shift-release behavior while entering punctuation during composition.
+- Kept the v1.0.0 dictionaries, language models and candidate-ranking behavior.
+
 ## 1.0.0 - 2026-10-04
 
 - Aligned the engine and dictionaries with Cassotis IME and Cassotis Lexicon

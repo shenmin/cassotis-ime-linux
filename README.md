@@ -94,7 +94,11 @@ cloud service, network connection, or GPU.
 
 ## Supported Release
 
-v1.0.0 aligns with Cassotis IME and Cassotis Lexicon v1.31.0 and uses
+v1.0.1 fixes Shift+number-row Chinese punctuation in both IBus and Fcitx 5,
+including parentheses with half-width characters enabled. It retains the
+v1.0.0 dictionaries, models and ranking behavior.
+
+The engine aligns with Cassotis IME and Cassotis Lexicon v1.31.0 and uses
 schema-24 dictionaries containing 249,362 simplified and 252,574 traditional
 base records. These counts include single-character readings from Unihan and
 other sources as well as multi-character entries; a character or word may have
@@ -124,7 +128,7 @@ checks also cover native core and dictionary tests, package payloads, cold-start
 responsiveness and the automated IBus/Fcitx desktop matrix. See
 [COMPATIBILITY.md](COMPATIBILITY.md) for desktop and framework test coverage.
 
-The v1.0.0 release targets amd64 and arm64 with `.deb` packages and portable
+The v1.0.1 release targets amd64 and arm64 with `.deb` packages and portable
 binary archives. Qualification uses Ubuntu 26.04.1 GNOME Wayland on both
 architectures; results are recorded in [BENCHMARK.md](BENCHMARK.md).
 Use [GitHub Releases](https://github.com/shenmin/cassotis-ime-linux/releases)
@@ -211,7 +215,7 @@ metadata, and install it with APT:
 
 ```bash
 arch="$(dpkg --print-architecture)"  # amd64 or arm64
-package="cassotis-ime_1.0.0_${arch}.deb"
+package="cassotis-ime_1.0.1_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -250,10 +254,10 @@ composition, then open a terminal as the current desktop user. Run these command
 
 ```bash
 arch="$(uname -m)"  # x86_64 or aarch64
-archive="cassotis-ime-linux-1.0.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-1.0.1-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-1.0.0-${arch}"
+cd "cassotis-ime-linux-1.0.1-${arch}"
 ./install.sh --user --check &&
 ./install.sh --user
 ```
@@ -306,10 +310,10 @@ and compatible runtime libraries. For SteamOS and other read-only systems, use
 
 ```bash
 arch="$(uname -m)"  # x86_64 or aarch64
-archive="cassotis-ime-linux-1.0.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-1.0.1-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-1.0.0-${arch}"
+cd "cassotis-ime-linux-1.0.1-${arch}"
 sudo ./install.sh
 ```
 
