@@ -214,6 +214,8 @@ start_session_refresh() {
     fi
     run_bounded 10s "$refresh" --enable-ibus-source --quiet || true
 }
+python3 /usr/libexec/cassotis-ime/cassotis-model-assets.py \
+    --remove-retired-models /usr/libexec/cassotis-ime
 if command -v update-desktop-database >/dev/null 2>&1; then
     run_bounded 2s update-desktop-database \
         /usr/share/applications >/dev/null 2>&1 || true
@@ -255,7 +257,7 @@ exit 0
 EOF
 chmod 0755 "$deb_root/DEBIAN/postrm"
 find "$deb_root" -exec touch -d "@$source_date_epoch" {} +
-dpkg-deb --root-owner-group -Zzstd -z10 --build "$deb_root" \
+dpkg-deb --root-owner-group --uniform-compression -Zxz -z6 --build "$deb_root" \
     "$resolved_output/cassotis-ime_${version}_${deb_arch}.deb" >/dev/null
 dpkg-deb --info "$resolved_output/cassotis-ime_${version}_${deb_arch}.deb" \
     >/dev/null

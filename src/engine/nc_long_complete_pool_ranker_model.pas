@@ -1,4 +1,4 @@
-﻿unit nc_long_complete_pool_ranker_model;
+unit nc_long_complete_pool_ranker_model;
 
 {$codepage utf8}
 {$mode delphiunicode}
@@ -7,7 +7,7 @@
 interface
 
 uses
-    nc_long_final_ranker_model;
+    nc_long_ranker_features;
 
 const
     c_long_complete_pool_ranker_default_profile: Integer = 2;

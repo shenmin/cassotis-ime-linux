@@ -77,6 +77,7 @@ cassotis_require_command pkg-config
 cassotis_require_command realpath
 cassotis_require_command sed
 cassotis_require_command sha256sum
+cassotis_require_command strip
 [[ -n "$dictionary_path" ]] || cassotis_die '--dictionary is required'
 [[ -r "$dictionary_path" ]] ||
     cassotis_die "dictionary is not readable: $dictionary_path"
@@ -173,6 +174,8 @@ install -d -m 0755 \
 install -m 0755 "$engine" "$(stage_path "$libexec_path/cassotis-engine")"
 install -m 0755 "$control" "$(stage_path "$libexec_path/cassotis-control")"
 install -m 0755 "$settings" "$(stage_path "$libexec_path/cassotis-settings")"
+install -m 0644 "$cassotis_root/scripts/model_weights.py" \
+    "$(stage_path "$libexec_path/cassotis-model-assets.py")"
 install -m 0755 \
     "$cassotis_root/packaging/session/cassotis-refresh-sessions" \
     "$(stage_path "$libexec_path/cassotis-refresh-sessions")"
@@ -181,6 +184,17 @@ install -m 0755 "$ibus_adapter" \
 cassotis_stage_neural_runtime "$bin_dir" "$(stage_path "$libexec_path")"
 install -m 0755 "$fcitx_addon" \
     "$(stage_path "$fcitx_library_path/libcassotis.so")"
+# Strip only staging copies; keep build/bin intact for debugging. Do this
+# before generating the manifest so checksums describe the shipped binaries.
+for binary in "$libexec_path/cassotis-engine" \
+              "$libexec_path/cassotis-control" \
+              "$libexec_path/ibus-engine-cassotis" \
+              "$libexec_path/libcassotis_pinyin_transformer_ort.so" \
+              "$libexec_path/libonnxruntime.so.1.20.1" \
+              "$libexec_path/libonnxruntime_providers_shared.so" \
+              "$fcitx_library_path/libcassotis.so"; do
+    strip --strip-unneeded -- "$(stage_path "$binary")"
+done
 install -m 0644 "$icon" "$(stage_path "$icon_path/cassotis-ime.png")"
 install -m 0644 "$dictionary_path" "$(stage_path "$data_path/dict_sc.db")"
 if [[ -n "$traditional_dictionary_path" ]]; then
@@ -228,10 +242,6 @@ install -m 0644 "$cassotis_root/third_party/onnxruntime/LICENSE" \
 install -m 0644 \
     "$cassotis_root/third_party/onnxruntime/ThirdPartyNotices.txt" \
     "$(stage_path "$doc_path/third-party/onnxruntime/ThirdPartyNotices.txt")"
-install -d -m 0755 "$(stage_path "$doc_path/third-party/macbert")"
-install -m 0644 "$cassotis_root/third_party/macbert/LICENSE" \
-    "$cassotis_root/third_party/macbert/NOTICE" \
-    "$(stage_path "$doc_path/third-party/macbert")/"
 
 if grep -R -n -E '@(EXECUTABLE|SETUP|VERSION|FCITX_VERSION|LIBRARY)@' \
         "$resolved_destdir"; then

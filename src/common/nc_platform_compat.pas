@@ -25,6 +25,16 @@ const
     VK_DOWN = $28;
     VK_INSERT = $2D;
     VK_DELETE = $2E;
+    VK_NUMPAD0 = $60;
+    VK_NUMPAD1 = $61;
+    VK_NUMPAD2 = $62;
+    VK_NUMPAD3 = $63;
+    VK_NUMPAD4 = $64;
+    VK_NUMPAD5 = $65;
+    VK_NUMPAD6 = $66;
+    VK_NUMPAD7 = $67;
+    VK_NUMPAD8 = $68;
+    VK_NUMPAD9 = $69;
     VK_MULTIPLY = $6A;
     VK_ADD = $6B;
     VK_SUBTRACT = $6D;
@@ -56,11 +66,52 @@ function nc_monotonic_tick_ms: QWord;
 function QueryPerformanceCounter(out value: Int64): Boolean;
 function QueryPerformanceFrequency(out value: Int64): Boolean;
 function nc_quantize_single(const value: Double): Double;
+function nc_available_cpu_count: Integer;
 
 implementation
 
 uses
-    SysUtils;
+    SysUtils, Classes;
+
+{$IFDEF LINUX}
+function linux_online_cpu_count: LongInt; cdecl; external 'c' name 'get_nprocs';
+function linux_get_affinity(pid: LongInt; mask_size: SizeUInt; mask: Pointer): LongInt;
+    cdecl; external 'c' name 'sched_getaffinity';
+{$ENDIF}
+
+function nc_available_cpu_count: Integer;
+{$IFDEF LINUX}
+var
+    mask: array[0..127] of Byte;
+    affinity_count, i: Integer;
+    bits: Byte;
+{$ENDIF}
+begin
+{$IFDEF LINUX}
+    // FPC 3.2.2 reports one CPU on Unix; query the OS and honor task affinity.
+    Result := linux_online_cpu_count;
+    FillChar(mask, SizeOf(mask), 0);
+    if linux_get_affinity(0, SizeOf(mask), @mask[0]) = 0 then
+    begin
+        affinity_count := 0;
+        for i := Low(mask) to High(mask) do
+        begin
+            bits := mask[i];
+            while bits <> 0 do
+            begin
+                Inc(affinity_count);
+                bits := bits and (bits - 1);
+            end;
+        end;
+        if (affinity_count > 0) and
+            ((Result < 1) or (affinity_count < Result)) then
+            Result := affinity_count;
+    end;
+{$ELSE}
+    Result := TThread.ProcessorCount;
+{$ENDIF}
+    if Result < 1 then Result := 1;
+end;
 
 function nc_monotonic_tick_ms: QWord;
 begin

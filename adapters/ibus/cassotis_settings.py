@@ -49,7 +49,10 @@ SHORTCUT_STATE_KEYS = (
     "shortcut_settings_modifiers",
 )
 
-STATE_KEYS = BASE_STATE_KEYS + SHORTCUT_STATE_KEYS + ("shortcut_disabled_mask",)
+STATE_KEYS = BASE_STATE_KEYS + SHORTCUT_STATE_KEYS + (
+    "shortcut_disabled_mask", "decimal_period_after_digit",
+    "auto_english", "punctuation_ascii_symbols",
+)
 
 SCHEME_NAMES = (
     "全拼",
@@ -149,6 +152,17 @@ KEY_CHOICES = (
     (0xDE, "'"),
 )
 
+MARKDOWN_ASCII_SYMBOLS = "-#*+_=`~[]<>|@"
+
+
+def normalize_ascii_symbols(value):
+    return "".join(dict.fromkeys(char for char in value
+                                if 33 <= ord(char) <= 47 or
+                                58 <= ord(char) <= 64 or
+                                91 <= ord(char) <= 96 or
+                                123 <= ord(char) <= 126))
+
+
 DEFAULT_STATE = {
     "input_mode": 0,
     "dictionary_variant": 0,
@@ -157,6 +171,9 @@ DEFAULT_STATE = {
     "fuzzy_pinyin_rules": 0,
     "full_width_mode": 0,
     "punctuation_full_width": 1,
+    "decimal_period_after_digit": 1,
+    "auto_english": 1,
+    "punctuation_ascii_symbols": MARKDOWN_ASCII_SYMBOLS,
     "candidate_page_key_scheme": 0,
     "one_key_completion_key": 0,
     "candidate_page_size": 9,
@@ -181,6 +198,9 @@ PAGE_DEFAULT_KEYS = (
         "pinyin_scheme",
         "full_width_mode",
         "punctuation_full_width",
+        "decimal_period_after_digit",
+        "auto_english",
+        "punctuation_ascii_symbols",
     ),
     ("candidate_page_size",),
     ("fuzzy_pinyin_enabled", "fuzzy_pinyin_rules"),
@@ -276,8 +296,14 @@ def validate_state(state):
     if state["fuzzy_pinyin_rules"] & ~((1 << len(FUZZY_RULES)) - 1):
         raise ControlError("模糊音规则超出范围")
     if state["full_width_mode"] not in (0, 1) or \
-            state["punctuation_full_width"] not in (0, 1):
+            state["punctuation_full_width"] not in (0, 1) or \
+            state["decimal_period_after_digit"] not in (0, 1) or \
+            state["auto_english"] not in (0, 1):
         raise ControlError("字符模式超出范围")
+    if not isinstance(state["punctuation_ascii_symbols"], str) or \
+            normalize_ascii_symbols(state["punctuation_ascii_symbols"]) != \
+            state["punctuation_ascii_symbols"]:
+        raise ControlError("半角标点列表只能包含不重复的英文标点")
     if not 0 <= state["candidate_page_key_scheme"] < len(PAGE_KEY_SCHEMES):
         raise ControlError("候选翻页方案超出范围")
     if not 0 <= state["one_key_completion_key"] < len(COMPLETION_KEYS):
@@ -314,6 +340,9 @@ def parse_state(output):
     for line in output.splitlines():
         key, separator, value = line.partition("=")
         if separator and key in STATE_KEYS:
+            if key == "punctuation_ascii_symbols":
+                state[key] = value
+                continue
             try:
                 state[key] = int(value)
             except ValueError as error:
@@ -501,6 +530,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self._add_row(general, 0, "输入模式", self.input_mode)
         self.pinyin_scheme = self._combo(SCHEME_NAMES)
         self._add_row(general, 1, "拼音方案", self.pinyin_scheme)
+        self.auto_english = Gtk.CheckButton(label="识别英文单词，空格上屏")
+        self.auto_english.set_halign(Gtk.Align.START)
+        self._add_row(general, 2, "英文单词", self.auto_english)
 
         typography = self._new_section("字符与标点")
         content.pack_start(typography, False, False, 0)
@@ -509,7 +541,30 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.full_width = Gtk.CheckButton(label="使用全角字符")
         self.full_width.set_halign(Gtk.Align.START)
         self._add_row(typography, 1, "字符宽度", self.full_width)
+        self.decimal_period = Gtk.CheckButton(label="数字后句号使用小数点")
+        self.decimal_period.set_halign(Gtk.Align.START)
+        self._add_row(typography, 2, "小数点", self.decimal_period)
+        self.ascii_symbols = Gtk.Entry()
+        self.ascii_symbols.set_tooltip_text("列出的标点在中文标点、半角字符模式下使用半角")
+        self.ascii_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.ascii_box.pack_start(self.ascii_symbols, False, False, 0)
+        buttons = Gtk.Box(spacing=8)
+        preset = Gtk.Button(label="Markdown 预设")
+        preset.connect("clicked", lambda _button:
+                       self.ascii_symbols.set_text(MARKDOWN_ASCII_SYMBOLS))
+        clear = Gtk.Button(label="清空例外")
+        clear.connect("clicked", lambda _button: self.ascii_symbols.set_text(""))
+        buttons.pack_start(preset, False, False, 0)
+        buttons.pack_start(clear, False, False, 0)
+        self.ascii_box.pack_start(buttons, False, False, 0)
+        self._add_row(typography, 3, "半角标点", self.ascii_box)
+        self.punctuation.connect("changed", self._update_ascii_sensitivity)
+        self.full_width.connect("toggled", self._update_ascii_sensitivity)
         return page
+
+    def _update_ascii_sensitivity(self, *_args):
+        self.ascii_box.set_sensitive(self._combo_value(self.punctuation) == 0
+                                     and not self.full_width.get_active())
 
     def _build_appearance_page(self):
         page, content = self._new_page()
@@ -560,7 +615,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.completion_key.connect("changed", self._completion_key_changed)
         self._add_row(completion, 0, "快捷键", self.completion_key)
         hint = Gtk.Label(
-            label="输入至少两个完整音节，并存在可继续补全的精确词库词时生效。Tab 用作一键补全时，不能同时选择 Tab/Shift+Tab 翻页。"
+            label="输入至少两个完整音节后，根据词库与本地语言模型提供补全。Tab 用作一键补全时，不能同时选择 Tab/Shift+Tab 翻页。"
         )
         hint.set_xalign(0)
         hint.set_line_wrap(True)
@@ -673,6 +728,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         for index, check in enumerate(self.fuzzy_checks):
             check.set_active(bool(state["fuzzy_pinyin_rules"] & (1 << index)))
         self.full_width.set_active(bool(state["full_width_mode"]))
+        self.decimal_period.set_active(bool(state["decimal_period_after_digit"]))
+        self.auto_english.set_active(bool(state["auto_english"]))
+        self.ascii_symbols.set_text(state["punctuation_ascii_symbols"])
         self._set_combo_value(
             self.punctuation,
             0 if state["punctuation_full_width"] else 1,
@@ -696,6 +754,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             enabled.set_active(not state["shortcut_disabled_mask"] & (1 << index))
             self._shortcut_enabled_changed(enabled, modifier, key)
         self._update_fuzzy_sensitivity()
+        self._update_ascii_sensitivity()
 
     def _collect_state(self):
         mask = 0
@@ -721,6 +780,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
             "fuzzy_pinyin_enabled": int(self.fuzzy_enabled.get_active()),
             "fuzzy_pinyin_rules": mask,
             "full_width_mode": int(self.full_width.get_active()),
+            "decimal_period_after_digit": int(self.decimal_period.get_active()),
+            "auto_english": int(self.auto_english.get_active()),
             "punctuation_full_width": int(
                 self._combo_value(self.punctuation) == 0
             ),
@@ -731,6 +792,12 @@ class SettingsWindow(Gtk.ApplicationWindow):
             ),
             "debug_mode": int(self.debug_mode.get_active()),
         }
+        if changes["punctuation_full_width"] and not changes["full_width_mode"]:
+            if any(not normalize_ascii_symbols(char)
+                   for char in self.ascii_symbols.get_text()):
+                raise ControlError("半角标点列表只能包含英文标点")
+            changes["punctuation_ascii_symbols"] = normalize_ascii_symbols(
+                self.ascii_symbols.get_text())
         changes["shortcut_disabled_mask"] = 0
         for index, (prefix, _caption) in enumerate(SHORTCUTS):
             modifier, key, enabled = self.shortcut_widgets[prefix]

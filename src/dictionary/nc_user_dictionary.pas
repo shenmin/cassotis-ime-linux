@@ -60,6 +60,7 @@ implementation
 
 uses
     SysUtils,
+    nc_config,
     nc_shortcut;
 
 function ShortcutModifierMask(const shortcut: TncShortcut): Integer;
@@ -419,6 +420,8 @@ const
         '''setting.pinyin_scheme'', ''setting.dictionary_variant'', ' +
         '''setting.full_width_mode'', ' +
         '''setting.punctuation_full_width'', ' +
+        '''setting.decimal_period_after_digit'', ' +
+        '''setting.punctuation_ascii_symbols'', ''setting.auto_english'', ' +
         '''setting.fuzzy_pinyin_enabled'', ' +
         '''setting.fuzzy_pinyin_rules'', ' +
         '''setting.candidate_page_size'', ' +
@@ -466,6 +469,12 @@ begin
                 Exit(False);
             end;
             key_name := FConnection.ColumnText(statement, 0);
+            if key_name = 'setting.punctuation_ascii_symbols' then
+            begin
+                state.punctuation_ascii_symbols := nc_normalize_punctuation_ascii_symbols(
+                    FConnection.ColumnText(statement, 1));
+                Continue;
+            end;
             if not TryStrToInt(UTF8Encode(
                 FConnection.ColumnText(statement, 1)), setting_value) then
                 Continue;
@@ -489,6 +498,10 @@ begin
                 state.full_width_mode := setting_value <> 0
             else if key_name = 'setting.punctuation_full_width' then
                 state.punctuation_full_width := setting_value <> 0
+            else if key_name = 'setting.decimal_period_after_digit' then
+                state.decimal_period_after_digit := setting_value <> 0
+            else if key_name = 'setting.auto_english' then
+                state.auto_english := setting_value <> 0
             else if (key_name = 'setting.candidate_page_size') and
                 (setting_value >= c_min_candidate_page_size) and
                 (setting_value <= c_max_candidate_page_size) then
@@ -589,6 +602,13 @@ begin
         ExecutePairStatement(c_upsert_setting,
         'setting.punctuation_full_width',
         UTF8Decode(IntToStr(Ord(state.punctuation_full_width)))) and
+        ExecutePairStatement(c_upsert_setting,
+        'setting.decimal_period_after_digit',
+        UTF8Decode(IntToStr(Ord(state.decimal_period_after_digit)))) and
+        ExecutePairStatement(c_upsert_setting, 'setting.punctuation_ascii_symbols',
+        nc_normalize_punctuation_ascii_symbols(state.punctuation_ascii_symbols)) and
+        ExecutePairStatement(c_upsert_setting, 'setting.auto_english',
+        UTF8Decode(IntToStr(Ord(state.auto_english)))) and
         ExecutePairStatement(c_upsert_setting,
         'setting.candidate_page_size', UTF8Decode(IntToStr(
         state.candidate_page_size))) and

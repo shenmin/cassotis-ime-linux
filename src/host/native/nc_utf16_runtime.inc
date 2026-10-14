@@ -1,5 +1,4 @@
-// These optional model APIs use UTF-16 explicitly, independent of wchar_t.
-// Existing UTF-8 entry points retain their original ABI.
+// The model ABI uses UTF-16 explicitly, independent of platform wchar_t.
 namespace {
 static_assert(sizeof(char16_t) == 2);
 
@@ -39,8 +38,4 @@ void SetUtf16Error(char16_t* destination, int capacity, std::u16string_view text
     destination[count] = 0;
 }
 
-uint64_t MonotonicMilliseconds() {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count());
-}
 }

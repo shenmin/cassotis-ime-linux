@@ -93,6 +93,10 @@ static void print_state(const CassotisEngineState *state)
             (state->shortcuts.dictionary_variant_toggle.disabled ? 4U : 0U) |
             (state->shortcuts.full_width_toggle.disabled ? 8U : 0U) |
             (state->shortcuts.open_settings.disabled ? 16U : 0U));
+    g_print("decimal_period_after_digit=%u\n",
+            state->decimal_period_after_digit ? 1U : 0U);
+    g_print("auto_english=%u\n", state->auto_english ? 1U : 0U);
+    g_print("punctuation_ascii_symbols=%s\n", state->punctuation_ascii_symbols);
 }
 
 static void print_usage(const gchar *program_name)
@@ -104,7 +108,7 @@ static void print_usage(const gchar *program_name)
         "       [PAGE_KEYS COMPLETION_KEY [PAGE_SIZE DEBUG] "
         "INPUT_KEY INPUT_MOD PUNCT_KEY PUNCT_MOD "
         "DICT_KEY DICT_MOD WIDTH_KEY WIDTH_MOD SETTINGS_KEY SETTINGS_MOD "
-        "[DISABLED_MASK]]\n"
+        "[DISABLED_MASK [DECIMAL_PERIOD [AUTO_ENGLISH ASCII_SYMBOLS]]]]\n"
         "  %s ping\n"
         "  %s clear-user-dictionary\n"
         "  %s shutdown\n",
@@ -121,7 +125,7 @@ int main(int argc, char **argv)
     gchar *engine_path;
     const gchar *engine_override;
     GError *error = NULL;
-    guint32 values[22];
+    guint32 values[24];
     guint index;
     guint shortcut_offset;
     gboolean extended_state;
@@ -144,12 +148,13 @@ int main(int argc, char **argv)
         if (success)
             print_state(&state);
     } else if (g_strcmp0(argv[1], "set-state") == 0 &&
-               (argc == 9 || argc == 21 || argc == 23 || argc == 24)) {
+               (argc == 9 || argc == 21 || argc == 23 || argc == 24 ||
+                argc == 25 || argc == 27)) {
         cassotis_engine_state_init_defaults(&state);
         if (!cassotis_client_get_state(&client, &state, &error))
             goto done;
         extended_state = argc >= 23;
-        for (index = 0; index < (guint)(argc - 2); ++index) {
+        for (index = 0; index < (guint)(argc == 27 ? 24 : argc - 2); ++index) {
             guint32 maximum = 1U;
             if (index == 4)
                 maximum = CASSOTIS_FUZZY_RULE_MASK;
@@ -175,6 +180,8 @@ int main(int argc, char **argv)
                           CASSOTIS_MODIFIER_ALT;
             if (index == 21)
                 maximum = 31U;
+            if (index == 22 || index == 23)
+                maximum = 1U;
             if (!parse_uint(argv[index + 2], maximum, &values[index])) {
                 g_set_error(&error, cassotis_client_error_quark(), 1,
                             "invalid set-state value '%s'", argv[index + 2]);
@@ -224,12 +231,33 @@ int main(int argc, char **argv)
             state.shortcuts.open_settings.modifiers =
                 values[shortcut_offset + 9U];
         }
-        if (argc == 24) {
+        if (argc >= 24) {
             state.shortcuts.input_mode_toggle.disabled = (values[21] & 1U) != 0;
             state.shortcuts.punctuation_toggle.disabled = (values[21] & 2U) != 0;
             state.shortcuts.dictionary_variant_toggle.disabled = (values[21] & 4U) != 0;
             state.shortcuts.full_width_toggle.disabled = (values[21] & 8U) != 0;
             state.shortcuts.open_settings.disabled = (values[21] & 16U) != 0;
+        }
+        if (argc >= 25)
+            state.decimal_period_after_digit = values[22] != 0;
+        if (argc == 27) {
+            const gchar *symbols = argv[26];
+            gsize length = strlen(symbols);
+            if (length >= sizeof(state.punctuation_ascii_symbols)) {
+                g_set_error_literal(&error, cassotis_client_error_quark(), 1,
+                                    "ASCII punctuation list is too long");
+                goto done;
+            }
+            for (gsize i = 0; i < length; ++i) {
+                if (!g_ascii_ispunct(symbols[i]) || strchr(symbols + i + 1, symbols[i])) {
+                    g_set_error_literal(&error, cassotis_client_error_quark(), 1,
+                                        "expected unique ASCII punctuation symbols");
+                    goto done;
+                }
+            }
+            state.auto_english = values[23] != 0;
+            g_strlcpy(state.punctuation_ascii_symbols, symbols,
+                      sizeof(state.punctuation_ascii_symbols));
         }
         success = cassotis_client_set_state(&client, &state, &error);
         if (success && cassotis_client_get_state(&client, &state, &error))

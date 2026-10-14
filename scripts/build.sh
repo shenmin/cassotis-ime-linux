@@ -64,9 +64,18 @@ ort_arch_dir="$ort_root/$ort_arch"
 ort_versioned_library="$ort_arch_dir/libonnxruntime.so.1.20.1"
 
 printf '[build] libcassotis_pinyin_transformer_ort.so\n'
+native_objects=()
+if [[ "$ort_arch" == linux-x86_64 ]]; then
+    # Keep AVX2 in a separate unit; the runtime dispatch checks CPU support.
+    c++ -std=c++20 -O2 -g -Wall -Wextra -Werror -fPIC -mavx2 -mfma \
+        -c "$cassotis_root/src/host/native/nc_trie_attention_avx2.cpp" \
+        -o "$unit_dir/nc_trie_attention_avx2.o"
+    native_objects+=("$unit_dir/nc_trie_attention_avx2.o")
+fi
 c++ -std=c++20 -O2 -g -Wall -Wextra -Werror -fPIC -shared -pthread \
     -I"$ort_root/include" \
     "$cassotis_root/src/host/native/nc_pinyin_transformer_ort.cpp" \
+    "${native_objects[@]}" \
     "$ort_versioned_library" \
     -Wl,-rpath,'$ORIGIN' \
     -o "$bin_dir/libcassotis_pinyin_transformer_ort.so"
@@ -76,37 +85,11 @@ install -m 0755 "$ort_arch_dir/libonnxruntime_providers_shared.so" \
     "$bin_dir/libonnxruntime_providers_shared.so"
 ln -sfn libonnxruntime.so.1.20.1 "$bin_dir/libonnxruntime.so.1"
 ln -sfn libonnxruntime.so.1 "$bin_dir/libonnxruntime.so"
-install -d -m 0755 "$bin_dir/pinyin_transformer" \
-    "$bin_dir/local_completion" "$bin_dir/local_repair" "$bin_dir/char_lm"
-install -m 0644 \
-    "$cassotis_root/data/models/pinyin_transformer/pinyin_conditional_scorer_int8.onnx" \
-    "$cassotis_root/data/models/pinyin_transformer/pinyin_parallel_generator_int8.onnx" \
-    "$cassotis_root/data/models/pinyin_transformer/pinyin_parallel_allowed.bin" \
-    "$cassotis_root/data/models/pinyin_transformer/vocab.json" \
-    "$bin_dir/pinyin_transformer/"
-rm -f -- \
-    "$bin_dir/pinyin_transformer/pinyin_difference_reranker_int8.onnx"
-install -m 0644 \
-    "$cassotis_root/data/models/local_completion/local_completion_path_ranker_int8.onnx" \
-    "$cassotis_root/data/models/local_completion/local_completion_generator_int8.onnx" \
-    "$cassotis_root/data/models/local_completion/local_completion_index.bin" \
-    "$cassotis_root/data/models/local_completion/model_manifest.json" \
-    "$bin_dir/local_completion/"
-install -m 0644 \
-    "$cassotis_root/data/models/local_repair/context_int8.onnx" \
-    "$cassotis_root/data/models/local_repair/query_int8.onnx" \
-    "$cassotis_root/data/models/local_repair/joint_query_int8.onnx" \
-    "$cassotis_root/data/models/local_repair/joint_head_int8.onnx" \
-    "$cassotis_root/data/models/local_repair/bilateral_head_int8.onnx" \
-    "$cassotis_root/data/models/local_repair/style_head.onnx" \
-    "$cassotis_root/data/models/local_repair/style_phrases.bin" \
-    "$cassotis_root/data/models/local_repair/style_manifest.json" \
-    "$cassotis_root/data/models/local_repair/readings.json" \
-    "$cassotis_root/data/models/local_repair/vocab.json" \
-    "$cassotis_root/data/models/local_repair/runtime_manifest.json" \
-    "$bin_dir/local_repair/"
+install -d -m 0755 "$bin_dir/char_lm"
+cassotis_remove_retired_models "$bin_dir"
 install -m 0644 \
     "$cassotis_root/data/models/char_lm/char_lm_vocab.bin" \
+    "$cassotis_root/data/models/char_lm/pinyin_readings.json" \
     "$cassotis_root/data/models/char_lm/runtime_manifest.json" \
     "$bin_dir/char_lm/"
 

@@ -8,7 +8,8 @@
 #define CASSOTIS_ENGINE_STATE_FUZZY_SCHEMA 2U
 #define CASSOTIS_ENGINE_STATE_SHORTCUTS_SCHEMA 3U
 #define CASSOTIS_ENGINE_STATE_DEBUG_SCHEMA 4U
-#define CASSOTIS_ENGINE_STATE_SCHEMA 5U
+#define CASSOTIS_ENGINE_STATE_DECIMAL_SCHEMA 6U
+#define CASSOTIS_ENGINE_STATE_SCHEMA 7U
 #define CASSOTIS_MIN_PAGE_SIZE 3U
 #define CASSOTIS_DEFAULT_PAGE_SIZE 9U
 #define CASSOTIS_MAX_PAGE_SIZE 9U
@@ -18,15 +19,23 @@
 #define CASSOTIS_STATE_FLAG_PUNCTUATION_FULL_WIDTH 0x02U
 #define CASSOTIS_STATE_FLAG_FUZZY_PINYIN_ENABLED 0x04U
 #define CASSOTIS_STATE_FLAG_DEBUG_MODE 0x08U
+#define CASSOTIS_STATE_FLAG_DECIMAL_PERIOD 0x10U
+#define CASSOTIS_STATE_FLAG_AUTO_ENGLISH 0x20U
 #define CASSOTIS_STATE_KNOWN_FLAGS                                      \
     (CASSOTIS_STATE_FLAG_FULL_WIDTH |                                  \
      CASSOTIS_STATE_FLAG_PUNCTUATION_FULL_WIDTH |                      \
      CASSOTIS_STATE_FLAG_FUZZY_PINYIN_ENABLED |                        \
-     CASSOTIS_STATE_FLAG_DEBUG_MODE)
+     CASSOTIS_STATE_FLAG_DEBUG_MODE | CASSOTIS_STATE_FLAG_DECIMAL_PERIOD | \
+     CASSOTIS_STATE_FLAG_AUTO_ENGLISH)
 #define CASSOTIS_ENGINE_RESULT_FLAG_ASYNC_PENDING 0x01U
 #define CASSOTIS_ENGINE_RESULT_FLAG_EXACT_TAIL 0x02U
+#define CASSOTIS_ENGINE_RESULT_FLAG_LETTER_KEYS 0x04U
+#define CASSOTIS_ENGINE_RESULT_FLAG_UNLABELLED 0x08U
+#define CASSOTIS_ENGINE_RESULT_FLAG_RAW_SELECTED 0x10U
 #define CASSOTIS_ENGINE_RESULT_KNOWN_FLAGS \
-    (CASSOTIS_ENGINE_RESULT_FLAG_ASYNC_PENDING | CASSOTIS_ENGINE_RESULT_FLAG_EXACT_TAIL)
+    (CASSOTIS_ENGINE_RESULT_FLAG_ASYNC_PENDING | CASSOTIS_ENGINE_RESULT_FLAG_EXACT_TAIL | \
+     CASSOTIS_ENGINE_RESULT_FLAG_LETTER_KEYS | CASSOTIS_ENGINE_RESULT_FLAG_UNLABELLED | \
+     CASSOTIS_ENGINE_RESULT_FLAG_RAW_SELECTED)
 #define CASSOTIS_SHORTCUT_KNOWN_MODIFIERS                               \
     (CASSOTIS_MODIFIER_SHIFT | CASSOTIS_MODIFIER_CONTROL |             \
      CASSOTIS_MODIFIER_ALT)
@@ -48,6 +57,10 @@ void cassotis_engine_state_init_defaults(CassotisEngineState *state)
     state->dictionary_variant = CASSOTIS_DICTIONARY_SIMPLIFIED;
     state->pinyin_scheme = CASSOTIS_PINYIN_FULL;
     state->punctuation_full_width = TRUE;
+    state->decimal_period_after_digit = TRUE;
+    state->auto_english = TRUE;
+    g_strlcpy(state->punctuation_ascii_symbols, CASSOTIS_MARKDOWN_ASCII_SYMBOLS,
+              sizeof(state->punctuation_ascii_symbols));
     state->candidate_page_size = CASSOTIS_DEFAULT_PAGE_SIZE;
     state->candidate_page_key_scheme = CASSOTIS_PAGE_KEYS_MINUS_PLUS;
     state->one_key_completion_key = CASSOTIS_COMPLETION_TAB;
@@ -270,6 +283,10 @@ GByteArray *cassotis_protocol_build_set_state_request(
         flags |= CASSOTIS_STATE_FLAG_FULL_WIDTH;
     if (state->punctuation_full_width)
         flags |= CASSOTIS_STATE_FLAG_PUNCTUATION_FULL_WIDTH;
+    if (state->decimal_period_after_digit)
+        flags |= CASSOTIS_STATE_FLAG_DECIMAL_PERIOD;
+    if (state->auto_english)
+        flags |= CASSOTIS_STATE_FLAG_AUTO_ENGLISH;
     if (state->fuzzy_pinyin_enabled)
         flags |= CASSOTIS_STATE_FLAG_FUZZY_PINYIN_ENABLED;
     if (state->debug_mode)
@@ -285,6 +302,7 @@ GByteArray *cassotis_protocol_build_set_state_request(
     append_shortcut(payload, &state->shortcuts.dictionary_variant_toggle);
     append_shortcut(payload, &state->shortcuts.full_width_toggle);
     append_shortcut(payload, &state->shortcuts.open_settings);
+    append_string(payload, state->punctuation_ascii_symbols);
     return build_frame(CASSOTIS_MESSAGE_SET_STATE, request_id, 0, 0,
                        payload);
 }
@@ -487,6 +505,7 @@ void cassotis_engine_result_clear(CassotisEngineResult *result)
     g_free(result->preedit_text);
     g_free(result->query_text);
     g_free(result->completion_text);
+    g_free(result->raw_input_candidate);
     g_free(result->error_text);
     for (index = 0; index < result->candidate_count; ++index) {
         g_free(result->candidates[index].text);
@@ -507,6 +526,7 @@ gboolean cassotis_protocol_decode_engine_result(
     guint8 handled;
     guint8 result_flags;
     guint16 reserved16;
+    guint16 schema;
     guint32 candidate_count;
     guint32 index;
     guint8 source;
@@ -518,7 +538,7 @@ gboolean cassotis_protocol_decode_engine_result(
 
     memset(result, 0, sizeof(*result));
     result->selected_index = -1;
-    if (!reader_header(&reader) || !reader_u8(&reader, &handled) ||
+    if (!reader_state_header(&reader, &schema) || !reader_u8(&reader, &handled) ||
         !reader_u16(&reader, &reserved16) ||
         !reader_u8(&reader, &result_flags) ||
         !reader_i32(&reader, &result->selected_index) ||
@@ -532,7 +552,12 @@ gboolean cassotis_protocol_decode_engine_result(
         !reader_string(&reader, &result->error_text) ||
         !reader_u32(&reader, &candidate_count))
         goto fail;
-    if (handled > 1 || reserved16 != 0 ||
+    if (schema > 2 || handled > 1 || reserved16 != 0 ||
+        (schema < 2 && (result_flags & CASSOTIS_ENGINE_RESULT_FLAG_RAW_SELECTED)) ||
+        (result_flags & (CASSOTIS_ENGINE_RESULT_FLAG_LETTER_KEYS |
+                         CASSOTIS_ENGINE_RESULT_FLAG_UNLABELLED)) ==
+            (CASSOTIS_ENGINE_RESULT_FLAG_LETTER_KEYS |
+             CASSOTIS_ENGINE_RESULT_FLAG_UNLABELLED) ||
         (result_flags & ~CASSOTIS_ENGINE_RESULT_KNOWN_FLAGS) != 0 ||
         candidate_count > CASSOTIS_MAX_CANDIDATES) {
         set_reader_error(&reader, "invalid engine result fields");
@@ -543,6 +568,12 @@ gboolean cassotis_protocol_decode_engine_result(
         (result_flags & CASSOTIS_ENGINE_RESULT_FLAG_ASYNC_PENDING) != 0;
     result->completion_is_exact_tail =
         (result_flags & CASSOTIS_ENGINE_RESULT_FLAG_EXACT_TAIL) != 0;
+    result->raw_input_selected =
+        (result_flags & CASSOTIS_ENGINE_RESULT_FLAG_RAW_SELECTED) != 0;
+    result->selection_kind = (result_flags & CASSOTIS_ENGINE_RESULT_FLAG_LETTER_KEYS)
+        ? CASSOTIS_SELECTION_LETTERS
+        : (result_flags & CASSOTIS_ENGINE_RESULT_FLAG_UNLABELLED)
+            ? CASSOTIS_SELECTION_UNLABELLED : CASSOTIS_SELECTION_DIGITS;
     result->candidate_count = candidate_count;
     result->candidates = g_new0(CassotisCandidate, candidate_count);
     for (index = 0; index < candidate_count; ++index) {
@@ -558,7 +589,7 @@ gboolean cassotis_protocol_decode_engine_result(
             !reader_string(&reader, &candidate->text) ||
             !reader_string(&reader, &candidate->comment))
             goto fail;
-        if (source > 1 ||
+        if (source > 2 ||
             display_kind > CASSOTIS_CANDIDATE_SENTENCE_PREFIX ||
             has_weight > 1 || deletable > 1) {
             g_set_error(reader.error, cassotis_protocol_error_quark(), 1,
@@ -571,8 +602,14 @@ gboolean cassotis_protocol_decode_engine_result(
         candidate->has_dictionary_weight = has_weight != 0;
         candidate->deletable = deletable != 0;
     }
-    if (reader.offset != reader.length) {
-        set_reader_error(&reader, "trailing bytes in engine result");
+    if (schema >= 2 && !reader_string(&reader, &result->raw_input_candidate))
+        goto fail;
+    if (reader.offset != reader.length ||
+        (result->raw_input_selected && (!result->raw_input_candidate ||
+                                       !*result->raw_input_candidate)) ||
+        (result->raw_input_candidate && *result->raw_input_candidate &&
+         result->page_index != 0)) {
+        set_reader_error(&reader, "invalid raw selection or trailing bytes in engine result");
         goto fail;
     }
     return TRUE;
@@ -635,6 +672,20 @@ gboolean cassotis_protocol_decode_engine_state(
             !reader_shortcut(&reader, schema, &state->shortcuts.open_settings))
             return FALSE;
     }
+    if (schema >= 7) {
+        gchar *symbols = NULL;
+        if (!reader_string(&reader, &symbols))
+            return FALSE;
+        gboolean valid = strlen(symbols) < sizeof(state->punctuation_ascii_symbols);
+        for (const gchar *symbol = symbols; valid && *symbol; ++symbol)
+            valid = g_ascii_ispunct(*symbol) && !strchr(symbol + 1, *symbol);
+        if (valid)
+            g_strlcpy(state->punctuation_ascii_symbols, symbols,
+                      sizeof(state->punctuation_ascii_symbols));
+        g_free(symbols);
+        if (!valid)
+            return set_reader_error(&reader, "invalid ASCII punctuation symbols");
+    }
     if (input_mode > CASSOTIS_INPUT_ENGLISH ||
         dictionary_variant > CASSOTIS_DICTIONARY_TRADITIONAL ||
         pinyin_scheme > CASSOTIS_PINYIN_PINYINJIAJIA ||
@@ -643,6 +694,9 @@ gboolean cassotis_protocol_decode_engine_state(
          (flags & CASSOTIS_STATE_FLAG_FUZZY_PINYIN_ENABLED) != 0) ||
         (schema < CASSOTIS_ENGINE_STATE_DEBUG_SCHEMA &&
          (flags & CASSOTIS_STATE_FLAG_DEBUG_MODE) != 0) ||
+        (schema < CASSOTIS_ENGINE_STATE_DECIMAL_SCHEMA &&
+         (flags & CASSOTIS_STATE_FLAG_DECIMAL_PERIOD) != 0) ||
+        (schema < 7 && (flags & CASSOTIS_STATE_FLAG_AUTO_ENGLISH) != 0) ||
         (fuzzy_rules & ~CASSOTIS_FUZZY_RULE_MASK) != 0 ||
         candidate_page_size < CASSOTIS_MIN_PAGE_SIZE ||
         candidate_page_size > CASSOTIS_MAX_PAGE_SIZE ||
@@ -664,6 +718,10 @@ gboolean cassotis_protocol_decode_engine_state(
         (flags & CASSOTIS_STATE_FLAG_FULL_WIDTH) != 0;
     state->punctuation_full_width =
         (flags & CASSOTIS_STATE_FLAG_PUNCTUATION_FULL_WIDTH) != 0;
+    state->decimal_period_after_digit =
+        schema < CASSOTIS_ENGINE_STATE_DECIMAL_SCHEMA ||
+        (flags & CASSOTIS_STATE_FLAG_DECIMAL_PERIOD) != 0;
+    state->auto_english = schema < 7 || (flags & CASSOTIS_STATE_FLAG_AUTO_ENGLISH) != 0;
     state->candidate_page_size = candidate_page_size;
     state->candidate_page_key_scheme =
         (CassotisCandidatePageKeyScheme)candidate_page_key_scheme;

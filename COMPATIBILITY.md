@@ -1,5 +1,75 @@
 # Compatibility
 
+## v2.0.0 Validation
+
+The 2026-10-14 (UTC+8) alignment uses the Cassotis IME and Cassotis Lexicon
+v2.1.0 baseline. Both architectures passed all four full benchmark groups,
+including production-mode candidate and completion checks, without widening
+the quality tolerances or latency/memory ceilings. Foreground/background model
+budgets remain 100/120 ms. These budgets are not ceilings on whole-query or
+end-to-end key latency. Measurements are in [BENCHMARK.md](BENCHMARK.md) /
+[Chinese](BENCHMARK.CN.md).
+
+| Platform | Current checks |
+| --- | --- |
+| Ubuntu 26.04.1 x86_64 and aarch64, GNOME Wayland hosts | 869 core tests and 69 final-Tab projection checks per architecture; settings, candidate-layout and shortcut regressions |
+| Both architectures | SC/TC incremental and whole-input candidate checks in static and ready-neural modes; ambiguous nasal boundaries, explicit apostrophes, double Pinyin, partial selection and undo |
+| Both architectures | Isolated IBus normal/debug/disabled-shortcut checks and Fcitx 5 adapter checks, including Shift punctuation, U/I/V quick input, decimal periods and English/raw selection |
+| Both architectures | Full long/short candidate and completion quality/latency gates, blocked model initialization, independent process-cold input, idle-memory reclamation and native math ABI checks |
+
+The packaging pipeline strips staging copies only, preserves the tested build
+output, and uses XZ for Debian payloads. It checks dictionary and model hashes,
+retired-model absence, both framework adapters, and portable install/uninstall
+in a staging root. These checks do not replace installed-desktop testing.
+
+The installed-package desktop matrix and SteamOS tests below were performed
+before this final engine/dictionary alignment. They are retained with their
+original scope, not claimed as new tests of these final packages. The current
+isolated checks do not restart the user's active desktop input method.
+
+### Earlier v2.0.0 Desktop And Pre-Alignment Validation
+
+Native follow-up testing on 2026-10-13/14 (UTC+8) uses the Cassotis IME and Cassotis Lexicon
+v2.0.0 baseline, one shared character language model and schema-24 dictionaries.
+All four complete benchmark groups passed on aarch64. The x86_64 production
+long-sentence accuracy gate had not passed at that point; short-word and completion gates
+passed. Foreground/background model budgets remain 100/120 ms. These budgets are not
+ceilings on whole-query or end-to-end key latency. Accuracy, latency and memory
+measurements are in [BENCHMARK.md](BENCHMARK.md) / [Chinese](BENCHMARK.CN.md).
+
+| Platform | Verified checks |
+| --- | --- |
+| Ubuntu 26.04.1 x86_64 and aarch64, GNOME Wayland | 863 core tests and 69 final-Tab projection checks per architecture; full long/short candidate and completion suites with the x86_64 quality failure noted above; model score/cache/cancellation checks |
+| Ubuntu x86_64 and aarch64 | Initial Debian v1.0.1-to-v2.0.0 upgrade and follow-up v2.0.0 reinstall, removal/reinstallation, discovery and unchanged personal-dictionary hashes; only the shared model remains installed |
+| Ubuntu x86_64 and aarch64 | 24 input checks in each of eight installed-package IBus/Fcitx 5, GTK 3/4 and Wayland/XWayland combinations (192 checks per architecture), including ASCII punctuation exceptions and English/raw selection |
+| Ubuntu x86_64 and aarch64 | Relocated user installation with a read-only system tree; both framework adapters, upgrade/removal and retained user data |
+| SteamOS 3.8.14 x86_64, KDE X11, IBus 1.5.32 | Follow-up user-directory upgrade, uninstall/reinstall, discovery, settings launcher and 25 real GTK input checks, including ASCII punctuation and English/raw selection; user data and mount options unchanged |
+
+The follow-up passed both architectures' SC/TC candidate checks in incremental
+and whole-input, static and ready-neural modes, actual-dictionary prefix/undo
+checks, 25-field settings round trips, blocked-model initialization, independent
+process-cold trials and idle-memory checks. Standalone source builds passed on
+both architectures. Cold-start checks do not flush OS file caches.
+
+The initial port also passed SC/TC fuzzy-input checks across contexts/restarts
+and three identical 500-case candidate replays. A separate 1,000-case long-input
+sample on aarch64 found no per-key/whole-input candidate-list differences in
+static or ready-neural mode. Those initial-port checks do not replace the
+follow-up's complete-corpus quality gate or its recorded x86_64 failure.
+
+The portable native library retains the established glibc math ABI rather than
+requiring glibc 2.43 solely because of the build host. Its inference instructions
+and constants are unchanged; native model tests and 500-case replays passed
+after the compatibility rebuild. SteamOS installation required no `sudo`,
+system-directory writes or filesystem-protection changes. Personal dictionary
+hashes and mount options were unchanged. Read-only `/usr` enforcement was also
+tested in Ubuntu namespaces. No SteamOS corpus-performance result is claimed.
+
+SteamOS Fcitx 5 and Gaming Mode, Chromium/Electron, standalone GNOME X11
+sessions and mixed-DPI candidate placement are not newly qualified by these
+checks. Text-commit assertions do not replace visual placement tests. The
+coverage below remains historical.
+
 ## v1.0.1 Punctuation Fix
 
 The shared IBus/Fcitx 5 key mapping now converts resolved Shift+number-row

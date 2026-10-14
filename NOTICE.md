@@ -29,22 +29,24 @@ License. Its license and third-party notices are included under
 `third_party/onnxruntime` in the source tree and under
 `third-party/onnxruntime` in binary release documentation.
 
-The bundled six-layer local-repair model is derived from
-`hfl/chinese-macbert-base` (revision
-`a986e004d2a7f2a1c2f5a3edef4e20604a974ed1`), distributed under Apache-2.0.
-Its source attribution, modification notice, and license are provided in
-`third_party/macbert` in the source tree and `third-party/macbert` in binary
-release documentation. The model uses local pinyin constraints and a bounded
-in-memory context cache; its upstream license remains unchanged.
-
 The shared character language model and vocabulary are supplied by
 [Cassotis IME](https://github.com/shenmin/cassotis-ime). Architecture,
 quantization settings and runtime asset checksums are recorded in
-`data/models/char_lm/runtime_manifest.json`. One local session is shared by
-candidate ranking and completion; inference does not transmit typed text.
+`data/models/char_lm/runtime_manifest.json`. This is the only neural model
+distributed with version 2.0.0. One local session is shared by long-sentence
+and short-word ranking, phrase correction, completion and continuation.
+Its custom attention operator is part of this project's source code.
+The model was trained on separately licensed corpora; no training documents
+are distributed with it. Inference does not transmit typed text.
 
-Literary phrase recovery uses public-domain fragments from
-[Chinese Poetry](https://github.com/chinese-poetry/chinese-poetry/tree/b8594f81a89752241442f2ce267d6f66f96704ee)
-and [Chinese Wikisource](https://zh.wikisource.org/wiki/Category:古文評註).
-Its runtime policy and source information are recorded in
-`data/models/local_repair/style_manifest.json`.
+English-word recognition uses a filtered subset of Alan Beale's 12Dicts
+`2of12full.txt`, packaged by Kevin Atkinson. The
+[source directory](https://github.com/en-wl/wordlist/tree/b22230cc5250887737fdefe9ca4c9d9d01230eaa/alt12dicts)
+declares its word lists public domain. `src/engine/nc_english_words.inc` retains
+the source URL and SHA-256. It includes lowercase ASCII words supported by at
+least eight dictionaries, a small set of computing terms, and letter-pair and
+letter-triple evidence derived from these spellings.
+The generated table also contains Latin-letter spellings and frequency bands
+counted in the separately licensed character-model training corpora. These
+entries occur at least 30 times across at least two corpora. No source corpus
+documents are distributed in the table.

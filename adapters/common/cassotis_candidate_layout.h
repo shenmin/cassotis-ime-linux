@@ -13,6 +13,16 @@
 #define CASSOTIS_HORIZONTAL_CANDIDATE_CELL_BUDGET 72U
 #define CASSOTIS_CANDIDATE_LABEL_CELL_OVERHEAD 3U
 
+static inline gchar cassotis_candidate_selection_key(
+    CassotisCandidateSelectionKind kind, guint32 index)
+{
+    if (kind == CASSOTIS_SELECTION_UNLABELLED)
+        return '\0';
+    if (kind == CASSOTIS_SELECTION_LETTERS)
+        return index < 4U ? (gchar)('a' + index) : '\0';
+    return index < 9U ? (gchar)('1' + index) : '\0';
+}
+
 static inline guint32 cassotis_candidate_display_cells(const gchar *text)
 {
     const gchar *cursor = text != NULL ? text : "";
@@ -38,6 +48,12 @@ static inline gboolean cassotis_candidate_row_requires_vertical(
 
     if (result == NULL)
         return FALSE;
+    if (result->raw_input_candidate != NULL && result->raw_input_candidate[0] != '\0') {
+        cells = cassotis_candidate_display_cells(result->raw_input_candidate) +
+                CASSOTIS_CANDIDATE_LABEL_CELL_OVERHEAD;
+        if (cells > CASSOTIS_HORIZONTAL_CANDIDATE_CELL_BUDGET)
+            return TRUE;
+    }
     for (index = 0; index < result->candidate_count; ++index) {
         guint32 item_cells = cassotis_candidate_display_cells(
             result->candidates[index].text);

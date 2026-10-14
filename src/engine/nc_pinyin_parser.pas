@@ -32,6 +32,15 @@ function nc_is_canonical_pinyin_syllable(const value: string): Boolean;
 function nc_word_completion_remainder_fits(const parser: TncPinyinParser;
     const remainder: string; const units: Integer): Boolean;
 function nc_normalize_umlaut_spelling(const value: string): string;
+{ Split the original keys, not a corrected lookup key. Only a literal suffix
+  or one verified adjacent transposition may supply the consumption boundary.
+  boundary_swapped: the transposed pair lies across the boundary, so the keys
+  the candidate uses are not contiguous. consumed_input then ends with the
+  second key of the pair and remaining_input begins with the first: what
+  remains is still the keys not consumed, in the order they were typed. }
+function nc_try_split_pinyin_input(const input_text, lookup_key,
+    remaining_pinyin: string; out consumed_input, remaining_input: string;
+    out boundary_swapped: Boolean; const allow_boundary_swap: Boolean = True): Boolean;
 procedure nc_merge_abbreviated_retroflex_initials(var syllables: TncPinyinParseResult);
 
 implementation
@@ -603,6 +612,89 @@ begin
             Exit;
         end;
     end;
+end;
+
+function nc_try_split_pinyin_input(const input_text, lookup_key,
+    remaining_pinyin: string; out consumed_input, remaining_input: string;
+    out boundary_swapped: Boolean; const allow_boundary_swap: Boolean): Boolean;
+var
+    input_key, tail_key, corrected_key, swapped_key: string;
+    idx, consumed_letters, boundary, letters, first_key, second_key: Integer;
+    ch: Char;
+
+    function compact_key(const value: string): string;
+    begin
+        Result := StringReplace(LowerCase(nc_normalize_umlaut_spelling(value)),
+            '''', '', [rfReplaceAll]);
+    end;
+begin
+    Result := False;
+    consumed_input := '';
+    remaining_input := '';
+    boundary_swapped := False;
+    input_key := compact_key(input_text);
+    tail_key := compact_key(remaining_pinyin);
+    if (tail_key = '') or (Length(tail_key) >= Length(input_key)) then Exit;
+    for ch in input_key do
+        if not CharInSet(ch, ['a'..'z']) then Exit;
+
+    consumed_letters := Length(input_key) - Length(tail_key);
+    if Copy(input_key, consumed_letters + 1, MaxInt) <> tail_key then
+    begin
+        corrected_key := compact_key(lookup_key);
+        if (Length(corrected_key) <> Length(input_key)) or
+            (Copy(corrected_key, consumed_letters + 1, MaxInt) <> tail_key) then Exit;
+        idx := 1;
+        while (idx <= Length(input_key)) and
+            (input_key[idx] = corrected_key[idx]) do Inc(idx);
+        if idx >= Length(input_key) then Exit;
+        swapped_key := input_key;
+        swapped_key[idx] := input_key[idx + 1];
+        swapped_key[idx + 1] := input_key[idx];
+        if swapped_key <> corrected_key then Exit;
+        if allow_boundary_swap and (idx = consumed_letters) then
+        begin
+            // The candidate uses the second key of the pair and leaves the
+            // first. With a separator between the two the cut below applies.
+            letters := 0;
+            first_key := 0;
+            second_key := 0;
+            for boundary := 1 to Length(input_text) do
+                if input_text[boundary] <> '''' then
+                begin
+                    Inc(letters);
+                    if letters = idx then first_key := boundary
+                    else if letters = idx + 1 then
+                    begin
+                        second_key := boundary;
+                        Break;
+                    end;
+                end;
+            if (first_key > 0) and (second_key = first_key + 1) then
+            begin
+                consumed_input := Copy(input_text, 1, first_key - 1) + input_text[second_key];
+                remaining_input := input_text[first_key] +
+                    Copy(input_text, second_key + 1, MaxInt);
+                boundary_swapped := True;
+                Exit(True);
+            end;
+        end;
+    end;
+
+    boundary := 1;
+    while (boundary <= Length(input_text)) and (consumed_letters > 0) do
+    begin
+        if input_text[boundary] <> '''' then Dec(consumed_letters);
+        Inc(boundary);
+    end;
+    // A separator immediately after the chosen prefix belongs to that prefix;
+    // keeping it there also makes Backspace restore the exact original input.
+    while (boundary <= Length(input_text)) and (input_text[boundary] = '''') do
+        Inc(boundary);
+    if boundary > Length(input_text) then Exit;
+    consumed_input := Copy(input_text, 1, boundary - 1);
+    remaining_input := Copy(input_text, boundary, MaxInt);
+    Result := True;
 end;
 
 initialization

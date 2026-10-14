@@ -10,12 +10,23 @@ uses SysUtils, Classes, fpjson;
 
 function read_model_manifest(const path: string): TJSONObject;
 function model_file_matches_hash(const path, expected: string): Boolean;
+procedure model_runtime_log(const message_text: string);
 procedure validate_external_model_files(const folder: string;
     const manifest: TJSONObject; const model_names: array of string);
 
 implementation
 
 uses jsonparser, Process;
+
+procedure model_runtime_log(const message_text: string);
+var
+    line: UTF8String;
+begin
+    // Loader threads must not share Pascal's buffered StdErr TextRec.
+    line := UTF8Encode(message_text + LineEnding);
+    if Length(line) > 0 then
+        FileWrite(TextRec(StdErr).Handle, line[1], Length(line));
+end;
 
 procedure validate_external_model_files(const folder: string;
     const manifest: TJSONObject; const model_names: array of string);

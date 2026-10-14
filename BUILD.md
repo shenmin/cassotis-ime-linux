@@ -188,5 +188,11 @@ dictionaries, and licenses. The tarballs contain dynamically linked binaries,
 not source code or distribution-independent packages. Other distributions
 may need native builds against their framework and C library versions.
 
+Packaging requires `strip` from binutils. Debug information and unused static
+symbols are removed from staging copies before checksums are generated;
+the original binaries in `build/bin/` retain their debug information.
+Debian packages use XZ compression. Portable archives retain gzip compression
+and the `.tar.gz` format.
+
 See [compatibility](COMPATIBILITY.md), [configuration](CONFIGURATION.md),
 and [benchmark results](BENCHMARK.md) / [Chinese](BENCHMARK.CN.md).

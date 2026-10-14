@@ -17,6 +17,14 @@ engine reconnection. Surrounding text is synchronized with the shared engine
 and participates in the same short-word and long-sentence context-ranking
 stages used through IBus.
 
+U/I/V quick-input modes use engine-supplied letter labels, preserving digits
+inside numbers and monetary amounts. The configurable decimal-period behavior
+uses directly typed digit continuity, not a guess from surrounding text.
+The same shared character model handles ranking, correction and background
+completion; no model or language policy is duplicated in the adapter.
+See [configuration](../../CONFIGURATION.md) /
+[Chinese](../../CONFIGURATION.CN.md) for the available shortcuts and options.
+
 Build and install the user-local addon on Linux with:
 
 ```bash

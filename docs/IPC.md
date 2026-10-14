@@ -101,7 +101,7 @@ cursor convention at this boundary.
 
 ## Engine Result
 
-The schema-v1 result contains handled/selection/page/error fields and a result
+The schema-v2 result contains handled/selection/page/error fields and a result
 flags byte followed by commit text, preedit text, normalized query, one-key
 completion, error text, and at most 256 candidates. Result flag bit 0 is
 `async_pending`: the ordinary key result is complete and immediately
@@ -109,10 +109,19 @@ renderable, while a bounded background completion request may still produce a
 new completion row. Bit 1 is `completion_is_exact_tail`: the completion row
 converts an already-typed exact suffix instead of predicting additional text.
 Adapters retain the configured completion key label but omit the prediction
-arrow for this fallback. Bits 2 through 7 are reserved and rejected.
-The flag does not change payload size. Engine and adapters must be upgraded
-together and restarted; older result decoders reject bit 1 rather than
-silently misrepresenting the hint.
+arrow for this fallback. Bit 2 requests letter selection keys (numeric quick
+input); bit 3 requests an unlabelled candidate list. With neither set, selection
+uses digits. Setting both is invalid. Schema 2 adds bit 4, `raw_input_selected`,
+and a trailing `raw_input_candidate` string after the candidate array. Bits 5
+through 7 remain reserved. Decoders also accept schema 1 without that string
+or bit, supplying empty/unselected raw input. Raw input may appear only on page
+zero; selecting an empty raw slot is invalid. It is not a numbered Chinese
+candidate and does not alter Chinese selection indexes or deletion permissions.
+The adapter submits special-key ordinal 48 to select and commit raw input;
+the service validates the context, generation and current raw slot before use.
+Engine and adapters must be upgraded
+together and restarted; older decoders reject new flags rather than treating
+numeric-conversion input as candidate-selection keys.
 Each candidate contains source, display kind, dictionary-weight/deletable
 flags, final score, dictionary weight, fuzzy cost and rule mask, text, and
 annotation.
@@ -141,22 +150,23 @@ ends polling, whether the model accepted a completion or abstained. Adapters
 use a bounded polling interval and discard the request after focus loss,
 context reset, generation change, timeout, or transport failure.
 
-## Engine State Schema 5
+## Engine State Schema 7
 
-The current state payload is schema 5:
+The current state payload is schema 7:
 
 | Order | Type | Field |
 | ---: | --- | --- |
 | 1 | `u8` | input mode |
 | 2 | `u8` | simplified/traditional dictionary |
 | 3 | `u8` | pinyin scheme |
-| 4 | `u8` | full-width, Chinese-punctuation, fuzzy, debug flags |
+| 4 | `u8` | full-width, Chinese-punctuation, fuzzy, debug, decimal-period, English-recognition flags |
 | 5 | `u32` | fuzzy-rule mask |
 | 6 | `u8` | candidate paging-key scheme |
 | 7 | `u8` | one-key-completion key |
 | 8 | `u8` | page size, 3 through 9 |
 | 9 | `u8` | reserved |
 | 10 | 5 x shortcut | mode, punctuation, dictionary, width, settings |
+| 11 | string | Half-width punctuation exceptions: unique ASCII punctuation, at most 32 characters |
 
 One shortcut is `u16 key_code`, `u8` Shift/Ctrl/Alt mask, and a `u8 disabled`
 boolean (0 or 1). A disabled shortcut retains its validated chord but neither
@@ -167,7 +177,13 @@ State decoders remain backward-compatible: schema 1 carries the first four
 bytes, schema 2 adds fuzzy rules, and schema 3 adds paging/completion and five
 shortcuts with a reserved `u16`. Schema 4 adds page size and debug mode.
 Schema 5 uses each shortcut's formerly reserved zero byte for `disabled`;
-older schemas still reject nonzero values there. Other payload types remain
+older schemas still reject nonzero values there. Schema 6 adds flag bit 4
+(`0x10`) for automatic decimal periods after directly typed digits. Old state
+frames decode with this option enabled by default; older schemas reject the
+new bit if present. Schema 7 adds English recognition at bit 5 (`0x20`) and
+the punctuation string. Older state payloads default to English recognition
+enabled and the Markdown punctuation preset. Older schemas must not carry new
+flags or trailing data. Other payload types, except engine results, remain
 schema 1.
 
 Pinyin ordinals are full pinyin, Microsoft, Xiaohe, Ziranma, Sogou, Ziguang,

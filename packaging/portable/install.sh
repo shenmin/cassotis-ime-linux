@@ -79,7 +79,18 @@ for directory in "$destdir" "$destdir/usr" "$destdir/usr/lib" \
 done
 
 install -d -m 0755 "$destdir"
+command -v python3 >/dev/null 2>&1 || {
+    printf 'Error: Python 3 is required for model upgrade cleanup.\n' >&2
+    exit 1
+}
+model_cleanup="$source_root/usr/libexec/cassotis-ime/cassotis-model-assets.py"
+[[ -r "$model_cleanup" ]] || {
+    printf 'Error: model upgrade helper is missing from the bundle.\n' >&2
+    exit 1
+}
 cp -a "$source_root/." "$destdir/"
+python3 "$model_cleanup" --remove-retired-models \
+    "$destdir/usr/libexec/cassotis-ime"
 
 if [[ "$destdir" == / ]]; then
     command -v update-desktop-database >/dev/null 2>&1 &&

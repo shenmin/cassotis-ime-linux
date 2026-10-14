@@ -417,14 +417,20 @@ cassotis_atomic_install() {
     fi
 }
 
+cassotis_remove_retired_models() {
+    local destination_dir="$1"
+    [[ -n "$destination_dir" && "$destination_dir" != / ]] ||
+        cassotis_die "invalid runtime cleanup directory"
+    python3 "$cassotis_root/scripts/model_weights.py" \
+        --remove-retired-models "$destination_dir"
+}
+
 cassotis_stage_neural_runtime() {
     local source_dir="$1"
     local destination_dir="$2"
     local file_name
 
-    install -d -m 0755 "$destination_dir/pinyin_transformer" \
-        "$destination_dir/local_completion" "$destination_dir/local_repair" \
-        "$destination_dir/char_lm"
+    install -d -m 0755 "$destination_dir/char_lm"
     cassotis_require_command python3
     python3 "$cassotis_root/scripts/model_weights.py" --copy-weights \
         "$source_dir" "$destination_dir" || return
@@ -439,31 +445,11 @@ cassotis_stage_neural_runtime() {
     ln -sfn libonnxruntime.so.1.20.1 \
         "$destination_dir/libonnxruntime.so.1"
     ln -sfn libonnxruntime.so.1 "$destination_dir/libonnxruntime.so"
-    for file_name in pinyin_conditional_scorer_int8.onnx \
-                     pinyin_parallel_generator_int8.onnx \
-                     pinyin_parallel_allowed.bin vocab.json; do
-        install -m 0644 "$source_dir/pinyin_transformer/$file_name" \
-            "$destination_dir/pinyin_transformer/$file_name"
-    done
-    rm -f -- \
-        "$destination_dir/pinyin_transformer/pinyin_difference_reranker_int8.onnx"
-    for file_name in local_completion_path_ranker_int8.onnx \
-                     local_completion_generator_int8.onnx \
-                     local_completion_index.bin model_manifest.json; do
-        install -m 0644 "$source_dir/local_completion/$file_name" \
-            "$destination_dir/local_completion/$file_name"
-    done
-    for file_name in context_int8.onnx query_int8.onnx readings.json \
-                     joint_query_int8.onnx joint_head_int8.onnx bilateral_head_int8.onnx \
-                     style_head.onnx style_phrases.bin style_manifest.json \
-                     vocab.json runtime_manifest.json; do
-        install -m 0644 "$source_dir/local_repair/$file_name" \
-            "$destination_dir/local_repair/$file_name"
-    done
-    for file_name in char_lm.onnx char_lm_vocab.bin runtime_manifest.json; do
+    for file_name in char_lm.onnx char_lm_vocab.bin pinyin_readings.json runtime_manifest.json; do
         install -m 0644 "$source_dir/char_lm/$file_name" \
             "$destination_dir/char_lm/$file_name"
     done
+    cassotis_remove_retired_models "$destination_dir"
 }
 
 cassotis_atomic_install_neural_runtime() {
@@ -471,10 +457,7 @@ cassotis_atomic_install_neural_runtime() {
     local destination_dir="$2"
     local file_name
 
-    install -d -m 0700 "$destination_dir" \
-        "$destination_dir/pinyin_transformer" \
-        "$destination_dir/local_completion" "$destination_dir/local_repair" \
-        "$destination_dir/char_lm"
+    install -d -m 0700 "$destination_dir" "$destination_dir/char_lm"
     cassotis_require_command python3
     # Publish immutable weight files before models that reference them. Keep
     # older versions available to loaders already opening the previous model.
@@ -489,32 +472,11 @@ cassotis_atomic_install_neural_runtime() {
     ln -sfn libonnxruntime.so.1.20.1 \
         "$destination_dir/libonnxruntime.so.1"
     ln -sfn libonnxruntime.so.1 "$destination_dir/libonnxruntime.so"
-    for file_name in pinyin_conditional_scorer_int8.onnx \
-                     pinyin_parallel_generator_int8.onnx \
-                     pinyin_parallel_allowed.bin vocab.json; do
-        cassotis_atomic_install \
-            "$source_dir/pinyin_transformer/$file_name" \
-            "$destination_dir/pinyin_transformer/$file_name" 0644
-    done
-    rm -f -- \
-        "$destination_dir/pinyin_transformer/pinyin_difference_reranker_int8.onnx"
-    for file_name in local_completion_path_ranker_int8.onnx \
-                     local_completion_generator_int8.onnx \
-                     local_completion_index.bin model_manifest.json; do
-        cassotis_atomic_install "$source_dir/local_completion/$file_name" \
-            "$destination_dir/local_completion/$file_name" 0644
-    done
-    for file_name in context_int8.onnx query_int8.onnx readings.json \
-                     joint_query_int8.onnx joint_head_int8.onnx bilateral_head_int8.onnx \
-                     style_head.onnx style_phrases.bin style_manifest.json \
-                     vocab.json runtime_manifest.json; do
-        cassotis_atomic_install "$source_dir/local_repair/$file_name" \
-            "$destination_dir/local_repair/$file_name" 0644
-    done
-    for file_name in char_lm.onnx char_lm_vocab.bin runtime_manifest.json; do
+    for file_name in char_lm.onnx char_lm_vocab.bin pinyin_readings.json runtime_manifest.json; do
         cassotis_atomic_install "$source_dir/char_lm/$file_name" \
             "$destination_dir/char_lm/$file_name" 0644
     done
+    cassotis_remove_retired_models "$destination_dir"
 }
 
 cassotis_remove_neural_runtime() {
@@ -551,6 +513,7 @@ cassotis_remove_neural_runtime() {
         "$destination_dir/local_repair/runtime_manifest.json" \
         "$destination_dir/char_lm/char_lm.onnx" \
         "$destination_dir/char_lm/char_lm_vocab.bin" \
+        "$destination_dir/char_lm/pinyin_readings.json" \
         "$destination_dir/char_lm/runtime_manifest.json" \
         "$destination_dir/short_context/exit0.int8.onnx" \
         "$destination_dir/short_context/exit1.int8.onnx" \

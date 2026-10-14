@@ -13,12 +13,23 @@ function get_default_dictionary_path_simplified: string;
 function get_default_dictionary_path_traditional: string;
 function get_default_user_dictionary_path: string;
 function nc_default_engine_config: TncEngineConfig;
+function nc_normalize_punctuation_ascii_symbols(const value: string): string;
 
 implementation
 
 uses
     SysUtils,
     nc_shortcut;
+
+function nc_normalize_punctuation_ascii_symbols(const value: string): string;
+var symbol: Char;
+begin
+    Result := '';
+    for symbol in value do
+        if CharInSet(symbol, ['!'..'/', ':'..'@', '['..'`', '{'..'~']) and
+            (Pos(symbol, Result) = 0) then
+            Result := Result + symbol;
+end;
 
 function get_user_data_path(const file_name: string): string;
 var
@@ -100,6 +111,9 @@ begin
     Result.enable_shift_space_full_width_toggle := True;
     Result.enable_ctrl_period_punct_toggle := True;
     Result.punctuation_full_width := True;
+    Result.decimal_period_after_digit := True;
+    Result.punctuation_ascii_symbols := c_markdown_punctuation_ascii_symbols;
+    Result.auto_english := True;
     Result.enable_segment_candidates := True;
     Result.segment_head_only_multi_syllable := True;
     Result.candidate_font_name := c_default_candidate_font_name;

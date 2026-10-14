@@ -15,6 +15,24 @@ property menu.
 | Pinyin scheme | Full Pinyin; Microsoft, Xiaohe, Ziranma, Sogou, Ziguang, or Pinyin Jiajia shuangpin | Full Pinyin | Changes only keyboard decoding; all schemes share recall, ranking, learning, and completion. |
 | Punctuation | Chinese, English | Chinese | Chooses full-width Chinese punctuation mapping or literal English punctuation. |
 | Character width | Half width, full width | Half width | Converts printable ASCII characters when full-width mode is enabled. |
+| Decimal period after digits | On, off | On | In Chinese punctuation mode, a period immediately after directly typed digits produces `.` instead of `。`. |
+| Recognize English words, commit with Space | On, off | On | In full pinyin, shows recognized English raw text as an unnumbered candidate. |
+| Half-width punctuation exceptions | ASCII punctuation characters | Markdown preset | Keeps selected symbols half width in Chinese punctuation and half-width character mode. |
+
+The **Markdown preset** contains `-`, `#`, `*`, `+`, `_`, `=`, the backtick,
+`~`, `[`, `]`, `<`, `>`, `|` and `@`. Parentheses, quotation marks, commas,
+periods and backslashes are not part of this preset. Use **Clear exceptions**
+for ordinary Chinese punctuation or enter your own set. Duplicate symbols are
+removed. Switching to English punctuation or full-width characters disables
+exceptions without discarding the saved set.
+
+English recognition preserves original case. Its unnumbered candidate appears
+only on the first page; Space commits the highlighted candidate, while `1`-`9`
+still select the corresponding Chinese candidates. Arrow keys or a mouse click
+can select raw input explicitly. The engine remembers the latest raw/Chinese
+choice for that query separately from learned Chinese words. This feature does
+not reinterpret shuangpin codes or U/I/V quick-input commands. Disable it in
+Settings to keep ordinary pinyin selection behavior.
 
 Changing the input mode, pinyin scheme, or fuzzy-pinyin rules clears an active
 composition so existing keystrokes are never reinterpreted under another
@@ -26,6 +44,35 @@ Full pinyin accepts `lue`/`nue` as aliases of `lve`/`nve`, and complete
 An explicit apostrophe keeps syllables separate (`lu'e` is not `lve`). Partial-prefix
 candidates still refer to the original keystrokes, and Enter commits that
 original spelling unchanged.
+
+## Quick Input
+
+In full pinyin, type a command directly. In any of the six shuangpin schemes,
+start with `Shift+U`, `Shift+I` or `Shift+V` so normal double-pinyin codes
+remain available.
+
+| Command | Content |
+| --- | --- |
+| `ufh` | Common symbols |
+| `uxh` | Numbered markers |
+| `usx` | Mathematical symbols |
+| `ujt` | Arrows |
+| `udw` | Units |
+| `ubd` | Chinese punctuation |
+| `urq` / `usj` / `uxq` | Current date, time and weekday |
+| `i123.45` / `v123.45` | Chinese numbers and uppercase currency amounts |
+
+In numeric conversion mode, digit keys continue entering the number. Select
+with the displayed letter labels (`a/b/c/d`), arrow keys and Space, or a
+candidate click. These conversions need no language model and are not learned
+as user words.
+
+The default-on **Decimal period after digits** option makes the period key
+produce `.` immediately after directly typed digits in Chinese punctuation
+mode. It does not infer continuity from existing surrounding text. Navigation,
+input-context changes and non-digit input restore ordinary Chinese periods;
+candidate-selection digits do not count as directly typed numbers. English
+punctuation mode is unchanged.
 
 ## Candidates
 
@@ -51,10 +98,11 @@ completion supports either `Tab` or the backtick key. `Tab` cannot be assigned
 to both paging and completion; the settings application resolves that conflict
 before applying the state.
 
-Completion is offered only when the input contains at least two complete
-syllables and a supported lexicon/user transition can continue the exact
-prefix. It is displayed separately from ordinary candidates and cannot change
-their order.
+After at least two complete syllables, dictionary and reliable transition
+evidence can offer an immediate completion. The local language model may rerank
+or extend it in the background; insufficient-confidence predictions stay hidden.
+Completion is displayed separately from ordinary candidates and does not change
+their order. Ordinary candidate selection remains available while the model works.
 
 ## Function Shortcuts
 

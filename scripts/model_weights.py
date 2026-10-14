@@ -8,6 +8,7 @@ Canonical models remain unchanged; only build/runtime copies are repackaged.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import math
@@ -17,17 +18,35 @@ import re
 import tempfile
 
 MODELS = (
+    "char_lm/char_lm.onnx",
+)
+RETIRED_MODELS = (
     "pinyin_transformer/pinyin_conditional_scorer_int8.onnx",
+    "pinyin_transformer/pinyin_difference_reranker_int8.onnx",
     "pinyin_transformer/pinyin_parallel_generator_int8.onnx",
     "local_completion/local_completion_path_ranker_int8.onnx",
     "local_completion/local_completion_generator_int8.onnx",
     "local_repair/context_int8.onnx",
     "local_repair/query_int8.onnx",
     "local_repair/joint_query_int8.onnx",
-    "char_lm/char_lm.onnx",
+    "local_repair/joint_head_int8.onnx",
+    "local_repair/bilateral_head_int8.onnx",
+    "local_repair/style_head.onnx",
+) + tuple(f"short_context/exit{i}.int8.onnx" for i in range(4))
+RETIRED_ASSETS = RETIRED_MODELS + (
+    "pinyin_transformer/pinyin_parallel_allowed.bin",
+    "pinyin_transformer/vocab.json",
+    "local_completion/local_completion_index.bin",
+    "local_completion/model_manifest.json",
+    "local_repair/style_phrases.bin",
+    "local_repair/style_manifest.json",
+    "local_repair/readings.json",
+    "local_repair/vocab.json",
+    "local_repair/runtime_manifest.json",
+    "short_context/policy.bin",
+    "short_context/tokenizer.bin",
+    "short_context/runtime_manifest.json",
 )
-# The small repair heads are loaded from in-memory compatibility graphs, so
-# external paths cannot be resolved for those models. Keep their storage inline.
 MIN_BYTES = 1024 * 1024
 ALIGNMENT = 65536
 
@@ -233,7 +252,7 @@ def update_char_manifest(source: Path, destination: Path, canonical_model: Path)
     folder = destination / "char_lm"
     manifest = json.loads((source / "char_lm/runtime_manifest.json").read_text(encoding="utf-8"))
     files = manifest["files"]
-    expected = {"char_lm.onnx", "char_lm_vocab.bin"}
+    expected = {"char_lm.onnx", "char_lm_vocab.bin", "pinyin_readings.json"}
     if set(files) != expected:
         raise ValueError("unexpected canonical character LM manifest")
     manifest["canonical_files"] = dict(files)
@@ -253,15 +272,41 @@ def update_char_manifest(source: Path, destination: Path, canonical_model: Path)
                  (json.dumps(manifest, ensure_ascii=True, indent=2) + "\n").encode("utf-8"))
 
 
-def remove_weights(root: Path) -> None:
-    # Older user-prefix installations may retain mapped RBT3 sidecars until
-    # uninstall. They are not part of the current build or copy manifest.
-    legacy_models = tuple(f"short_context/exit{i}.int8.onnx" for i in range(4))
-    for relative in (*MODELS, *legacy_models):
+def remove_weights(root: Path, retired_only: bool = False) -> None:
+    for relative in RETIRED_MODELS if retired_only else (*MODELS, *RETIRED_MODELS):
         model = root / relative
+        if model.parent.is_symlink():
+            raise ValueError(f"refusing to remove weights through symlink: {model.parent}")
         for path in model.parent.glob(model.name + ".*.weights"):
             if owned_weight(model, path.name) and (path.is_file() or path.is_symlink()):
                 path.unlink()
+
+
+def remove_retired_models(root: Path) -> None:
+    if root.is_symlink() or root.resolve() == Path(root.resolve().anchor):
+        raise ValueError(f"invalid runtime cleanup directory: {root}")
+    if not root.exists():
+        return
+    if not root.is_dir():
+        raise ValueError(f"runtime cleanup requires a directory: {root}")
+    directories = sorted({(root / relative).parent for relative in RETIRED_ASSETS})
+    # Validate every parent before removing anything; never follow a model
+    # directory symlink into another installation or a user's files.
+    for directory in directories:
+        if directory.is_symlink():
+            raise ValueError(f"refusing cleanup through symlink: {directory}")
+    remove_weights(root, retired_only=True)
+    for relative in RETIRED_ASSETS:
+        path = root / relative
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+    for directory in directories:
+        if directory.is_dir():
+            try:
+                directory.rmdir()
+            except OSError as error:
+                if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+                    raise
 
 
 def main():
@@ -270,11 +315,15 @@ def main():
     modes.add_argument("--pack", action="store_true")
     modes.add_argument("--copy-weights", action="store_true")
     modes.add_argument("--remove-weights", action="store_true")
+    modes.add_argument("--remove-retired-weights", action="store_true")
+    modes.add_argument("--remove-retired-models", action="store_true")
     parser.add_argument("source", type=Path)
     parser.add_argument("destination", type=Path, nargs="?")
     args = parser.parse_args()
-    if args.remove_weights:
-        remove_weights(args.source)
+    if args.remove_retired_models:
+        remove_retired_models(args.source)
+    elif args.remove_weights or args.remove_retired_weights:
+        remove_weights(args.source, retired_only=args.remove_retired_weights)
     else:
         if args.destination is None:
             parser.error("destination is required")

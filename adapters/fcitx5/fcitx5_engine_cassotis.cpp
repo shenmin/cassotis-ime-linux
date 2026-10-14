@@ -92,6 +92,9 @@ bool statesEqual(const CassotisEngineState &left,
            left.fuzzy_pinyin_rules == right.fuzzy_pinyin_rules &&
            left.full_width_mode == right.full_width_mode &&
            left.punctuation_full_width == right.punctuation_full_width &&
+           left.decimal_period_after_digit == right.decimal_period_after_digit &&
+           left.auto_english == right.auto_english &&
+           strcmp(left.punctuation_ascii_symbols, right.punctuation_ascii_symbols) == 0 &&
            left.candidate_page_size == right.candidate_page_size &&
            left.candidate_page_key_scheme ==
                right.candidate_page_key_scheme &&
@@ -214,6 +217,7 @@ public:
                     guint32 scanCode, bool isRelease, bool isRepeat,
                     const std::string &text);
     void selectCandidate(std::size_t globalIndex);
+    void selectRawCandidate();
     void acceptCompletion();
     void activate();
     void deactivate();
@@ -246,6 +250,9 @@ private:
     std::string surroundingText_;
     gint32 surroundingCursor_ = 0;
     int pageIndex_ = 0;
+    guint32 renderedCandidateCount_ = 0;
+    bool renderedRawCandidate_ = false;
+    CassotisCandidateSelectionKind selectionKind_ = CASSOTIS_SELECTION_DIGITS;
     bool resultPollPending_ = false;
     unsigned int resultPollAttempts_ = 0;
 };
@@ -254,13 +261,14 @@ class CassotisCandidateWord final : public fcitx::CandidateWord {
 public:
     CassotisCandidateWord(CassotisFcitxEngine *engine,
                           std::size_t globalIndex, const char *text,
-                          const char *comment);
+                          const char *comment, bool rawInput = false);
 
     void select(fcitx::InputContext *inputContext) const override;
 
 private:
     CassotisFcitxEngine *engine_;
     std::size_t globalIndex_;
+    bool rawInput_;
 };
 
 class CassotisCompletionWord final : public fcitx::CandidateWord {
@@ -465,6 +473,8 @@ void CassotisFcitxState::refreshSurrounding() {
 }
 
 void CassotisFcitxState::clearUI() {
+    renderedCandidateCount_ = 0;
+    renderedRawCandidate_ = false;
     inputContext_->inputPanel().reset();
     inputContext_->updatePreedit();
     inputContext_->updateUserInterface(
@@ -513,10 +523,15 @@ void CassotisFcitxState::reset() {
 }
 
 void CassotisFcitxState::renderResult(CassotisEngineResult *result) {
+    selectionKind_ = result->selection_kind;
+    renderedCandidateCount_ = result->candidate_count;
     auto &panel = inputContext_->inputPanel();
     const auto pageSize = effectivePageSize(engine_->state_);
     const bool hasCompletion =
         result->completion_text && *result->completion_text;
+    const bool hasRaw = result->page_index == 0 &&
+        result->raw_input_candidate && *result->raw_input_candidate;
+    renderedRawCandidate_ = hasRaw;
     panel.reset();
 
     if (result->commit_text && *result->commit_text) {
@@ -532,21 +547,24 @@ void CassotisFcitxState::renderResult(CassotisEngineResult *result) {
             panel.setPreedit(preedit);
         }
     }
-    if (result->candidate_count > 0 || hasCompletion) {
+    if (result->candidate_count > 0 || hasCompletion || hasRaw) {
         auto candidates = std::make_unique<fcitx::CommonCandidateList>();
-        if (hasCompletion) {
+        if (hasCompletion || hasRaw || selectionKind_ != CASSOTIS_SELECTION_DIGITS) {
             std::vector<std::string> labels;
-            labels.reserve(result->candidate_count + 1U);
-            for (guint32 index = 0; index < result->candidate_count; ++index) {
-                labels.emplace_back(std::to_string(index + 1U));
+            labels.reserve(result->candidate_count + 2U);
+            if (hasRaw) {
+                labels.emplace_back("");
             }
-            labels.emplace_back(
-                engine_->state_.one_key_completion_key ==
-                        CASSOTIS_COMPLETION_BACKTICK
-                    ? "`"
-                    : "Tab");
-            candidates->setPageSize(
-                static_cast<int>(result->candidate_count + 1U));
+            for (guint32 index = 0; index < result->candidate_count; ++index) {
+                const char key = cassotis_candidate_selection_key(selectionKind_, index);
+                labels.emplace_back(key ? std::string(1, key) : "");
+            }
+            if (hasCompletion) {
+                labels.emplace_back(
+                    engine_->state_.one_key_completion_key == CASSOTIS_COMPLETION_BACKTICK
+                        ? "`" : "Tab");
+            }
+            candidates->setPageSize(static_cast<int>(labels.size()));
             candidates->setLabels(labels);
         } else {
             candidates->setPageSize(static_cast<int>(pageSize));
@@ -556,6 +574,10 @@ void CassotisFcitxState::renderResult(CassotisEngineResult *result) {
             cassotis_candidate_panel_requires_vertical(result)
                 ? fcitx::CandidateLayoutHint::Vertical
                 : fcitx::CandidateLayoutHint::Horizontal);
+        if (hasRaw) {
+            candidates->insert(0, std::make_unique<CassotisCandidateWord>(
+                engine_, 0, result->raw_input_candidate, "", true));
+        }
         for (guint32 index = 0; index < result->candidate_count; ++index) {
             const auto &candidate = result->candidates[index];
             std::string comment = candidate.comment ? candidate.comment : "";
@@ -567,21 +589,23 @@ void CassotisFcitxState::renderResult(CassotisEngineResult *result) {
                 comment += std::to_string(candidate.dictionary_weight);
             }
             candidates->insert(
-                static_cast<int>(index),
+                static_cast<int>(index + (hasRaw ? 1U : 0U)),
                 std::make_unique<CassotisCandidateWord>(
                     engine_, index, candidate.text, comment.c_str()));
         }
         if (hasCompletion) {
             candidates->insert(
-                static_cast<int>(result->candidate_count),
+                static_cast<int>(result->candidate_count + (hasRaw ? 1U : 0U)),
                 std::make_unique<CassotisCompletionWord>(
                     engine_, result->completion_text,
                     result->completion_is_exact_tail));
         }
-        if (result->selected_index >= 0 &&
+        if (hasRaw && result->raw_input_selected) {
+            candidates->setGlobalCursorIndex(0);
+        } else if (result->selected_index >= 0 &&
             static_cast<guint32>(result->selected_index) <
                 result->candidate_count) {
-            candidates->setGlobalCursorIndex(result->selected_index);
+            candidates->setGlobalCursorIndex(result->selected_index + (hasRaw ? 1 : 0));
         }
         panel.setCandidateList(std::move(candidates));
     }
@@ -675,12 +699,26 @@ void CassotisFcitxState::pollAsyncResult() {
 }
 
 void CassotisFcitxState::selectCandidate(std::size_t globalIndex) {
-    if (globalIndex >= effectivePageSize(engine_->state_)) {
+    if (globalIndex >= renderedCandidateCount_) {
         return;
     }
-    const char selection = static_cast<char>('1' + globalIndex);
+    if (selectionKind_ == CASSOTIS_SELECTION_UNLABELLED) {
+        if (globalIndex == 0)
+            processKey(CASSOTIS_KEY_SPACE, 0, 0, false, false, "");
+        return;
+    }
+    const char selection = cassotis_candidate_selection_key(selectionKind_, globalIndex);
+    if (!selection) {
+        return;
+    }
     processKey(CASSOTIS_KEY_NONE, 0, 0, false, false,
                std::string(1, selection));
+}
+
+void CassotisFcitxState::selectRawCandidate() {
+    if (renderedRawCandidate_) {
+        processKey(CASSOTIS_KEY_SELECT_RAW_INPUT, 0, 0, false, false, "");
+    }
 }
 
 void CassotisFcitxState::acceptCompletion() {
@@ -694,9 +732,9 @@ void CassotisFcitxState::acceptCompletion() {
 
 CassotisCandidateWord::CassotisCandidateWord(
     CassotisFcitxEngine *engine, std::size_t globalIndex, const char *text,
-    const char *comment)
+    const char *comment, bool rawInput)
     : fcitx::CandidateWord(candidateDisplayText(text, comment)), engine_(engine),
-      globalIndex_(globalIndex) {
+      globalIndex_(globalIndex), rawInput_(rawInput) {
 #ifdef CASSOTIS_FCITX_HAS_CANDIDATE_COMMENT
     if (comment && *comment) {
         setComment(fcitx::Text(comment));
@@ -707,7 +745,11 @@ CassotisCandidateWord::CassotisCandidateWord(
 void CassotisCandidateWord::select(
     fcitx::InputContext *inputContext) const {
     if (auto *state = inputContext->propertyFor(engine_->factory())) {
-        state->selectCandidate(globalIndex_);
+        if (rawInput_) {
+            state->selectRawCandidate();
+        } else {
+            state->selectCandidate(globalIndex_);
+        }
     }
 }
 

@@ -29,6 +29,7 @@ type
         FModifierShortcutAction: TncShortcutAction;
         FModifierShortcutKeyCode: Word;
     public
+        TypedDigit: WideChar;
         LongCompletionPending: Boolean;
         OneKeyRerankPending: Boolean;
         constructor Create(const context_id: QWord);
@@ -117,6 +118,7 @@ end;
 
 procedure TncEngineContext.ClearComposition;
 begin
+    TypedDigit := #0;
     LongCompletionPending := False;
     OneKeyRerankPending := False;
     FComposition := '';
@@ -222,6 +224,8 @@ end;
 procedure TncEngineContext.SetSurrounding(const text: string;
     const cursor_offset: Integer);
 begin
+    if (text = FSurroundingText) and (cursor_offset <> FCursorOffset) then
+        TypedDigit := #0;
     FSurroundingText := text;
     if cursor_offset < 0 then
         FCursorOffset := 0

@@ -9,6 +9,7 @@ G_BEGIN_DECLS
 #define CASSOTIS_IPC_MAX_PAYLOAD (8U * 1024U * 1024U)
 #define CASSOTIS_IPC_FLAG_RESPONSE 0x00000001U
 #define CASSOTIS_IPC_FLAG_ERROR 0x00000002U
+#define CASSOTIS_MARKDOWN_ASCII_SYMBOLS "-#*+_=`~[]<>|@"
 
 typedef enum {
     CASSOTIS_MESSAGE_INVALID = 0,
@@ -79,7 +80,8 @@ typedef enum {
     CASSOTIS_KEY_F21 = 44,
     CASSOTIS_KEY_F22 = 45,
     CASSOTIS_KEY_F23 = 46,
-    CASSOTIS_KEY_F24 = 47
+    CASSOTIS_KEY_F24 = 47,
+    CASSOTIS_KEY_SELECT_RAW_INPUT = 48
 } CassotisSpecialKey;
 
 typedef enum {
@@ -131,6 +133,12 @@ typedef enum {
 } CassotisCandidateDisplayKind;
 
 typedef enum {
+    CASSOTIS_SELECTION_DIGITS = 0,
+    CASSOTIS_SELECTION_LETTERS = 1,
+    CASSOTIS_SELECTION_UNLABELLED = 2
+} CassotisCandidateSelectionKind;
+
+typedef enum {
     CASSOTIS_FUZZY_Z_ZH = 1U << 0,
     CASSOTIS_FUZZY_C_CH = 1U << 1,
     CASSOTIS_FUZZY_S_SH = 1U << 2,
@@ -169,6 +177,9 @@ typedef struct {
     guint32 fuzzy_pinyin_rules;
     gboolean full_width_mode;
     gboolean punctuation_full_width;
+    gboolean decimal_period_after_digit;
+    gchar punctuation_ascii_symbols[33];
+    gboolean auto_english;
     guint8 candidate_page_size;
     CassotisCandidatePageKeyScheme candidate_page_key_scheme;
     CassotisOneKeyCompletionKey one_key_completion_key;
@@ -187,8 +198,11 @@ typedef struct {
 
 typedef struct {
     gboolean handled;
+    CassotisCandidateSelectionKind selection_kind;
     gboolean async_pending;
     gboolean completion_is_exact_tail;
+    gchar *raw_input_candidate;
+    gboolean raw_input_selected;
     gchar *commit_text;
     gchar *preedit_text;
     gchar *query_text;

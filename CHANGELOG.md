@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.0.0 - Unreleased
+
+- Align the engine and dictionaries with Cassotis IME and Cassotis Lexicon
+  v2.1.0. One character language model now handles long and short candidates,
+  pinyin-constrained correction, one-key completion and continuation.
+- Consolidate the neural models into one model with seven compact compiled
+  parameter units. Remove retired runtime code and clean obsolete model assets
+  during upgrades, while retaining asynchronous loading and bounded caches.
+- Compose three-to-five-syllable phrases absent from the dictionary using the
+  language model and typed pinyin, with learning after explicit selection.
+- Add U/I/V symbol, date, time and Chinese-number conversion modes. Numeric
+  conversions use letter selection labels in both IBus and Fcitx 5; shuangpin
+  enters these modes with Shift+U/I/V.
+- Add a default-on setting for decimal periods immediately after directly typed
+  numbers in Chinese punctuation mode.
+- Add configurable half-width punctuation exceptions with a Markdown preset.
+- Recognize English words in full pinyin, offer an unnumbered raw-text candidate
+  and allow Space confirmation while preserving Chinese selection numbers.
+  Remember raw/Chinese choices without adding raw text to the Chinese user lexicon.
+- Preserve original keystrokes during partial typo correction and undo,
+  including transpositions across a confirmed-prefix boundary.
+- Retain selectable single-character prefixes at ambiguous vowel boundaries
+  without changing complete-word ranking or crossing explicit apostrophes.
+- Extend nasal/vowel-boundary prefix recall while preserving shuangpin boundaries,
+  paging and original-keystroke undo. Keep fixed whole-syllable choices for
+  `ying`, `jiu` and `bu` scoped to exact input.
+- Strip release ELF debug symbols and use XZ compression for Debian packages;
+  retain runtime resources and unstripped development binaries.
+
 ## 1.0.1 - 2026-10-07
 
 - Fixed Chinese punctuation entered with Shift and the number row in both

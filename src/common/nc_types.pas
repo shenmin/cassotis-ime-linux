@@ -11,6 +11,7 @@ uses
     SysUtils;
 
 const
+    c_markdown_punctuation_ascii_symbols = '-#*+_=`~[]<>|@';
     c_nc_shortcut_config_signature = $4E435348;
     c_default_candidate_font_name = 'Noto Sans CJK SC';
     c_min_candidate_font_size = 7;
@@ -57,8 +58,9 @@ type
     );
     TncFuzzyPinyinRules = set of TncFuzzyPinyinRule;
 
-    TncCandidateSource = (cs_rule, cs_user);
+    TncCandidateSource = (cs_rule, cs_user, cs_quick_input);
     TncCandidateDisplayKind = (cdk_default, cdk_lm_compound, cdk_sentence_prefix);
+    TncCandidateSelectionKind = (csk_digits, csk_letters, csk_unlabelled);
     TncInputMode = (im_chinese, im_english);
     TncDictionaryVariant = (dv_simplified, dv_traditional);
     TncPinyinInputScheme = (
@@ -110,6 +112,9 @@ type
         fuzzy_pinyin_rules: TncFuzzyPinyinRules;
         full_width_mode: Boolean;
         punctuation_full_width: Boolean;
+        decimal_period_after_digit: Boolean;
+        punctuation_ascii_symbols: string;
+        auto_english: Boolean;
         candidate_page_size: Integer;
         candidate_page_key_scheme: TncCandidatePageKeyScheme;
         one_key_completion_key: TncOneKeyCompletionKey;
@@ -128,6 +133,9 @@ type
         enable_ctrl_period_punct_toggle: Boolean;
         full_width_mode: Boolean;
         punctuation_full_width: Boolean;
+        decimal_period_after_digit: Boolean;
+        punctuation_ascii_symbols: string;
+        auto_english: Boolean;
         enable_segment_candidates: Boolean;
         segment_head_only_multi_syllable: Boolean;
         candidate_font_name: string;
@@ -305,7 +313,8 @@ type
         sk_f21,
         sk_f22,
         sk_f23,
-        sk_f24
+        sk_f24,
+        sk_select_raw_input
     );
 
     TncKeyEvent = record
@@ -320,8 +329,11 @@ type
 
     TncEngineResult = record
         handled: Boolean;
+        selection_kind: TncCandidateSelectionKind;
         async_pending: Boolean;
         completion_is_exact_tail: Boolean;
+        raw_input_candidate: string;
+        raw_input_selected: Boolean;
         commit_text: string;
         preedit_text: string;
         query_text: string;
@@ -421,9 +433,12 @@ end;
 
 procedure nc_initialize_engine_result(out value: TncEngineResult);
 begin
+    value.selection_kind := csk_digits;
     value.handled := False;
     value.async_pending := False;
     value.completion_is_exact_tail := False;
+    value.raw_input_candidate := '';
+    value.raw_input_selected := False;
     value.commit_text := '';
     value.preedit_text := '';
     value.query_text := '';
@@ -446,6 +461,9 @@ begin
     value.fuzzy_pinyin_rules := [];
     value.full_width_mode := False;
     value.punctuation_full_width := True;
+    value.decimal_period_after_digit := True;
+    value.punctuation_ascii_symbols := c_markdown_punctuation_ascii_symbols;
+    value.auto_english := True;
     value.candidate_page_size := c_default_candidate_page_size;
     value.candidate_page_key_scheme := cpks_minus_plus;
     value.one_key_completion_key := ock_tab;
@@ -525,6 +543,10 @@ begin
         (left_value.full_width_mode = right_value.full_width_mode) and
         (left_value.punctuation_full_width =
         right_value.punctuation_full_width) and
+        (left_value.decimal_period_after_digit =
+        right_value.decimal_period_after_digit) and
+        (left_value.punctuation_ascii_symbols = right_value.punctuation_ascii_symbols) and
+        (left_value.auto_english = right_value.auto_english) and
         (left_value.candidate_page_size =
         right_value.candidate_page_size) and
         (left_value.candidate_page_key_scheme =

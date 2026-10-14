@@ -15,7 +15,9 @@ const
     c_ipc_engine_state_fuzzy_schema_version = 2;
     c_ipc_engine_state_shortcuts_schema_version = 3;
     c_ipc_engine_state_debug_schema_version = 4;
-    c_ipc_engine_state_schema_version = 5;
+    c_ipc_engine_state_decimal_schema_version = 6;
+    c_ipc_engine_state_schema_version = 7;
+    c_ipc_engine_result_schema_version = 2;
     c_ipc_payload_max_text_bytes = 1024 * 1024;
     c_ipc_payload_max_candidates = 256;
 
@@ -56,6 +58,7 @@ function nc_try_decode_error_payload(const payload: TBytes;
 implementation
 
 uses
+    nc_config,
     nc_shortcut;
 
 const
@@ -66,13 +69,20 @@ const
     c_state_flag_punctuation_full_width = $02;
     c_state_flag_fuzzy_pinyin_enabled = $04;
     c_state_flag_debug_mode = $08;
+    c_state_flag_decimal_period = $10;
+    c_state_flag_auto_english = $20;
     c_state_known_flags = c_state_flag_full_width or
         c_state_flag_punctuation_full_width or
-        c_state_flag_fuzzy_pinyin_enabled or c_state_flag_debug_mode;
+        c_state_flag_fuzzy_pinyin_enabled or c_state_flag_debug_mode or
+        c_state_flag_decimal_period or c_state_flag_auto_english;
     c_engine_result_flag_async_pending = $01;
     c_engine_result_flag_exact_tail = $02;
+    c_engine_result_flag_letter_keys = $04;
+    c_engine_result_flag_unlabelled = $08;
+    c_engine_result_flag_raw_selected = $10;
     c_engine_result_known_flags = c_engine_result_flag_async_pending or
-        c_engine_result_flag_exact_tail;
+        c_engine_result_flag_exact_tail or c_engine_result_flag_letter_keys or
+        c_engine_result_flag_unlabelled or c_engine_result_flag_raw_selected;
     c_shortcut_flag_shift = $01;
     c_shortcut_flag_control = $02;
     c_shortcut_flag_alt = $04;
@@ -677,7 +687,7 @@ begin
         raise EncIpcPayloadError.Create('Engine result has too many candidates');
     writer := TncIpcPayloadWriter.Create;
     try
-        WritePayloadHeader(writer);
+        WritePayloadHeaderVersion(writer, c_ipc_engine_result_schema_version);
         writer.WriteBoolean(engine_result.handled);
         writer.WriteUInt16(0);
         result_flags := 0;
@@ -685,6 +695,12 @@ begin
             result_flags := result_flags or c_engine_result_flag_async_pending;
         if engine_result.completion_is_exact_tail then
             result_flags := result_flags or c_engine_result_flag_exact_tail;
+        if engine_result.raw_input_selected then
+            result_flags := result_flags or c_engine_result_flag_raw_selected;
+        case engine_result.selection_kind of
+            csk_letters: result_flags := result_flags or c_engine_result_flag_letter_keys;
+            csk_unlabelled: result_flags := result_flags or c_engine_result_flag_unlabelled;
+        end;
         writer.WriteByte(result_flags);
         writer.WriteInt32(engine_result.selected_index);
         writer.WriteInt32(engine_result.page_index);
@@ -710,6 +726,7 @@ begin
             writer.WriteString(candidate.text);
             writer.WriteString(candidate.comment);
         end;
+        writer.WriteString(engine_result.raw_input_candidate);
         Result := writer.Finish;
     finally
         writer.Free;
@@ -728,12 +745,13 @@ var
     display_kind: Byte;
     fuzzy_mask: Cardinal;
     rule: TncFuzzyPinyinRule;
+    version: Word;
 begin
     nc_initialize_engine_result(engine_result);
     candidate_count := 0;
     reader := TncIpcPayloadReader.Create(payload);
     try
-        Result := ReadPayloadHeader(reader) and
+        Result := ReadPayloadHeaderVersion(reader, version) and
             reader.ReadBoolean(engine_result.handled) and
             reader.ReadUInt16(reserved16) and reader.ReadByte(result_flags) and
             reader.ReadInt32(engine_result.selected_index) and
@@ -746,7 +764,12 @@ begin
             reader.ReadString(engine_result.completion_text) and
             reader.ReadString(engine_result.error_text) and
             reader.ReadUInt32(candidate_count);
-        if Result and ((reserved16 <> 0) or
+        if Result and ((version > c_ipc_engine_result_schema_version) or
+            ((version < 2) and ((result_flags and c_engine_result_flag_raw_selected) <> 0)) or
+            (reserved16 <> 0) or
+            ((result_flags and (c_engine_result_flag_letter_keys or
+                c_engine_result_flag_unlabelled)) =
+                (c_engine_result_flag_letter_keys or c_engine_result_flag_unlabelled)) or
             ((result_flags and not c_engine_result_known_flags) <> 0)) then
         begin
             reader.SetError('Engine result contains invalid flags');
@@ -758,6 +781,12 @@ begin
                 (result_flags and c_engine_result_flag_async_pending) <> 0;
             engine_result.completion_is_exact_tail :=
                 (result_flags and c_engine_result_flag_exact_tail) <> 0;
+            engine_result.raw_input_selected :=
+                (result_flags and c_engine_result_flag_raw_selected) <> 0;
+            if (result_flags and c_engine_result_flag_letter_keys) <> 0 then
+                engine_result.selection_kind := csk_letters
+            else if (result_flags and c_engine_result_flag_unlabelled) <> 0 then
+                engine_result.selection_kind := csk_unlabelled;
         end;
         if Result and (candidate_count > c_ipc_payload_max_candidates) then
         begin
@@ -815,6 +844,16 @@ begin
                             rule);
             end;
         end;
+        if Result and (version >= 2) then
+            Result := reader.ReadString(engine_result.raw_input_candidate);
+        if Result and ((engine_result.raw_input_selected and
+            (engine_result.raw_input_candidate = '')) or
+            ((engine_result.raw_input_candidate <> '') and
+            (engine_result.page_index <> 0))) then
+        begin
+            reader.SetError('Engine result contains an invalid raw input selection');
+            Result := False;
+        end;
         Result := Result and reader.Finish(error_text);
         if not Result then
         begin
@@ -842,6 +881,10 @@ begin
             flags := flags or c_state_flag_full_width;
         if state.punctuation_full_width then
             flags := flags or c_state_flag_punctuation_full_width;
+        if state.decimal_period_after_digit then
+            flags := flags or c_state_flag_decimal_period;
+        if state.auto_english then
+            flags := flags or c_state_flag_auto_english;
         if state.fuzzy_pinyin_enabled then
             flags := flags or c_state_flag_fuzzy_pinyin_enabled;
         if state.debug_mode then
@@ -858,6 +901,7 @@ begin
         WriteShortcut(writer, state.shortcuts.dictionary_variant_toggle);
         WriteShortcut(writer, state.shortcuts.full_width_toggle);
         WriteShortcut(writer, state.shortcuts.open_settings);
+        writer.WriteString(nc_normalize_punctuation_ascii_symbols(state.punctuation_ascii_symbols));
         Result := writer.Finish;
     finally
         writer.Free;
@@ -914,6 +958,14 @@ begin
                 ReadShortcut(reader, version, state.shortcuts.full_width_toggle) and
                 ReadShortcut(reader, version, state.shortcuts.open_settings);
         end;
+        if Result and (version >= 7) then
+            Result := reader.ReadString(state.punctuation_ascii_symbols);
+        if Result and (nc_normalize_punctuation_ascii_symbols(state.punctuation_ascii_symbols) <>
+            state.punctuation_ascii_symbols) then
+        begin
+            reader.SetError('State payload contains invalid ASCII punctuation');
+            Result := False;
+        end;
         if Result and (input_mode > Ord(High(TncInputMode))) then
         begin
             reader.SetError('State payload contains an invalid input mode');
@@ -942,6 +994,17 @@ begin
         end;
         if Result and (version < c_ipc_engine_state_debug_schema_version) and
             ((flags and c_state_flag_debug_mode) <> 0) then
+        begin
+            reader.SetError('State payload contains flags unsupported by its schema');
+            Result := False;
+        end;
+        if Result and (version < c_ipc_engine_state_decimal_schema_version) and
+            ((flags and c_state_flag_decimal_period) <> 0) then
+        begin
+            reader.SetError('State payload contains flags unsupported by its schema');
+            Result := False;
+        end;
+        if Result and (version < 7) and ((flags and c_state_flag_auto_english) <> 0) then
         begin
             reader.SetError('State payload contains flags unsupported by its schema');
             Result := False;
@@ -984,6 +1047,10 @@ begin
             state.full_width_mode := (flags and c_state_flag_full_width) <> 0;
             state.punctuation_full_width :=
                 (flags and c_state_flag_punctuation_full_width) <> 0;
+            state.decimal_period_after_digit :=
+                (version < c_ipc_engine_state_decimal_schema_version) or
+                ((flags and c_state_flag_decimal_period) <> 0);
+            state.auto_english := (version < 7) or ((flags and c_state_flag_auto_english) <> 0);
             state.fuzzy_pinyin_enabled :=
                 (flags and c_state_flag_fuzzy_pinyin_enabled) <> 0;
             state.fuzzy_pinyin_rules :=

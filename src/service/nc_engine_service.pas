@@ -13,7 +13,7 @@ uses
     nc_engine_intf,
     nc_dictionary_sqlite,
     nc_user_dictionary,
-    nc_pinyin_transformer_host,
+    nc_lm_repair_host,
     nc_local_completion_host,
     nc_char_lm,
     nc_char_lm_host,
@@ -34,7 +34,7 @@ type
         FStateStore: TncUserDictionary;
         FState: TncEngineState;
         FConfig: TncEngineConfig;
-        FLongNeuralReranker: IncLongNeuralReranker;
+        FLocalRepair: IncLongLocalRepair;
         FLocalCompletionHost: TncLocalCompletionHost;
         FCharLm: IncCharLm;
         FOneKeyRerankHost: TncOneKeyRerankHost;
@@ -148,7 +148,7 @@ begin
     FContexts := TncEngineContextRegistry.Create;
     FEngine := nil;
     FStateStore := nil;
-    FLongNeuralReranker := nil;
+    FLocalRepair := nil;
     FLocalCompletionHost := nil;
     FLoadedContextId := c_invalid_context_id;
     FDictionaryError := '';
@@ -206,11 +206,10 @@ begin
     FEngine.set_dictionary_provider(provider);
     FEngine.prewarm_dictionary_caches;
     runtime_directory := ExtractFileDir(ParamStr(0));
-    FLongNeuralReranker := TncPinyinTransformerHostReranker.Create(
+    FLocalRepair := TncLmRepairHost.Create(
         runtime_directory, True);
-    FEngine.set_long_neural_reranker(FLongNeuralReranker);
-    FLocalCompletionHost := TncLocalCompletionHost.Create(
-        runtime_directory);
+    FEngine.set_long_local_repair(FLocalRepair);
+    FLocalCompletionHost := TncLocalCompletionHost.Create;
     char_lm_host := TncCharLmHost.Create(runtime_directory, True);
     FCharLm := char_lm_host;
     FEngine.set_char_lm(FCharLm, True, True);
@@ -225,7 +224,7 @@ begin
     FLocalCompletionHost.Free;
     FEngine.Free;
     FCharLm := nil;
-    FLongNeuralReranker := nil;
+    FLocalRepair := nil;
     FStateStore.Free;
     FContexts.Free;
     inherited Destroy;
@@ -241,6 +240,9 @@ begin
     config.fuzzy_pinyin_rules := state.fuzzy_pinyin_rules;
     config.full_width_mode := state.full_width_mode;
     config.punctuation_full_width := state.punctuation_full_width;
+    config.decimal_period_after_digit := state.decimal_period_after_digit;
+    config.punctuation_ascii_symbols := state.punctuation_ascii_symbols;
+    config.auto_english := state.auto_english;
     config.candidate_page_size := state.candidate_page_size;
     config.candidate_page_key_scheme :=
         state.candidate_page_key_scheme;
@@ -262,6 +264,10 @@ begin
         (old_state.full_width_mode <> new_state.full_width_mode) or
         (old_state.punctuation_full_width <>
         new_state.punctuation_full_width) or
+        (old_state.decimal_period_after_digit <>
+        new_state.decimal_period_after_digit) or
+        (old_state.punctuation_ascii_symbols <> new_state.punctuation_ascii_symbols) or
+        (old_state.auto_english <> new_state.auto_english) or
         (old_state.candidate_page_size <>
         new_state.candidate_page_size) or
         (old_state.candidate_page_key_scheme <>
@@ -310,6 +316,10 @@ begin
     next_state.full_width_mode := engine_config.full_width_mode;
     next_state.punctuation_full_width :=
         engine_config.punctuation_full_width;
+    next_state.decimal_period_after_digit :=
+        engine_config.decimal_period_after_digit;
+    next_state.punctuation_ascii_symbols := engine_config.punctuation_ascii_symbols;
+    next_state.auto_english := engine_config.auto_english;
     next_state.candidate_page_size := engine_config.candidate_page_size;
     next_state.candidate_page_key_scheme :=
         engine_config.candidate_page_key_scheme;
@@ -355,6 +365,7 @@ var
     shifted_digit_index: Integer;
 begin
     key_code := 0;
+    key_state := Default(TncKeyState);
     key_state.shift_down := km_shift in key_event.modifiers;
     key_state.ctrl_down := km_control in key_event.modifiers;
     key_state.alt_down := km_alt in key_event.modifiers;
@@ -372,7 +383,7 @@ begin
         sk_delete: key_code := VK_DELETE;
         sk_enter: key_code := VK_RETURN;
         sk_escape: key_code := VK_ESCAPE;
-        sk_space: key_code := VK_SPACE;
+        sk_space, sk_select_raw_input: key_code := VK_SPACE;
         sk_tab: key_code := VK_TAB;
         sk_left: key_code := VK_LEFT;
         sk_right: key_code := VK_RIGHT;
@@ -517,6 +528,11 @@ begin
     SyncContext(context);
     engine_result.preedit_text := context.Composition;
     engine_result.query_text := FEngine.get_last_lookup_key;
+    engine_result.selection_kind := csk_digits;
+    if FEngine.candidate_selection_keys = 'abcd' then
+        engine_result.selection_kind := csk_letters
+    else if FEngine.candidate_selection_keys = '' then
+        engine_result.selection_kind := csk_unlabelled;
     engine_result.candidates := Copy(context.Candidates, 0,
         Length(context.Candidates));
     engine_result.selected_index := context.SelectedIndex;
@@ -524,6 +540,11 @@ begin
     engine_result.page_count := FEngine.get_page_count;
     engine_result.completion_text := context.CompletionText;
     engine_result.completion_is_exact_tail := context.CompletionIsExactTail;
+    if engine_result.page_index = 0 then
+    begin
+        engine_result.raw_input_candidate := FEngine.raw_input_candidate;
+        engine_result.raw_input_selected := FEngine.raw_input_selected;
+    end;
 end;
 
 function TncEngineService.QueueLongNeuralCompletion(
@@ -772,7 +793,7 @@ var
     raw_key_state: TncKeyState;
     raw_commit_text: string;
     engine_commit_text: string;
-    prefetch_task: TncLocalCompletionTask;
+    preceding_digit: WideChar;
 begin
     nc_initialize_engine_result(Result);
     Result.error_code := PrepareContext(context_id, generation_id, context);
@@ -784,6 +805,9 @@ begin
     end;
     if Result.error_code <> 0 then
         Exit;
+    preceding_digit := context.TypedDigit;
+    if not key_event.is_release then
+        context.TypedDigit := #0;
     if not KeyEventToVirtualKey(key_event, key_code, key_state) then
     begin
         if not key_event.is_release then
@@ -863,10 +887,11 @@ begin
         Exit;
     end;
 
+    FEngine.set_punctuation_preceding_char(preceding_digit);
     if (key_event.special_key = sk_delete) and key_state.ctrl_down and
         (not key_state.alt_down) then
     begin
-        if (context.SelectedIndex >= 0) and
+        if not FEngine.raw_input_selected and (context.SelectedIndex >= 0) and
             (context.SelectedIndex < Length(context.Candidates)) and
             context.Candidates[context.SelectedIndex].deletable then
         begin
@@ -878,6 +903,16 @@ begin
 
     try
         raw_commit_text := '';
+        if key_event.special_key = sk_select_raw_input then
+        begin
+            if key_event.is_release or key_event.is_repeat or
+                (key_event.modifiers <> []) or
+                not FEngine.activate_raw_input_candidate then
+            begin
+                PopulateResult(context, Result);
+                Exit;
+            end;
+        end;
         if modifier_release and (shortcut_action = sa_input_mode_toggle) and
             (FState.input_mode = im_chinese) and
             (context.Composition <> '') then
@@ -890,6 +925,14 @@ begin
 
         if not FEngine.should_handle_key(key_code, key_state) then
         begin
+            // Only directly typed digits arm the decimal rule, never a pasted
+            // number or a digit used to select a candidate.
+            if (context.Composition = '') and
+                (Length(key_event.text) = 1) and
+                (key_event.text[1] >= '0') and (key_event.text[1] <= '9') and
+                not key_state.ctrl_down and not key_state.alt_down and
+                not key_state.shift_down then
+                context.TypedDigit := key_event.text[1];
             if raw_commit_text <> '' then
             begin
                 Result.handled := True;
@@ -911,14 +954,6 @@ begin
                 Result.commit_text := engine_commit_text;
         end;
         SyncStateFromEngine;
-        if (FLocalCompletionHost <> nil) and FLocalCompletionHost.Ready and
-            FEngine.get_prefetch_long_neural_completion_request(prefetch_task.request) then
-        begin
-            prefetch_task.context_id := context.Id;
-            prefetch_task.generation_id := context.Generation;
-            prefetch_task.prefetch_only := True;
-            FLocalCompletionHost.Enqueue(prefetch_task);
-        end;
         PopulateResult(context, Result);
         context.LongCompletionPending := QueueLongNeuralCompletion(context);
         context.OneKeyRerankPending := QueueOneKeyRerank(context);
@@ -976,7 +1011,6 @@ end;
 
 procedure TncEngineService.ReleaseIdleMemory;
 begin
-    if FLocalCompletionHost <> nil then FLocalCompletionHost.ReleaseIdlePages;
 end;
 
 procedure TncEngineService.ClearContexts;

@@ -6,28 +6,35 @@ Pascal engine, and renders preedit and lookup-table results through native IBus
 APIs. It does not contain dictionary, pinyin, learning, or ranking logic.
 
 The adapter uses the shared production candidate pipeline, including the full
-v1.21.0 exact, alias, prefix, jianpin, segmented-path, short-word, long-sentence,
+v2.0.0 exact, alias, prefix, jianpin, segmented-path, short-word, long-sentence,
 context-ranking, completion, and user-signal stages. It supports selection by
 space, number, mouse, and cursor movement; paging,
 backspace, Escape, and raw-pinyin commit with Enter; persistent cross-context
 user learning; full pinyin and six shuangpin schemes; Shift Chinese/English
 switching; `Ctrl+.` punctuation switching; `Shift+Space` full-/half-width
 switching; Chinese/English punctuation plus full-/half-width state; and
-`Ctrl+Delete` removal of the currently selected deletable user word. Exact
+`Ctrl+Delete` removal of the currently selected deletable user word. Controlled
 one-key completion appears as a protected final lookup-table row after at
 least two complete syllables and is accepted with its configured `Tab` or
 backtick key; an unmatched completion key remains an application key. This
 mapping keeps completion below ordinary candidates because GNOME Shell fixes
 IBus auxiliary text above the lookup table.
 
-Long-prefix static misses may enqueue the v1.21 constrained local-completion
-worker, including lexical and phonetic-repair recall plus the gated generator
-fallback. The adapter polls the
-versioned engine result without blocking key
-delivery, applies only the matching context generation, and stops polling on
+The shared character language model reranks short completions and supplies
+long-prefix continuation in the background, using the same model session as
+candidate ranking and pinyin-conditioned correction. Dictionary completion
+remains available before model initialization. The adapter polls the versioned
+engine result without blocking key delivery, applies only the matching context
+generation, and stops polling on
 focus loss, reset, disable, replacement by a newer request, or a bounded
 timeout. Neural inference and all acceptance rules remain in the shared engine
 process rather than the adapter.
+
+U/I/V quick-input modes use engine-supplied letter labels instead of consuming
+digits as ordinary candidate selections. Decimal punctuation after consecutive
+directly typed digits is also engine-owned; focus loss, reset and navigation
+clear that input continuity. See [configuration](../../CONFIGURATION.md) /
+[Chinese](../../CONFIGURATION.CN.md) for the shortcuts and decimal setting.
 
 IBus properties expose input mode, punctuation, character width, a pinyin
 scheme submenu, and a controlled fuzzy-pinyin submenu. The fuzzy menu keeps a

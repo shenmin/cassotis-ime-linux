@@ -45,6 +45,11 @@ type
             out results: TncOneKeyCompletionList): Boolean; virtual;
         function lookup_one_key_completions(const pinyin_prefix: string;
             out results: TncOneKeyCompletionList): Boolean; virtual;
+        { More words the typed prefix can complete to, beside the bounded pool
+          of lookup_one_key_completions and never repeating it. They take part
+          in the language-model rerank only, not in the immediate choice. }
+        function lookup_one_key_completion_extras(const pinyin_prefix: string;
+            out results: TncOneKeyCompletionList): Boolean; virtual;
         function lookup_long_one_key_completions(const anchor_path: string;
             out results: TncLongOneKeyCompletionList): Boolean; virtual;
         function lookup_long_one_key_completions_by_text(
@@ -58,6 +63,14 @@ type
             const baseline_full_pinyin, baseline_text: string;
             const challenger_full_pinyin, challenger_text: string;
             out audit: TncOneKeyCompletionPairAudit): Boolean; virtual;
+        { The base dictionary's own choice among the exact words of a short
+          query when no context, user word or earlier choice decides: with
+          baseline_text first, promoted_text goes above it. lead is the
+          margin of that choice; candidates names the words and weights it
+          was made among (word:weight|word:weight...), and the choice holds
+          only for those. }
+        function lookup_short_promotion(const pinyin, baseline_text: string;
+            out promoted_text, candidates: string; out lead: Integer): Boolean; virtual;
         function resolve_exact_text_prefix(const text: string;
             const max_segments, max_units: Integer;
             out resolved: TncExactTextPath): Boolean; virtual;
@@ -93,6 +106,12 @@ type
             const text: string); virtual;
         procedure record_commit(const pinyin: string; const text: string;
             const explicit_choice: Boolean = False); virtual;
+        procedure record_selected_short_phrase(const pinyin, text: string); virtual;
+        { The raw letters the user committed for an input (English in Chinese
+          mode). Kept as the latest choice of that input only: no user word,
+          no heat. A Chinese choice for the same input replaces it. }
+        procedure record_raw_input_choice(const input_key, text: string); virtual;
+        function get_raw_input_choice(const input_key: string): string; virtual;
         procedure record_context_pair(const left_text: string; const committed_text: string); virtual;
         procedure record_context_trigram(const prev_prev_text: string; const prev_text: string;
             const committed_text: string); virtual;
@@ -207,6 +226,14 @@ begin
     Result := False;
 end;
 
+function TncDictionaryProvider.lookup_one_key_completion_extras(
+    const pinyin_prefix: string;
+    out results: TncOneKeyCompletionList): Boolean;
+begin
+    SetLength(results, 0);
+    Result := False;
+end;
+
 function TncDictionaryProvider.lookup_word_completions(const syllables: TArray<string>;
     const max_syllables, limit: Integer; out results: TncOneKeyCompletionList): Boolean;
 begin
@@ -292,6 +319,16 @@ function TncDictionaryProvider.lookup_one_key_completion_pair_audit(
     out audit: TncOneKeyCompletionPairAudit): Boolean;
 begin
     audit := Default(TncOneKeyCompletionPairAudit);
+    Result := False;
+end;
+
+function TncDictionaryProvider.lookup_short_promotion(const pinyin,
+    baseline_text: string; out promoted_text, candidates: string;
+    out lead: Integer): Boolean;
+begin
+    promoted_text := '';
+    candidates := '';
+    lead := 0;
     Result := False;
 end;
 
@@ -419,6 +456,11 @@ procedure TncDictionaryProvider.record_commit(const pinyin: string; const text: 
 begin
 end;
 
+procedure TncDictionaryProvider.record_selected_short_phrase(const pinyin, text: string);
+begin
+    record_commit(pinyin, text, True);
+end;
+
 procedure TncDictionaryProvider.record_context_pair(const left_text: string; const committed_text: string);
 begin
 end;
@@ -472,6 +514,15 @@ begin
 end;
 
 function TncDictionaryProvider.get_query_latest_choice_text(const query_key: string): string;
+begin
+    Result := '';
+end;
+
+procedure TncDictionaryProvider.record_raw_input_choice(const input_key, text: string);
+begin
+end;
+
+function TncDictionaryProvider.get_raw_input_choice(const input_key: string): string;
 begin
     Result := '';
 end;

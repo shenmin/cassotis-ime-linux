@@ -54,7 +54,9 @@ typedef struct {
     guint result_poll_id;
     guint result_poll_attempts;
     guint32 rendered_page_candidate_count;
+    CassotisCandidateSelectionKind selection_kind;
     gboolean rendered_completion_row;
+    gboolean rendered_raw_row;
     CassotisEngineState state;
     gboolean state_valid;
 } CassotisIbusEngine;
@@ -80,6 +82,10 @@ static void log_client_error(const gchar *operation, GError *error)
 
 static void clear_ui(IBusEngine *engine)
 {
+    CassotisIbusEngine *self = (CassotisIbusEngine *)engine;
+    self->rendered_page_candidate_count = 0;
+    self->rendered_completion_row = FALSE;
+    self->rendered_raw_row = FALSE;
     ibus_engine_hide_preedit_text(engine);
     ibus_engine_hide_lookup_table(engine);
     ibus_engine_hide_auxiliary_text(engine);
@@ -151,6 +157,11 @@ static gboolean refresh_engine_state(CassotisIbusEngine *self)
               self->state.full_width_mode != observed_state.full_width_mode ||
               self->state.punctuation_full_width !=
                   observed_state.punctuation_full_width ||
+              self->state.decimal_period_after_digit !=
+                  observed_state.decimal_period_after_digit ||
+              self->state.auto_english != observed_state.auto_english ||
+              strcmp(self->state.punctuation_ascii_symbols,
+                     observed_state.punctuation_ascii_symbols) != 0 ||
               self->state.candidate_page_size !=
                   observed_state.candidate_page_size ||
               self->state.candidate_page_key_scheme !=
@@ -303,6 +314,7 @@ static void render_result(CassotisIbusEngine *self,
     guint32 index;
     gchar *display_text;
     gboolean has_completion;
+    gboolean has_raw;
     gboolean vertical;
     guint page_size;
     const gchar *completion_key = self->state.one_key_completion_key ==
@@ -323,12 +335,15 @@ static void render_result(CassotisIbusEngine *self,
 
     has_completion = result->completion_text != NULL &&
                      result->completion_text[0] != '\0';
+    has_raw = result->page_index == 0 && result->raw_input_candidate != NULL &&
+              result->raw_input_candidate[0] != '\0';
+    self->rendered_raw_row = has_raw;
     /* GNOME Shell fixes auxiliary text above the lookup table.  Completion
        is represented as a dedicated lookup row so it is actually below the
        candidates and remains clickable without changing engine candidates. */
     ibus_engine_hide_auxiliary_text(engine);
 
-    if (result->candidate_count == 0 && !has_completion) {
+    if (result->candidate_count == 0 && !has_completion && !has_raw) {
         ibus_engine_hide_lookup_table(engine);
         self->page_index = 0;
         self->rendered_page_candidate_count = 0;
@@ -339,18 +354,24 @@ static void render_result(CassotisIbusEngine *self,
     vertical = cassotis_candidate_panel_requires_vertical(result);
     page_size = effective_page_size(&self->state);
     table = ibus_lookup_table_new(
-        has_completion ? page_size + 1U : page_size,
+        page_size + (has_completion ? 1U : 0U) + (has_raw ? 1U : 0U),
         0, TRUE, TRUE);
     ibus_lookup_table_set_orientation(
         table, vertical ? IBUS_ORIENTATION_VERTICAL
                         : IBUS_ORIENTATION_HORIZONTAL);
 
+    self->selection_kind = result->selection_kind;
+    if (has_raw) {
+        ibus_lookup_table_append_label(table, ibus_text_new_from_string(""));
+        ibus_lookup_table_append_candidate(
+            table, ibus_text_new_from_string(result->raw_input_candidate));
+    }
+    for (index = 0; index < result->candidate_count; ++index) {
+        gchar label_text[2] = {
+            cassotis_candidate_selection_key(result->selection_kind, index), '\0'};
+        ibus_lookup_table_append_label(table, ibus_text_new_from_string(label_text));
+    }
     if (has_completion) {
-        for (index = 0; index < result->candidate_count; ++index) {
-            gchar label_text[2] = {(gchar)('1' + index), '\0'};
-            IBusText *label = ibus_text_new_from_string(label_text);
-            ibus_lookup_table_append_label(table, label);
-        }
         ibus_lookup_table_append_label(
             table, ibus_text_new_from_string(completion_key));
         for (index = 0; index < result->candidate_count; ++index) {
@@ -383,10 +404,12 @@ static void render_result(CassotisIbusEngine *self,
         self->rendered_page_candidate_count = result->candidate_count;
         self->rendered_completion_row = FALSE;
     }
-    if (result->selected_index >= 0 &&
+    if (has_raw && result->raw_input_selected) {
+        ibus_lookup_table_set_cursor_pos(table, 0);
+    } else if (result->selected_index >= 0 &&
         (guint32)result->selected_index < result->candidate_count) {
         ibus_lookup_table_set_cursor_pos(
-            table, (guint32)result->selected_index);
+            table, (guint32)result->selected_index + (has_raw ? 1U : 0U));
     }
     self->page_index = result->page_index;
     ibus_engine_update_lookup_table(engine, table, TRUE);
@@ -856,9 +879,15 @@ static void cassotis_candidate_clicked(IBusEngine *engine,
     if (button != 1)
         return;
     page_size = effective_page_size(&self->state);
-    local_index = index % (self->rendered_completion_row
-                               ? page_size + 1U
-                               : page_size);
+    local_index = index % (page_size + (self->rendered_completion_row ? 1U : 0U) +
+                          (self->rendered_raw_row ? 1U : 0U));
+    if (self->rendered_raw_row) {
+        if (local_index == 0) {
+            send_key(self, CASSOTIS_KEY_SELECT_RAW_INPUT, 0, 0, "");
+            return;
+        }
+        --local_index;
+    }
     if (self->rendered_completion_row &&
         local_index == self->rendered_page_candidate_count) {
         send_key(self, CASSOTIS_KEY_TAB, 0, 0, "");
@@ -866,7 +895,14 @@ static void cassotis_candidate_clicked(IBusEngine *engine,
     }
     if (local_index >= self->rendered_page_candidate_count)
         return;
-    selection[0] = (gchar)('1' + local_index);
+    if (self->selection_kind == CASSOTIS_SELECTION_UNLABELLED) {
+        if (local_index == 0)
+            send_key(self, CASSOTIS_KEY_SPACE, 0, 0, "");
+        return;
+    }
+    selection[0] = cassotis_candidate_selection_key(self->selection_kind, local_index);
+    if (selection[0] == '\0')
+        return;
     send_key(self, CASSOTIS_KEY_NONE, 0, 0, selection);
 }
 

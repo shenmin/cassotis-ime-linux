@@ -32,6 +32,12 @@ type
         backoff: Integer;
     end;
 
+    // What a stored pinyin string spells: its compact key and its syllables.
+    TncPinyinShape = record
+        compact: string;
+        syllables: TArray<string>;
+    end;
+
     TncSqliteDictionary = class(TncDictionaryProvider)
     private
         m_base_db_path: string;
@@ -155,12 +161,22 @@ type
             TDictionary<string, TncOneKeyCompletionList>;
         m_one_key_completion_cache:
             TDictionary<string, TncOneKeyCompletionList>;
+        // Rerank-only extras of the same lookups, stored and cleared together.
+        m_one_key_completion_extra_cache:
+            TDictionary<string, TncOneKeyCompletionList>;
+        // The compact key and the syllables of stored pinyin strings: the
+        // completion lookups test every row of a prefix range, and the next
+        // prefix brings most of the rows back.
+        m_pinyin_shape_cache: TDictionary<string, TncPinyinShape>;
         m_long_one_key_completion_cache:
             TDictionary<string, TncLongOneKeyCompletionList>;
         m_one_key_completion_competition_cache:
             TDictionary<string, TncOneKeyCompletionCompetitionEvidenceList>;
         m_one_key_completion_pair_audit_cache:
             TDictionary<string, TncOneKeyCompletionPairAudit>;
+        // pinyin, baseline text -> promoted text, lead, candidates ('' when
+        // there is none).
+        m_short_promotion_cache: TDictionary<string, string>;
         m_exact_text_prefix_cache: TDictionary<string, TncExactTextPath>;
         m_literal_lookup_result_cache: TDictionary<string, TncCandidateList>;
         m_literal_user_words_available: Integer;
@@ -221,6 +237,9 @@ type
         function has_any_base_phrase_for_pinyin(const pinyin: string): Boolean;
         function explicit_user_entry_exists(const pinyin: string; const text: string): Boolean;
         function split_full_pinyin_syllables(const pinyin: string): TArray<string>;
+        function pinyin_shape(const stored_pinyin: string): TncPinyinShape;
+        function prepare_base_pinyin_like(const sql: string; const pattern: string;
+            out stmt: Psqlite3_stmt): Boolean;
         function strict_full_pinyin_text_alignment_valid(const pinyin: string;
             const text: string): Boolean;
         function full_pinyin_text_alignment_valid(const pinyin: string;
@@ -232,6 +251,8 @@ type
             const text: string): Boolean;
         function is_nonbase_structured_rule_exact_phrase(const pinyin: string;
             const text: string): Boolean;
+        procedure record_commit_internal(const pinyin, text: string;
+            const explicit_choice, selected_short_phrase: Boolean);
         function is_suppressible_nonbase_exact_phrase(const pinyin: string; const text: string): Boolean;
         function is_likely_noisy_constructed_phrase(const pinyin: string; const text: string;
             const commit_count: Integer = 0; const user_weight: Integer = 0): Boolean;
@@ -327,6 +348,8 @@ type
             out results: TncOneKeyCompletionList): Boolean; override;
         function lookup_one_key_completions(const pinyin_prefix: string;
             out results: TncOneKeyCompletionList): Boolean; override;
+        function lookup_one_key_completion_extras(const pinyin_prefix: string;
+            out results: TncOneKeyCompletionList): Boolean; override;
         function lookup_long_one_key_completions(const anchor_path: string;
             out results: TncLongOneKeyCompletionList): Boolean; override;
         function lookup_long_one_key_completions_by_text(
@@ -340,6 +363,8 @@ type
             const baseline_full_pinyin, baseline_text: string;
             const challenger_full_pinyin, challenger_text: string;
             out audit: TncOneKeyCompletionPairAudit): Boolean; override;
+        function lookup_short_promotion(const pinyin, baseline_text: string;
+            out promoted_text, candidates: string; out lead: Integer): Boolean; override;
         function resolve_exact_text_prefix(const text: string;
             const max_segments, max_units: Integer;
             out resolved: TncExactTextPath): Boolean; override;
@@ -378,6 +403,7 @@ type
             const text: string); override;
         procedure record_commit(const pinyin: string; const text: string;
             const explicit_choice: Boolean = False); override;
+        procedure record_selected_short_phrase(const pinyin, text: string); override;
         procedure record_context_pair(const left_text: string; const committed_text: string); override;
         procedure record_context_trigram(const prev_prev_text: string; const prev_text: string;
             const committed_text: string); override;
@@ -393,6 +419,8 @@ type
             const query_key: string; const candidate_text: string): Integer; override;
         function get_query_choice_bonus(const query_key: string; const candidate_text: string): Integer; override;
         function get_query_latest_choice_text(const query_key: string): string; override;
+        procedure record_raw_input_choice(const input_key, text: string); override;
+        function get_raw_input_choice(const input_key: string): string; override;
         function get_query_segment_path_bonus(const query_key: string; const encoded_path: string): Integer; override;
         function get_long_query_segment_path_bonus(const query_key: string;
             const encoded_path: string): Integer; override;
@@ -570,6 +598,15 @@ const
         'ON dict_base_completion_pair_audit(typed_prefix, ' +
         'baseline_full_pinyin, baseline_text, challenger_full_pinyin, ' +
         'challenger_text, context_width DESC, context_suffix);' + sLineBreak +
+        sLineBreak +
+        'CREATE TABLE IF NOT EXISTS dict_base_short_promotion (' + sLineBreak +
+        '    pinyin TEXT NOT NULL,' + sLineBreak +
+        '    baseline_text TEXT NOT NULL,' + sLineBreak +
+        '    promoted_text TEXT NOT NULL,' + sLineBreak +
+        '    lead INTEGER NOT NULL DEFAULT 0,' + sLineBreak +
+        '    candidates TEXT NOT NULL DEFAULT '''',' + sLineBreak +
+        '    PRIMARY KEY(pinyin, baseline_text)' + sLineBreak +
+        ') WITHOUT ROWID;' + sLineBreak +
         sLineBreak +
         'CREATE TABLE IF NOT EXISTS dict_base_pinyin_alias (' + sLineBreak +
         '    id INTEGER PRIMARY KEY AUTOINCREMENT,' + sLineBreak +
@@ -2702,12 +2739,16 @@ begin
         TDictionary<string, TncOneKeyCompletionList>.Create;
     m_one_key_completion_cache :=
         TDictionary<string, TncOneKeyCompletionList>.Create;
+    m_one_key_completion_extra_cache :=
+        TDictionary<string, TncOneKeyCompletionList>.Create;
+    m_pinyin_shape_cache := TDictionary<string, TncPinyinShape>.Create;
     m_long_one_key_completion_cache :=
         TDictionary<string, TncLongOneKeyCompletionList>.Create;
     m_one_key_completion_competition_cache :=
         TDictionary<string, TncOneKeyCompletionCompetitionEvidenceList>.Create;
     m_one_key_completion_pair_audit_cache :=
         TDictionary<string, TncOneKeyCompletionPairAudit>.Create;
+    m_short_promotion_cache := TDictionary<string, string>.Create;
     m_exact_text_prefix_cache :=
         TDictionary<string, TncExactTextPath>.Create;
     m_literal_lookup_result_cache := TDictionary<string, TncCandidateList>.Create;
@@ -2963,6 +3004,12 @@ begin
         m_one_key_completion_cache.Free;
         m_one_key_completion_cache := nil;
     end;
+    if m_one_key_completion_extra_cache <> nil then
+    begin
+        m_one_key_completion_extra_cache.Free;
+        m_one_key_completion_extra_cache := nil;
+    end;
+    FreeAndNil(m_pinyin_shape_cache);
     FreeAndNil(m_candidate_prefix_completion_cache);
     if m_long_one_key_completion_cache <> nil then
     begin
@@ -2979,6 +3026,7 @@ begin
         m_one_key_completion_pair_audit_cache.Free;
         m_one_key_completion_pair_audit_cache := nil;
     end;
+    FreeAndNil(m_short_promotion_cache);
     if m_exact_text_prefix_cache <> nil then
     begin
         m_exact_text_prefix_cache.Free;
@@ -4169,6 +4217,9 @@ const
     c_result_limit = 32;
     c_query_limit = 256;
     c_source_result_limit = 8;
+    // Rerank-only extras: per range scan, and in all.
+    c_extra_source_limit = 40;
+    c_extra_limit = 64;
     c_base_exact_prefix_anchor_bonus = 80;
     base_completion_popularity_sql =
         'SELECT b.pinyin, b.text, b.weight, ' +
@@ -4230,7 +4281,34 @@ type
         secondary: Int64;
     end;
     TncRankedCompletionList = array of TncRankedCompletion;
+    // A row of a prefix range of dict_base, as the range statements return it.
+    TncBaseRangeRow = record
+        pinyin: string;
+        text: string;
+        // The stored text in UTF-8 and its length in characters: the
+        // statements' own sort keys (length(text), text in binary order).
+        sort_text: UTF8String;
+        sort_length: Integer;
+        weight: Integer;
+        popularity_prior: Integer;
+        corpus_score: Integer;
+        document_score: Integer;
+        source_count: Integer;
+        path_score: Integer;
+        vertical_penalty: Integer;
+        layer_kind: Integer;
+    end;
+    TncBaseRangeRows = TArray<TncBaseRangeRow>;
+    // The rows of one spelling of the prefix, by weight and by popularity.
+    TncBaseRange = record
+        stored_prefix: string;
+        weight_loaded: Boolean;
+        popularity_loaded: Boolean;
+        by_weight: TncBaseRangeRows;
+        by_popularity: TncBaseRangeRows;
+    end;
 var
+    base_ranges: array[0..1] of TncBaseRange;
     canonical_prefix: string;
     compact_prefix: string;
     lookup_prefix: string;
@@ -4243,6 +4321,11 @@ var
     base_items: TncRankedCompletionList;
     base_weight_items: TncRankedCompletionList;
     transition_items: TncRankedCompletionList;
+    extra_weight_items: TncRankedCompletionList;
+    extra_popularity_items: TncRankedCompletionList;
+    extras: TncOneKeyCompletionList;
+    source_limit: Integer;
+    exact_prefix_texts_loaded: Boolean;
 
     function resolve_lookup_prefix: Boolean;
     var
@@ -4390,15 +4473,15 @@ var
     function candidate_matches_prefix(const candidate_pinyin: string;
         const candidate_text: string; out candidate_compact_pinyin: string): Boolean;
     var
+        shape: TncPinyinShape;
         candidate_syllables: TArray<string>;
         syllable_idx: Integer;
         tail_idx: Integer;
         tail_fragment: string;
     begin
-        candidate_compact_pinyin := normalize_compact_pinyin_key(
-            candidate_pinyin);
-        candidate_syllables := split_full_pinyin_syllables(
-            normalize_canonical_pinyin_key(candidate_pinyin));
+        shape := pinyin_shape(candidate_pinyin);
+        candidate_compact_pinyin := shape.compact;
+        candidate_syllables := shape.syllables;
         Result :=
             (Length(candidate_syllables) > 0) and
             (Length(candidate_compact_pinyin) > Length(compact_prefix)) and
@@ -4600,7 +4683,7 @@ var
             end;
         end;
 
-        if Length(target) < c_source_result_limit then
+        if Length(target) < source_limit then
         begin
             SetLength(target, Length(target) + 1);
             target[High(target)] := ranked_item;
@@ -4621,106 +4704,302 @@ var
         end;
     end;
 
+    // The rows of the range of a stored prefix in the order of the statement
+    // by weight or by popularity, at most c_query_limit of them. Each order
+    // is read once per call. When the statement by weight returned the whole
+    // range, the order by popularity is sorted from its rows by that
+    // statement's keys instead of asking again.
+    function base_range_rows(const stored_prefix: string;
+        const rank_by_popularity: Boolean): TncBaseRangeRows;
+    var
+        slot: Integer;
+
+        procedure read_rows(const sql_text: string; out rows: TncBaseRangeRows);
+        var
+            upper_bound: string;
+            stmt: Psqlite3_stmt;
+            step_result: Integer;
+            count: Integer;
+            byte_idx: Integer;
+        begin
+            SetLength(rows, 0);
+            upper_bound := build_prefix_upper_bound(stored_prefix);
+            if (stored_prefix = '') or (upper_bound = '') then
+            begin
+                Exit;
+            end;
+            stmt := nil;
+            count := 0;
+            try
+                if (not m_base_connection.prepare(sql_text, stmt)) or
+                    (not m_base_connection.BindText(stmt, 1, stored_prefix)) or
+                    (not m_base_connection.BindText(stmt, 2, upper_bound)) or
+                    (not m_base_connection.BindInt(stmt, 3, c_query_limit)) then
+                begin
+                    Exit;
+                end;
+                step_result := m_base_connection.step(stmt);
+                while step_result = SQLITE_ROW do
+                begin
+                    if count >= Length(rows) then
+                    begin
+                        SetLength(rows, count * 2 + 16);
+                    end;
+                    rows[count].pinyin := m_base_connection.ColumnText(stmt, 0);
+                    rows[count].text := m_base_connection.ColumnText(stmt, 1);
+                    rows[count].sort_text := UTF8Encode(rows[count].text);
+                    rows[count].sort_length := 0;
+                    for byte_idx := 1 to Length(rows[count].sort_text) do
+                    begin
+                        if (Ord(rows[count].sort_text[byte_idx]) and $C0) <> $80 then
+                        begin
+                            Inc(rows[count].sort_length);
+                        end;
+                    end;
+                    rows[count].weight := m_base_connection.ColumnInt(stmt, 2);
+                    rows[count].popularity_prior := m_base_connection.ColumnInt(stmt, 3);
+                    rows[count].corpus_score := m_base_connection.ColumnInt(stmt, 4);
+                    rows[count].document_score := m_base_connection.ColumnInt(stmt, 5);
+                    rows[count].source_count := m_base_connection.ColumnInt(stmt, 6);
+                    rows[count].path_score := m_base_connection.ColumnInt(stmt, 7);
+                    rows[count].vertical_penalty := m_base_connection.ColumnInt(stmt, 8);
+                    rows[count].layer_kind := m_base_connection.ColumnInt(stmt, 9);
+                    Inc(count);
+                    step_result := m_base_connection.step(stmt);
+                end;
+            finally
+                SetLength(rows, count);
+                if stmt <> nil then
+                begin
+                    m_base_connection.finalize(stmt);
+                end;
+            end;
+        end;
+
+        // ORDER BY popularity_prior DESC, weight DESC, length(text) ASC,
+        // text ASC; rows equal in all four keep the order they came in.
+        function before_by_popularity(const left_row, right_row: TncBaseRangeRow): Boolean;
+        var
+            byte_idx: Integer;
+            shared: Integer;
+        begin
+            if left_row.popularity_prior <> right_row.popularity_prior then
+            begin
+                Exit(left_row.popularity_prior > right_row.popularity_prior);
+            end;
+            if left_row.weight <> right_row.weight then
+            begin
+                Exit(left_row.weight > right_row.weight);
+            end;
+            if left_row.sort_length <> right_row.sort_length then
+            begin
+                Exit(left_row.sort_length < right_row.sort_length);
+            end;
+            shared := Length(left_row.sort_text);
+            if Length(right_row.sort_text) < shared then
+            begin
+                shared := Length(right_row.sort_text);
+            end;
+            for byte_idx := 1 to shared do
+            begin
+                if left_row.sort_text[byte_idx] <> right_row.sort_text[byte_idx] then
+                begin
+                    Exit(Ord(left_row.sort_text[byte_idx]) <
+                        Ord(right_row.sort_text[byte_idx]));
+                end;
+            end;
+            Result := Length(left_row.sort_text) < Length(right_row.sort_text);
+        end;
+
+        procedure sort_by_popularity(var rows: TncBaseRangeRows);
+        var
+            row_idx: Integer;
+            insert_idx: Integer;
+            moved: TncBaseRangeRow;
+        begin
+            for row_idx := 1 to High(rows) do
+            begin
+                moved := rows[row_idx];
+                insert_idx := row_idx - 1;
+                while (insert_idx >= 0) and
+                    before_by_popularity(moved, rows[insert_idx]) do
+                begin
+                    rows[insert_idx + 1] := rows[insert_idx];
+                    Dec(insert_idx);
+                end;
+                rows[insert_idx + 1] := moved;
+            end;
+        end;
+
+    begin
+        slot := 0;
+        if (base_ranges[0].stored_prefix <> stored_prefix) and
+            ((base_ranges[1].stored_prefix = stored_prefix) or
+            (base_ranges[0].stored_prefix <> '')) then
+        begin
+            slot := 1;
+        end;
+        if base_ranges[slot].stored_prefix <> stored_prefix then
+        begin
+            base_ranges[slot] := Default(TncBaseRange);
+            base_ranges[slot].stored_prefix := stored_prefix;
+        end;
+        if not base_ranges[slot].weight_loaded then
+        begin
+            read_rows(base_completion_weight_sql, base_ranges[slot].by_weight);
+            base_ranges[slot].weight_loaded := True;
+        end;
+        if not rank_by_popularity then
+        begin
+            Exit(base_ranges[slot].by_weight);
+        end;
+        if not base_ranges[slot].popularity_loaded then
+        begin
+            if Length(base_ranges[slot].by_weight) < c_query_limit then
+            begin
+                base_ranges[slot].by_popularity := Copy(base_ranges[slot].by_weight);
+                sort_by_popularity(base_ranges[slot].by_popularity);
+            end
+            else
+            begin
+                read_rows(base_completion_popularity_sql,
+                    base_ranges[slot].by_popularity);
+            end;
+            base_ranges[slot].popularity_loaded := True;
+        end;
+        Result := base_ranges[slot].by_popularity;
+    end;
+
     procedure query_base_stored_prefix(const stored_prefix: string;
         var target_items: TncRankedCompletionList;
         const rank_by_popularity: Boolean);
     var
-        upper_bound: string;
-        candidate_pinyin: string;
+        rows: TncBaseRangeRows;
+        row_idx: Integer;
         candidate_text: string;
-        candidate_weight: Integer;
         candidate_rank: Integer;
-        candidate_popularity_prior: Integer;
-        candidate_corpus_score: Integer;
-        candidate_document_score: Integer;
-        candidate_source_count: Integer;
-        candidate_path_score: Integer;
-        candidate_vertical_penalty: Integer;
-        candidate_layer_kind: Integer;
         candidate_has_prior: Boolean;
         candidate_prefix_text: string;
         candidate_anchored: Boolean;
-        stmt: Psqlite3_stmt;
-        step_result: Integer;
-        sql_text: string;
     begin
-        upper_bound := build_prefix_upper_bound(stored_prefix);
-        if (stored_prefix = '') or (upper_bound = '') then
+        rows := base_range_rows(stored_prefix, rank_by_popularity);
+        for row_idx := 0 to High(rows) do
         begin
-            Exit;
-        end;
-
-        stmt := nil;
-        try
-            if rank_by_popularity then
+            candidate_text := Trim(rows[row_idx].text);
+            candidate_has_prior := rows[row_idx].popularity_prior >= 0;
+            if rank_by_popularity and candidate_has_prior then
             begin
-                sql_text := base_completion_popularity_sql;
+                candidate_rank := rows[row_idx].popularity_prior;
             end
             else
             begin
-                sql_text := base_completion_weight_sql;
+                candidate_rank := rows[row_idx].weight;
             end;
-            if (not m_base_connection.prepare(sql_text, stmt)) or
-                (not m_base_connection.BindText(stmt, 1, stored_prefix)) or
-                (not m_base_connection.BindText(stmt, 2, upper_bound)) or
-                (not m_base_connection.BindInt(stmt, 3, c_query_limit)) then
+            candidate_prefix_text := copy_first_text_units(candidate_text,
+                Length(prefix_syllables));
+            candidate_anchored := (candidate_prefix_text <> '') and
+                exact_prefix_texts.ContainsKey(candidate_prefix_text);
+            if candidate_anchored then
             begin
-                Exit;
+                // A completed exact word at the typed boundary is stronger
+                // evidence than an accidental prefix through another word.
+                Inc(candidate_rank, c_base_exact_prefix_anchor_bonus);
             end;
+            consider_candidate(target_items, rows[row_idx].pinyin,
+                candidate_text, rows[row_idx].weight, okcs_base_exact, '',
+                candidate_anchored, candidate_rank,
+                -get_text_unit_count_local(candidate_text),
+                rows[row_idx].popularity_prior, rows[row_idx].corpus_score,
+                rows[row_idx].document_score, rows[row_idx].source_count,
+                rows[row_idx].path_score, rows[row_idx].vertical_penalty,
+                rows[row_idx].layer_kind,
+                candidate_has_prior);
+            if (Length(target_items) >= source_limit) and
+                (candidate_rank + c_base_exact_prefix_anchor_bonus <
+                minimum_primary(target_items)) then
+            begin
+                Break;
+            end;
+        end;
+    end;
 
-            step_result := m_base_connection.step(stmt);
-            while step_result = SQLITE_ROW do
+    // The rerank-only extras: the range scans by weight and by popularity,
+    // wider than the pool's own sources, without what the pool already holds.
+    procedure collect_extras;
+    var
+        lists: array[0..1] of TncRankedCompletionList;
+        list_idx: Integer;
+        item_idx: Integer;
+        other_idx: Integer;
+        duplicate: Boolean;
+    begin
+        SetLength(extras, 0);
+        SetLength(extra_weight_items, 0);
+        SetLength(extra_popularity_items, 0);
+        if not exact_prefix_texts_loaded then
+        begin
+            load_exact_prefix_texts;
+            exact_prefix_texts_loaded := True;
+        end;
+        source_limit := c_extra_source_limit;
+        try
+            query_base_stored_prefix(compact_prefix, extra_weight_items, False);
+            query_base_stored_prefix(compact_prefix, extra_popularity_items,
+                True);
+            if not SameText(explicit_prefix, compact_prefix) then
             begin
-                candidate_pinyin := m_base_connection.ColumnText(stmt, 0);
-                candidate_text := Trim(m_base_connection.ColumnText(stmt, 1));
-                candidate_weight := m_base_connection.ColumnInt(stmt, 2);
-                candidate_popularity_prior := m_base_connection.ColumnInt(stmt, 3);
-                candidate_corpus_score := m_base_connection.ColumnInt(stmt, 4);
-                candidate_document_score := m_base_connection.ColumnInt(stmt, 5);
-                candidate_source_count := m_base_connection.ColumnInt(stmt, 6);
-                candidate_path_score := m_base_connection.ColumnInt(stmt, 7);
-                candidate_vertical_penalty := m_base_connection.ColumnInt(stmt, 8);
-                candidate_layer_kind := m_base_connection.ColumnInt(stmt, 9);
-                candidate_has_prior := candidate_popularity_prior >= 0;
-                if rank_by_popularity and candidate_has_prior then
-                begin
-                    candidate_rank := candidate_popularity_prior;
-                end
-                else
-                begin
-                    candidate_rank := candidate_weight;
-                end;
-                candidate_prefix_text := copy_first_text_units(candidate_text,
-                    Length(prefix_syllables));
-                candidate_anchored := (candidate_prefix_text <> '') and
-                    exact_prefix_texts.ContainsKey(candidate_prefix_text);
-                if candidate_anchored then
-                begin
-                    // A completed exact word at the typed boundary is stronger
-                    // evidence than an accidental prefix through another word.
-                    Inc(candidate_rank, c_base_exact_prefix_anchor_bonus);
-                end;
-                consider_candidate(target_items, candidate_pinyin,
-                    candidate_text, candidate_weight, okcs_base_exact, '',
-                    candidate_anchored, candidate_rank,
-                    -get_text_unit_count_local(candidate_text),
-                    candidate_popularity_prior, candidate_corpus_score,
-                    candidate_document_score, candidate_source_count,
-                    candidate_path_score, candidate_vertical_penalty,
-                    candidate_layer_kind,
-                    candidate_has_prior);
-                if (Length(target_items) >= c_source_result_limit) and
-                    (candidate_rank + c_base_exact_prefix_anchor_bonus <
-                    minimum_primary(target_items)) then
-                begin
-                    Break;
-                end;
-                step_result := m_base_connection.step(stmt);
+                query_base_stored_prefix(explicit_prefix, extra_weight_items,
+                    False);
+                query_base_stored_prefix(explicit_prefix,
+                    extra_popularity_items, True);
             end;
         finally
-            if stmt <> nil then
+            source_limit := c_source_result_limit;
+        end;
+        sort_ranked(extra_weight_items);
+        sort_ranked(extra_popularity_items);
+        lists[0] := extra_weight_items;
+        lists[1] := extra_popularity_items;
+        for list_idx := 0 to 1 do
+        begin
+            for item_idx := 0 to High(lists[list_idx]) do
             begin
-                m_base_connection.finalize(stmt);
+                if Length(extras) >= c_extra_limit then
+                begin
+                    Exit;
+                end;
+                duplicate := False;
+                for other_idx := 0 to High(results) do
+                begin
+                    if SameText(results[other_idx].full_pinyin,
+                        lists[list_idx][item_idx].item.full_pinyin) and
+                        SameText(results[other_idx].text,
+                        lists[list_idx][item_idx].item.text) then
+                    begin
+                        duplicate := True;
+                        Break;
+                    end;
+                end;
+                if not duplicate then
+                begin
+                    for other_idx := 0 to High(extras) do
+                    begin
+                        if SameText(extras[other_idx].full_pinyin,
+                            lists[list_idx][item_idx].item.full_pinyin) and
+                            SameText(extras[other_idx].text,
+                            lists[list_idx][item_idx].item.text) then
+                        begin
+                            duplicate := True;
+                            Break;
+                        end;
+                    end;
+                end;
+                if duplicate then
+                begin
+                    Continue;
+                end;
+                SetLength(extras, Length(extras) + 1);
+                extras[High(extras)] := lists[list_idx][item_idx].item;
             end;
         end;
     end;
@@ -4908,9 +5187,18 @@ var
         if m_one_key_completion_cache.Count >= c_result_cache_limit then
         begin
             m_one_key_completion_cache.Clear;
+            if m_one_key_completion_extra_cache <> nil then
+            begin
+                m_one_key_completion_extra_cache.Clear;
+            end;
         end;
         m_one_key_completion_cache.AddOrSetValue(cache_key,
             Copy(results, 0, Length(results)));
+        if m_one_key_completion_extra_cache <> nil then
+        begin
+            m_one_key_completion_extra_cache.AddOrSetValue(cache_key,
+                Copy(extras, 0, Length(extras)));
+        end;
     end;
 
     procedure append_ranked_items(const items: TncRankedCompletionList);
@@ -4946,6 +5234,9 @@ var
         end;
     end;
 
+    // The user's accept and reject records of this prefix, for the pool and
+    // for the rerank-only extras alike: an extra the user rejected must not
+    // come back through the rerank.
     procedure load_feedback_counts;
     var
         stmt: Psqlite3_stmt;
@@ -4954,10 +5245,28 @@ var
         feedback_text: string;
         feedback_count: Integer;
         feedback_reject_count: Integer;
-        result_idx: Integer;
+
+        function record_belongs_to(var items: TncOneKeyCompletionList): Boolean;
+        var
+            item_idx: Integer;
+        begin
+            for item_idx := 0 to High(items) do
+            begin
+                if SameText(items[item_idx].full_pinyin, feedback_pinyin) and
+                    SameText(items[item_idx].text, feedback_text) then
+                begin
+                    items[item_idx].feedback_count := feedback_count;
+                    items[item_idx].feedback_reject_count :=
+                        feedback_reject_count;
+                    Exit(True);
+                end;
+            end;
+            Result := False;
+        end;
+
     begin
-        if (Length(results) = 0) or (not m_user_ready) or
-            (m_user_connection = nil) then
+        if ((Length(results) = 0) and (Length(extras) = 0)) or
+            (not m_user_ready) or (m_user_connection = nil) then
         begin
             Exit;
         end;
@@ -4977,18 +5286,9 @@ var
                 feedback_text := Trim(m_user_connection.ColumnText(stmt, 1));
                 feedback_count := m_user_connection.ColumnInt(stmt, 2);
                 feedback_reject_count := m_user_connection.ColumnInt(stmt, 3);
-                for result_idx := 0 to High(results) do
+                if not record_belongs_to(results) then
                 begin
-                    if SameText(results[result_idx].full_pinyin,
-                        feedback_pinyin) and
-                        SameText(results[result_idx].text,
-                        feedback_text) then
-                    begin
-                        results[result_idx].feedback_count := feedback_count;
-                        results[result_idx].feedback_reject_count :=
-                            feedback_reject_count;
-                        Break;
-                    end;
+                    record_belongs_to(extras);
                 end;
                 step_result := m_user_connection.step(stmt);
             end;
@@ -5001,6 +5301,11 @@ var
     end;
 begin
     SetLength(results, 0);
+    SetLength(extras, 0);
+    source_limit := c_source_result_limit;
+    exact_prefix_texts_loaded := False;
+    base_ranges[0] := Default(TncBaseRange);
+    base_ranges[1] := Default(TncBaseRange);
     Result := False;
     canonical_prefix := normalize_canonical_pinyin_key(pinyin_prefix);
     compact_prefix := normalize_compact_pinyin_key(canonical_prefix);
@@ -5064,6 +5369,7 @@ begin
         if not query_precomputed_base then
         begin
             load_exact_prefix_texts;
+            exact_prefix_texts_loaded := True;
             query_base_stored_prefix(compact_prefix, base_items, True);
             query_base_stored_prefix(compact_prefix, base_weight_items,
                 False);
@@ -5081,12 +5387,42 @@ begin
         query_transition_completion;
         sort_ranked(transition_items);
         append_ranked_items(transition_items);
+        collect_extras;
         load_feedback_counts;
         cache_results;
         Result := Length(results) > 0;
     finally
         exact_prefix_texts.Free;
     end;
+end;
+
+function TncSqliteDictionary.lookup_one_key_completion_extras(
+    const pinyin_prefix: string;
+    out results: TncOneKeyCompletionList): Boolean;
+var
+    cache_key: string;
+    pool: TncOneKeyCompletionList;
+begin
+    SetLength(results, 0);
+    Result := False;
+    cache_key := normalize_canonical_pinyin_key(pinyin_prefix);
+    if (cache_key = '') or (m_one_key_completion_extra_cache = nil) then
+    begin
+        Exit;
+    end;
+    if not m_one_key_completion_extra_cache.TryGetValue(cache_key, results) then
+    begin
+        // The extras are collected with the pool and cached beside it.
+        lookup_one_key_completions(pinyin_prefix, pool);
+        if not m_one_key_completion_extra_cache.TryGetValue(cache_key,
+            results) then
+        begin
+            SetLength(results, 0);
+            Exit;
+        end;
+    end;
+    results := Copy(results, 0, Length(results));
+    Result := Length(results) > 0;
 end;
 
 function TncSqliteDictionary.lookup_long_one_key_completions(
@@ -5568,6 +5904,80 @@ begin
             audit);
     end;
     Result := audit.available;
+end;
+
+function TncSqliteDictionary.lookup_short_promotion(const pinyin,
+    baseline_text: string; out promoted_text, candidates: string;
+    out lead: Integer): Boolean;
+const
+    c_result_cache_limit = 4096;
+    promotion_sql =
+        'SELECT promoted_text, lead, candidates FROM dict_base_short_promotion ' +
+        'WHERE pinyin = ?1 AND baseline_text = ?2';
+var
+    stmt: Psqlite3_stmt;
+    cache_key, cached: string;
+    parts: TArray<string>;
+begin
+    promoted_text := '';
+    candidates := '';
+    lead := 0;
+    Result := False;
+    if (pinyin = '') or (baseline_text = '') or (not ensure_open) or
+        (not m_base_ready) or (m_base_connection = nil) then
+    begin
+        Exit;
+    end;
+    cache_key := pinyin + #1 + baseline_text;
+    if (m_short_promotion_cache <> nil) and
+        m_short_promotion_cache.TryGetValue(cache_key, cached) then
+    begin
+        parts := cached.Split([#1]);
+        if Length(parts) = 3 then
+        begin
+            promoted_text := parts[0];
+            lead := StrToIntDef(parts[1], 0);
+            candidates := parts[2];
+            Result := True;
+        end;
+        Exit;
+    end;
+
+    stmt := nil;
+    try
+        // A dictionary built before this table has no rows to offer.
+        if (not m_base_connection.prepare(promotion_sql, stmt)) or
+            (not m_base_connection.BindText(stmt, 1, pinyin)) or
+            (not m_base_connection.BindText(stmt, 2, baseline_text)) then
+        begin
+            Exit;
+        end;
+        if m_base_connection.step(stmt) = SQLITE_ROW then
+        begin
+            promoted_text := m_base_connection.ColumnText(stmt, 0);
+            lead := m_base_connection.ColumnInt(stmt, 1);
+            candidates := m_base_connection.ColumnText(stmt, 2);
+            Result := promoted_text <> '';
+        end;
+    finally
+        if stmt <> nil then
+        begin
+            m_base_connection.finalize(stmt);
+        end;
+    end;
+
+    if m_short_promotion_cache <> nil then
+    begin
+        if m_short_promotion_cache.Count >= c_result_cache_limit then
+        begin
+            m_short_promotion_cache.Clear;
+        end;
+        if Result then
+            m_short_promotion_cache.AddOrSetValue(cache_key,
+                promoted_text + #1 + IntToStr(lead) + #1 + candidates)
+        else
+            m_short_promotion_cache.AddOrSetValue(cache_key, '');
+    end;
 end;
 
 function TncSqliteDictionary.resolve_exact_text_prefix(
@@ -6594,6 +7004,20 @@ begin
         'ON dict_base_completion_pair_audit(typed_prefix, ' +
         'baseline_full_pinyin, baseline_text, challenger_full_pinyin, ' +
         'challenger_text, context_width DESC, context_suffix);') then
+    begin
+        Result := False;
+        Exit;
+    end;
+
+    if not connection.exec(
+        'CREATE TABLE IF NOT EXISTS dict_base_short_promotion (' +
+        'pinyin TEXT NOT NULL,' +
+        'baseline_text TEXT NOT NULL,' +
+        'promoted_text TEXT NOT NULL,' +
+        'lead INTEGER NOT NULL DEFAULT 0,' +
+        'candidates TEXT NOT NULL DEFAULT '''',' +
+        'PRIMARY KEY(pinyin, baseline_text)' +
+        ') WITHOUT ROWID;') then
     begin
         Result := False;
         Exit;
@@ -8276,6 +8700,130 @@ begin
     Result := True;
 end;
 
+// Prepares a statement of the base dictionary whose search condition is
+// "[b.]pinyin LIKE ?1" (its other parameters start at ?2 and stay below ?3)
+// and binds the pattern.
+//
+// LIKE cannot use the binary index on pinyin, so the statement as written
+// reads the whole table. A pattern only matches rows that begin with its
+// literal head, in either case of the head's ASCII letters (LIKE folds ASCII
+// case). The rows are found through the index within the ranges of the head's
+// first characters, one range per case variant, and the statement reads those
+// rows by id: the same rows in the order of the table, so the ORDER BY sees
+// what the table scan gave it and ties come out as before.
+function TncSqliteDictionary.prepare_base_pinyin_like(const sql: string;
+    const pattern: string; out stmt: Psqlite3_stmt): Boolean;
+const
+    c_condition = 'pinyin LIKE ?1';
+    c_head_chars = 3;
+    c_first_range_parameter = 3;
+var
+    heads: TArray<string>;
+    next_heads: TArray<string>;
+    ranges: string;
+    ranged_sql: string;
+    alias_prefix: string;
+    condition_pos: Integer;
+    char_idx: Integer;
+    head_idx: Integer;
+    ch: Char;
+    upper_bound: string;
+begin
+    stmt := nil;
+    heads := [''];
+    char_idx := 1;
+    while (char_idx <= Length(pattern)) and (char_idx <= c_head_chars) do
+    begin
+        ch := pattern[char_idx];
+        if (ch = '%') or (ch = '_') or (Ord(ch) < 32) or (Ord(ch) > 126) then
+        begin
+            Break;
+        end;
+        SetLength(next_heads, 0);
+        for head_idx := 0 to High(heads) do
+        begin
+            if CharInSet(ch, ['A' .. 'Z', 'a' .. 'z']) then
+            begin
+                next_heads := next_heads + [heads[head_idx] + UpCase(ch),
+                    heads[head_idx] + Chr(Ord(UpCase(ch)) + 32)];
+            end
+            else
+            begin
+                next_heads := next_heads + [heads[head_idx] + ch];
+            end;
+        end;
+        heads := next_heads;
+        Inc(char_idx);
+    end;
+    condition_pos := Pos(c_condition, sql);
+    if (heads[0] = '') or (condition_pos <= 0) then
+    begin
+        Result := m_base_connection.prepare(sql, stmt) and
+            m_base_connection.BindText(stmt, 1, pattern);
+        Exit;
+    end;
+
+    alias_prefix := '';
+    if (condition_pos > 2) and (Copy(sql, condition_pos - 2, 2) = 'b.') then
+    begin
+        alias_prefix := 'b.';
+        Dec(condition_pos, 2);
+    end;
+    ranges := '';
+    for head_idx := 0 to High(heads) do
+    begin
+        if ranges <> '' then
+        begin
+            ranges := ranges + ' OR ';
+        end;
+        ranges := ranges + Format('(pinyin >= ?%d AND pinyin < ?%d)',
+            [c_first_range_parameter + 2 * head_idx,
+            c_first_range_parameter + 2 * head_idx + 1]);
+    end;
+    ranged_sql := Copy(sql, 1, condition_pos - 1) + alias_prefix +
+        'id IN (SELECT id FROM dict_base WHERE (' + ranges + ') AND ' +
+        c_condition + ')' +
+        Copy(sql, condition_pos + Length(alias_prefix) + Length(c_condition), MaxInt);
+    Result := m_base_connection.prepare(ranged_sql, stmt) and
+        m_base_connection.BindText(stmt, 1, pattern);
+    for head_idx := 0 to High(heads) do
+    begin
+        if not Result then
+        begin
+            Break;
+        end;
+        upper_bound := heads[head_idx];
+        upper_bound[Length(upper_bound)] :=
+            Chr(Ord(upper_bound[Length(upper_bound)]) + 1);
+        Result := m_base_connection.BindText(stmt,
+            c_first_range_parameter + 2 * head_idx, heads[head_idx]) and
+            m_base_connection.BindText(stmt,
+            c_first_range_parameter + 2 * head_idx + 1, upper_bound);
+    end;
+end;
+
+function TncSqliteDictionary.pinyin_shape(const stored_pinyin: string): TncPinyinShape;
+const
+    c_cache_limit = 16384;
+begin
+    if (m_pinyin_shape_cache <> nil) and
+        m_pinyin_shape_cache.TryGetValue(stored_pinyin, Result) then
+    begin
+        Exit;
+    end;
+    Result.compact := normalize_compact_pinyin_key(stored_pinyin);
+    Result.syllables := split_full_pinyin_syllables(
+        normalize_canonical_pinyin_key(stored_pinyin));
+    if m_pinyin_shape_cache <> nil then
+    begin
+        if m_pinyin_shape_cache.Count >= c_cache_limit then
+        begin
+            m_pinyin_shape_cache.Clear;
+        end;
+        m_pinyin_shape_cache.Add(stored_pinyin, Result);
+    end;
+end;
+
 function TncSqliteDictionary.split_full_pinyin_syllables(const pinyin: string): TArray<string>;
 var
     parser: TncPinyinParser;
@@ -8922,28 +9470,7 @@ function TncSqliteDictionary.is_nonbase_structured_rule_exact_phrase(const pinyi
 var
     pinyin_key: string;
     text_key: string;
-    syllables: TArray<string>;
     text_units: TArray<string>;
-    tail_pinyin: string;
-    tail_text: string;
-
-    function head_matches_local: Boolean;
-    begin
-        Result := ((SameText(syllables[0], 'wo')) and
-            (text_units[0] = string(Char($6211)))) or
-            ((SameText(syllables[0], 'ni')) and
-            (text_units[0] = string(Char($4F60)))) or
-            ((SameText(syllables[0], 'zui')) and
-            (text_units[0] = string(Char($6700)))) or
-            ((SameText(syllables[0], 'bu')) and
-            (text_units[0] = string(Char($4E0D)))) or
-            ((SameText(syllables[0], 'hen')) and
-            (text_units[0] = string(Char($5F88)))) or
-            ((SameText(syllables[0], 'jiu')) and
-            (text_units[0] = string(Char($5C31)))) or
-            ((SameText(syllables[0], 'qing')) and
-            (text_units[0] = string(Char($8BF7))));
-    end;
 
     function fixed_suffix_text_matches_local(const suffix_pinyin: string;
         const suffix_text: string): Boolean;
@@ -9069,25 +9596,6 @@ var
             explicit_user_entry_exists(prefix_pinyin, prefix_text);
     end;
 
-    function has_exact_tail_phrase_local: Boolean;
-    var
-        tail_idx: Integer;
-    begin
-        tail_pinyin := '';
-        tail_text := '';
-        for tail_idx := 1 to High(syllables) do
-        begin
-            tail_pinyin := tail_pinyin + syllables[tail_idx];
-            tail_text := tail_text + text_units[tail_idx];
-        end;
-        if (tail_pinyin = '') or (tail_text = '') then
-        begin
-            Exit(False);
-        end;
-
-        Result := normalized_base_entry_exists(tail_pinyin, tail_text) or
-            explicit_user_entry_exists(tail_pinyin, tail_text);
-    end;
 begin
     Result := False;
     pinyin_key := LowerCase(Trim(pinyin));
@@ -9105,29 +9613,11 @@ begin
         Exit;
     end;
 
+    // A phrase the user put together from a head word and an exact tail
+    // ("jiu" + "guize") is learned like any other: no engine rule writes
+    // such a phrase by itself any more.
     text_units := split_text_units_local(text_key);
-    if has_exact_fixed_suffix_phrase_local then
-    begin
-        Exit(True);
-    end;
-
-    syllables := split_full_pinyin_syllables(pinyin_key);
-    if (Length(syllables) < 3) or (Length(syllables) > 4) or
-        (Length(text_units) <> Length(syllables)) then
-    begin
-        Exit;
-    end;
-    if not head_matches_local then
-    begin
-        Exit;
-    end;
-
-    if head_matches_local and has_exact_tail_phrase_local then
-    begin
-        Exit(True);
-    end;
-
-    Result := False;
+    Result := has_exact_fixed_suffix_phrase_local;
 end;
 
 function TncSqliteDictionary.is_base_entry(const pinyin: string; const text: string): Boolean;
@@ -11371,6 +11861,10 @@ begin
     begin
         m_one_key_completion_cache.Clear;
     end;
+    if m_one_key_completion_extra_cache <> nil then
+    begin
+        m_one_key_completion_extra_cache.Clear;
+    end;
     if m_long_one_key_completion_cache <> nil then
     begin
         m_long_one_key_completion_cache.Clear;
@@ -11382,6 +11876,10 @@ begin
     if m_one_key_completion_pair_audit_cache <> nil then
     begin
         m_one_key_completion_pair_audit_cache.Clear;
+    end;
+    if m_short_promotion_cache <> nil then
+    begin
+        m_short_promotion_cache.Clear;
     end;
     if m_exact_text_prefix_cache <> nil then
     begin
@@ -14511,8 +15009,8 @@ var
                 begin
                     prefix_stmt := nil;
                     try
-                        if m_base_connection.prepare(base_typo_prefix_sql, prefix_stmt) and
-                            m_base_connection.BindText(prefix_stmt, 1, swap_key + '%') and
+                        if prepare_base_pinyin_like(base_typo_prefix_sql, swap_key + '%',
+                            prefix_stmt) and
                             m_base_connection.BindInt(prefix_stmt, 2, c_typo_prefix_probe_limit) then
                         begin
                             step_result := m_base_connection.step(prefix_stmt);
@@ -15145,8 +15643,8 @@ begin
         begin
             stmt := nil;
             try
-                if m_base_connection.prepare(base_mixed_pattern_sql, stmt) and
-                    m_base_connection.BindText(stmt, 1, mixed_like_pattern) and
+                if prepare_base_pinyin_like(base_mixed_pattern_sql, mixed_like_pattern,
+                    stmt) and
                     m_base_connection.BindInt(stmt, 2, m_limit) then
                 begin
                     step_result := m_base_connection.step(stmt);
@@ -15207,8 +15705,8 @@ begin
 
             stmt := nil;
             try
-                if m_base_connection.prepare(base_initial_single_char_sql, stmt) and
-                    m_base_connection.BindText(stmt, 1, query_key + '%') and
+                if prepare_base_pinyin_like(base_initial_single_char_sql, query_key + '%',
+                    stmt) and
                     m_base_connection.BindInt(stmt, 2, Min(24, m_limit)) then
                 begin
                     step_result := m_base_connection.step(stmt);
@@ -15263,8 +15761,8 @@ begin
         begin
             stmt := nil;
             try
-                if m_base_connection.prepare(base_initial_single_char_sql, stmt) and
-                    m_base_connection.BindText(stmt, 1, mixed_tokens[0].text + '%') and
+                if prepare_base_pinyin_like(base_initial_single_char_sql,
+                    mixed_tokens[0].text + '%', stmt) and
                     m_base_connection.BindInt(stmt, 2, Min(24, m_limit)) then
                 begin
                     step_result := m_base_connection.step(stmt);
@@ -15516,6 +16014,89 @@ end;
 
 procedure TncSqliteDictionary.record_commit(const pinyin: string; const text: string;
     const explicit_choice: Boolean = False);
+begin
+    record_commit_internal(pinyin, text, explicit_choice, False);
+end;
+
+procedure TncSqliteDictionary.record_raw_input_choice(const input_key, text: string);
+const
+    update_latest_sql = 'UPDATE dict_user_query_latest SET text = ?2, ' +
+        'last_used = strftime(''%s'',''now'') WHERE query_pinyin = ?1';
+    insert_latest_sql = 'INSERT OR IGNORE INTO dict_user_query_latest(query_pinyin, text, last_used) ' +
+        'VALUES (?1, ?2, strftime(''%s'',''now''))';
+var
+    key, sql: string;
+    stmt: Psqlite3_stmt;
+begin
+    key := LowerCase(Trim(input_key));
+    if (key = '') or (text = '') or (not ensure_open) or (not m_user_ready) or
+        (m_user_connection = nil) then
+    begin
+        Exit;
+    end;
+    clear_user_read_caches;
+    for sql in TArray<string>.Create(update_latest_sql, insert_latest_sql) do
+    begin
+        stmt := nil;
+        try
+            if m_user_connection.prepare(sql, stmt) and
+                m_user_connection.BindText(stmt, 1, key) and
+                m_user_connection.BindText(stmt, 2, text) then
+            begin
+                m_user_connection.step(stmt);
+            end;
+        finally
+            if stmt <> nil then
+            begin
+                m_user_connection.finalize(stmt);
+            end;
+        end;
+    end;
+end;
+
+function TncSqliteDictionary.get_raw_input_choice(const input_key: string): string;
+const
+    query_sql = 'SELECT text FROM dict_user_query_latest WHERE query_pinyin = ?1 LIMIT 1';
+var
+    key: string;
+    stmt: Psqlite3_stmt;
+begin
+    // Read as stored: get_query_latest_choice_text checks its text against the
+    // pinyin of the query, which raw letters never pass.
+    Result := '';
+    key := LowerCase(Trim(input_key));
+    if (key = '') or (not ensure_open) or (not m_user_ready) or (m_user_connection = nil) then
+    begin
+        Exit;
+    end;
+    stmt := nil;
+    try
+        if m_user_connection.prepare(query_sql, stmt) and
+            m_user_connection.BindText(stmt, 1, key) and
+            (m_user_connection.step(stmt) = SQLITE_ROW) then
+        begin
+            Result := m_user_connection.ColumnText(stmt, 0);
+        end;
+    finally
+        if stmt <> nil then
+        begin
+            m_user_connection.finalize(stmt);
+        end;
+    end;
+end;
+
+procedure TncSqliteDictionary.record_selected_short_phrase(const pinyin, text: string);
+var
+    units: Integer;
+begin
+    units := get_valid_cjk_codepoint_count(text);
+    // Only an explicit short-phrase alternative bypasses the automatic
+    // particle rule. Alignment, user-word length and other guards still apply.
+    record_commit_internal(pinyin, text, True, (units >= 3) and (units <= 4));
+end;
+
+procedure TncSqliteDictionary.record_commit_internal(const pinyin, text: string;
+    const explicit_choice, selected_short_phrase: Boolean);
 const
     update_stats_sql = 'UPDATE dict_user_stats SET commit_count = commit_count + 1, ' +
         'last_used = strftime(''%s'',''now'') WHERE pinyin = ?1 AND text = ?2';
@@ -15585,7 +16166,9 @@ begin
     base_entry_exists := normalized_base_entry_exists(pinyin_key, text);
     existing_user_entry := is_valid_user_text(text) and
         explicit_user_entry_exists(pinyin_key, text);
+    // Do not erase a deliberately learned phrase when it becomes the top choice.
     suppress_structured_rule_phrase_user_row := full_pinyin_input and
+        (not selected_short_phrase) and (not existing_user_entry) and
         is_nonbase_structured_rule_exact_phrase(pinyin_key, text);
     suppress_admin_alias_user_row := full_pinyin_input and
         is_low_evidence_admin_place_alias_user_entry(pinyin_key, text, '', 0, 0);
