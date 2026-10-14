@@ -7567,6 +7567,38 @@ var
         end;
     end;
 
+    // A key that lengthens or rewrites the last syllable ("jid" -> "jidu",
+    // "xia" -> "xian") changes the anchor a long completion continued, and
+    // its spelling was the typed keys plus the suffix. The user has rejected
+    // nothing yet: only a key that starts a new syllable after the unchanged
+    // syllables before it can leave the completion.
+    function continues_last_syllable: Boolean;
+    var
+        previous_syllables: TncPinyinParseResult;
+        syllable_idx: Integer;
+    begin
+        previous_syllables := get_effective_compact_pinyin_syllables(
+            previous_query_prefix, False);
+        if Length(previous_syllables) = 0 then
+        begin
+            Exit(False);
+        end;
+        if Length(syllables) <= Length(previous_syllables) then
+        begin
+            Exit(True);
+        end;
+        for syllable_idx := 0 to High(previous_syllables) do
+        begin
+            if not SameText(
+                normalize_pinyin_text(previous_syllables[syllable_idx].text),
+                normalize_pinyin_text(syllables[syllable_idx].text)) then
+            begin
+                Exit(True);
+            end;
+        end;
+        Result := False;
+    end;
+
 begin
     previous_completion := m_one_key_completion;
     previous_query_prefix := m_one_key_completion_query_prefix;
@@ -7611,7 +7643,8 @@ begin
         (Length(compact_query) > Length(previous_query_prefix)) and
         (not previous_completion.full_pinyin.StartsWith(compact_query,
         True)) and (previous_completion.anchor_path <> '') and
-        (previous_completion.suffix_text <> '') then
+        (previous_completion.suffix_text <> '') and
+        (not continues_last_syllable) then
     begin
         m_dictionary.record_long_one_key_completion_reject(
             previous_completion.anchor_path,
