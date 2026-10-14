@@ -5864,8 +5864,7 @@ begin
 end;
 
 function try_split_relaxed_missing_apostrophe_token(const parser: TncPinyinParser; const token_text: string;
-    out out_left: string; out out_right: string;
-    const for_prefix_recall: Boolean = False): Boolean;
+    out out_left: string; out out_right: string): Boolean;
 var
     split_idx: Integer;
     left_text: string;
@@ -5893,10 +5892,7 @@ begin
 
         left_parts := parser.parse(left_text);
         right_parts := parser.parse(right_text);
-        // Keep whole-input parsing conservative; prefix recall can retain every
-        // valid head without changing the complete-word interpretation/ranking.
-        if (not for_prefix_recall) and
-            (Length(right_text) = 1) and (Length(left_text) > 3) and
+        if (Length(right_text) = 1) and (Length(left_text) > 3) and
             (Length(left_parts) < 2) then
         begin
             Continue;
