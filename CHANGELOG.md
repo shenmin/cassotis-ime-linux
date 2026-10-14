@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0 - Unreleased
+## 2.0.0 - 2026-10-14
 
 - Align the engine and dictionaries with Cassotis IME and Cassotis Lexicon
   v2.1.0. One character language model now handles long and short candidates,
