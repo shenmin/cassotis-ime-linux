@@ -100,6 +100,7 @@ python3 "$cassotis_root/scripts/model_weights.py" --pack \
 common_args=(
     -Mdelphiunicode
     -FcUTF8
+    -CF64
     -vm2091
     -vm4110
     -O2
@@ -117,6 +118,9 @@ common_args=(
     "-Fu$cassotis_root/src/host"
 )
 force_pending=$force_build
+if cassotis_fpc_options_changed "$unit_dir" "${common_args[@]}"; then
+    force_pending=1
+fi
 
 compile_target() {
     local source_path="$1"
@@ -129,6 +133,7 @@ compile_target() {
     printf '[build] %s\n' "$output_name"
     "$CASSOTIS_FPC_BIN" "${target_args[@]}" "-o$output_name" "$source_path"
     cassotis_require_executable "$bin_dir/$output_name"
+    cassotis_fpc_record_options "$unit_dir" "${common_args[@]}"
 }
 
 compile_target "$cassotis_root/src/service/cassotis_engine.lpr" \

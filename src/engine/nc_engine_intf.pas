@@ -3433,7 +3433,8 @@ begin
         if left.score > right.score then Exit(-1);
         Exit(1);
     end;
-    Result := UnicodeCompareStr(left.text, right.text);
+    // Ordinal, as on Windows: a locale collation reorders equal scores.
+    Result := CompareStr(left.text, right.text);
 end;
 
 function TncEngine.normalize_learned_prefix_exact_scores(const query_key: string;
@@ -35273,6 +35274,10 @@ var
             Exit;
         end;
 
+        // These flags belong to this invocation. Reading an old stack value
+        // skips preparation and changes ranking between identical queries.
+        lightweight_query_prepared := False;
+        exact_complete_texts_prepared := False;
         has_exact_complete_phrase_candidate := False;
         latest_query_choice_text := '';
         latest_query_choice_prepared := False;
@@ -125030,6 +125035,12 @@ var
                 begin
                     ensure_fast_prefix_single_char_partials_visible(m_candidates, 0);
                     ensure_multi_char_partial_precedes_single_char_partial(m_candidates);
+                    // Five-syllable input now reaches this exact-chain fast
+                    // path. Retain the attested 2+2 prefix and its segment
+                    // identity just as the ordinary prefix path does.
+                    ensure_supported_short_four_two_prefix_partial_visible_local(
+                        get_effective_compact_pinyin_syllables(lookup_text),
+                        m_candidates);
                 end;
                 note_debug_helper_elapsed('tplsingle', phase_start_tick);
                 phase_start_tick := nc_monotonic_tick_ms;
@@ -137878,6 +137889,12 @@ var
     cuts: TArray<TArray<Integer>>;
     top_complete: Boolean;
 
+    // Delphi evaluates Single operands in Double before the final assignment.
+    function real_value(const value: Single): Double;
+    begin
+        Result := value;
+    end;
+
     function span_key(const start, count: Integer): string;
     var k: Integer;
     begin
@@ -138213,11 +138230,11 @@ begin
             show(draft);
             behind := 0;
             if (rc = 1) and (Length(corrected) = units) and
-                (Max(0, corrected_gap) - gain <= c_shown_margin) then show(corrected);
+                (real_value(Max(0, corrected_gap)) - real_value(gain) <= c_shown_margin) then show(corrected);
         end;
         if scored > 0 then
             for index := 1 to High(order) do
-                if behind + scores[order[0]] - scores[order[index]] <= c_shown_margin then
+                if real_value(behind) + real_value(scores[order[0]]) - real_value(scores[order[index]]) <= c_shown_margin then
                     show(drafts[order[index]]);
         if Length(shown) = 0 then Exit;
         m_short_phrase_key := key;

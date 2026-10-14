@@ -255,6 +255,13 @@ implementation
 
 uses Generics.Collections, Generics.Defaults, nc_types;
 
+// Delphi Win64 performs Single arithmetic in Double precision. Preserve that
+// evaluation order when exporting features to the shared GBDT parameters.
+function promoted_single(const value: Single): Double; inline;
+begin
+    Result := value;
+end;
+
 function compare_ordinal(const left, right: string): Integer;
 var i: Integer;
 begin
@@ -471,7 +478,7 @@ begin
         entry.lp_full := logp[full_idx[idx]];
         entry.lp_base := logp[base_idx[idx]];
         if reread_idx[idx] >= 0 then
-            entry.reread_gain := logp[reread_idx[idx]] - logp[decoded_idx[idx]];
+            entry.reread_gain := promoted_single(logp[reread_idx[idx]]) - promoted_single(logp[decoded_idx[idx]]);
         scored_items := scored_items + [entry];
         if candidates[idx].full_base_text <> '' then
             typed := Max(typed, nc_char_lm_code_point_count(candidates[idx].full_base_text));
@@ -1199,7 +1206,7 @@ begin
             if (logp[other] > logp[idx]) or ((logp[other] = logp[idx]) and (other < idx)) then
                 Inc(lp_rank);
         features[0] := logp[idx];
-        features[1] := logp[idx] / expected_units;
+        features[1] := promoted_single(logp[idx]) / expected_units;
         features[2] := logp[idx] - lp_max;
         features[3] := 0.0;
         if visible_index >= 0 then

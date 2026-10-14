@@ -20,7 +20,8 @@ begin
     if a.score < b.score then Exit(1);
     if (a.source = cs_user) and (b.source <> cs_user) then Exit(-1);
     if (b.source = cs_user) and (a.source <> cs_user) then Exit(1);
-    Result := UnicodeCompareText(a.text, b.text);
+    // Ordinal, as on Windows: a locale collation reorders equal scores.
+    Result := CompareText(a.text, b.text);
 end;
 
 procedure nc_sort_exact_components(const items: TList<TncCandidate>);

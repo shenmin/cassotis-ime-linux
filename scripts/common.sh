@@ -65,6 +65,26 @@ cassotis_require_executable() {
     [[ -x "$path" ]] || cassotis_die "executable not found: $path"
 }
 
+# FPC reuses units compiled with other options, for example without -CF64,
+# which keeps floating literals in Double as the Windows Delphi build does.
+# A unit directory records the compiler and options it was built with.
+cassotis_fpc_options_stamp() {
+    printf '%s\n' "$CASSOTIS_FPC_BIN" "$@" | sha256sum | cut -d ' ' -f 1
+}
+
+cassotis_fpc_options_changed() {
+    local unit_dir="$1"
+    shift
+    [[ "$(cat "$unit_dir/.compiler-options" 2>/dev/null || true)" != \
+        "$(cassotis_fpc_options_stamp "$@")" ]]
+}
+
+cassotis_fpc_record_options() {
+    local unit_dir="$1"
+    shift
+    cassotis_fpc_options_stamp "$@" > "$unit_dir/.compiler-options"
+}
+
 cassotis_process_uses_executable() {
     local process_id="$1"
     local target_path="$2"
