@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -174,6 +175,7 @@ DEFAULT_STATE = {
     "decimal_period_after_digit": 1,
     "auto_english": 1,
     "punctuation_ascii_symbols": MARKDOWN_ASCII_SYMBOLS,
+    "custom_phrases": [],
     "candidate_page_key_scheme": 0,
     "one_key_completion_key": 0,
     "candidate_page_size": 9,
@@ -210,12 +212,60 @@ PAGE_DEFAULT_KEYS = (
         *SHORTCUT_STATE_KEYS,
         "shortcut_disabled_mask",
     ),
+    (),  # User-authored content is not a preference to reset.
     ("debug_mode",),
 )
 
 
 class ControlError(RuntimeError):
     pass
+
+
+CUSTOM_PHRASES_MAX_JSON = 16 * 1024 * 1024 - 1024
+
+
+def validate_custom_phrases(rows):
+    if not isinstance(rows, list) or len(rows) > 1024:
+        raise ControlError("自定义短语必须为列表，最多 1024 条")
+    result = []
+    for index, row in enumerate(rows, 1):
+        if not isinstance(row, (list, tuple)) or len(row) != 2 or \
+                not all(isinstance(value, str) for value in row):
+            raise ControlError(f"第 {index} 条必须包含缩写和内容两个文本字段")
+        key, text = row
+        key = key.strip().lower()
+        if not re.fullmatch(r"[a-z]{1,32}", key):
+            raise ControlError(f"第 {index} 条缩写只能包含 1–32 个英文字母")
+        try:
+            units = len(text.encode("utf-16-le")) // 2
+        except UnicodeError as error:
+            raise ControlError(f"第 {index} 条含有无效的 Unicode 字符") from error
+        if not text.strip() or units > 4096 or \
+                any(ord(char) < 32 and char not in "\t\r\n" for char in text):
+            raise ControlError(f"第 {index} 条内容不能为空或超过 4096 字符；支持换行和 Tab")
+        result.append([key, text])
+    return result
+
+
+def phrases_json(rows):
+    return json.dumps(validate_custom_phrases(rows), ensure_ascii=False,
+                      separators=(",", ":"))
+
+
+def parse_phrases(value):
+    try:
+        if len(value.encode("utf-8")) > CUSTOM_PHRASES_MAX_JSON:
+            raise ControlError("短语文件过大")
+        return validate_custom_phrases(json.loads(value))
+    except (ValueError, UnicodeError, RecursionError) as error:
+        raise ControlError("无效的自定义短语 JSON 文件") from error
+
+
+def phrase_preview(text):
+    encoded = text.encode("utf-16-le")
+    preview = encoded[:240].decode("utf-16-le", errors="ignore")
+    preview = preview.replace("\t", " ").replace("\r", " ").replace("\n", " ")
+    return preview + ("..." if len(encoded) > 240 else "")
 
 
 def default_control_path():
@@ -254,10 +304,11 @@ def settings_subtitle(engine_path):
     return f"Cassotis IME - 言泉输入法 ({version_text})"
 
 
-def run_control(control_path, arguments):
+def run_control(control_path, arguments, input_text=None):
     try:
         result = subprocess.run(
             [control_path, *arguments],
+            input=input_text,
             check=False,
             capture_output=True,
             text=True,
@@ -332,13 +383,19 @@ def validate_state(state):
         if signature in seen:
             raise ControlError(f"“{caption}”与“{seen[signature]}”快捷键重复")
         seen[signature] = caption
+    if "custom_phrases" in state:
+        state["custom_phrases"] = validate_custom_phrases(state["custom_phrases"])
     return state
 
 
 def parse_state(output):
     state = {}
-    for line in output.splitlines():
+    # JSON strings may contain Unicode line separators as literal characters.
+    for line in output.split("\n"):
         key, separator, value = line.partition("=")
+        if separator and key == "custom_phrases":
+            state[key] = parse_phrases(value)
+            continue
         if separator and key in STATE_KEYS:
             if key == "punctuation_ascii_symbols":
                 state[key] = value
@@ -351,13 +408,17 @@ def parse_state(output):
 
 
 def get_state(control_path):
-    return parse_state(run_control(control_path, ["get-state"]))
+    state = parse_state(run_control(control_path, ["get-preferences"]))
+    if "custom_phrases" not in state:
+        raise ControlError("引擎未返回自定义短语，请确认程序版本一致")
+    return state
 
 
 def set_state(control_path, state):
     validate_state(state)
-    arguments = ["set-state"] + [str(state[key]) for key in STATE_KEYS]
-    return parse_state(run_control(control_path, arguments))
+    arguments = ["set-preferences"] + [str(state[key]) for key in STATE_KEYS]
+    return parse_state(run_control(control_path, arguments,
+                                   phrases_json(state["custom_phrases"])))
 
 
 def clear_user_dictionary(control_path):
@@ -412,6 +473,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         )
         self.notebook.append_page(
             self._build_shortcuts_page(), Gtk.Label(label="快捷键")
+        )
+        self.notebook.append_page(
+            self._build_phrases_page(), Gtk.Label(label="自定义短语")
         )
         self.notebook.append_page(
             self._build_advanced_page(), Gtk.Label(label="高级")
@@ -656,6 +720,171 @@ class SettingsWindow(Gtk.ApplicationWindow):
         modifier.set_sensitive(enabled.get_active())
         key.set_sensitive(enabled.get_active())
 
+    def _build_phrases_page(self):
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        content.set_border_width(24)
+        description = Gtk.Label(
+            label="完整输入缩写后，在一键补全行显示内容，按 Tab（或已设置的 `）上屏。\n"
+                  "不区分大小写；同一缩写有多条时只使用第一条，不改变编号候选。",
+            xalign=0, wrap=True)
+        content.pack_start(description, False, False, 0)
+        self.phrase_store = Gtk.ListStore(str, str, str)
+        self.phrase_tree = Gtk.TreeView(model=self.phrase_store)
+        self.phrase_tree.set_search_column(0)
+        renderer = Gtk.CellRendererText()
+        self.phrase_tree.append_column(Gtk.TreeViewColumn("缩写", renderer, text=0))
+        renderer = Gtk.CellRendererText(ellipsize=Pango.EllipsizeMode.END)
+        column = Gtk.TreeViewColumn("内容", renderer, text=2)
+        column.set_expand(True)
+        column.set_sizing(Gtk.TreeViewColumnSizing.FIXED)
+        self.phrase_tree.append_column(column)
+        self.phrase_tree.connect("row-activated", lambda *_: self._edit_phrase(False))
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.add(self.phrase_tree)
+        content.pack_start(scroller, True, True, 0)
+        toolbar = Gtk.Box(spacing=8)
+        for label, action in (
+            ("新增", lambda *_: self._edit_phrase(True)),
+            ("编辑", lambda *_: self._edit_phrase(False)),
+            ("删除", self._delete_phrase),
+            ("上移", lambda *_: self._move_phrase(-1)),
+            ("下移", lambda *_: self._move_phrase(1)),
+            ("导入…", lambda *_: self._phrase_file(False)),
+            ("导出…", lambda *_: self._phrase_file(True)),
+        ):
+            button = Gtk.Button(label=label)
+            button.connect("clicked", action)
+            toolbar.pack_start(button, False, False, 0)
+        content.pack_start(toolbar, False, False, 0)
+        self.phrase_warning = Gtk.Label(xalign=0, wrap=True)
+        content.pack_start(self.phrase_warning, False, False, 0)
+        return content
+
+    def _phrase_rows(self):
+        return [[row[0], row[1]] for row in self.phrase_store]
+
+    def _set_phrase_rows(self, rows):
+        rows = validate_custom_phrases(rows)
+        self.phrase_store.clear()
+        for key, text in rows:
+            self.phrase_store.append([key, text, phrase_preview(text)])
+        self._update_phrase_warning()
+
+    def _update_phrase_warning(self):
+        keys = [row[0] for row in self.phrase_store]
+        duplicates = len(keys) - len(set(keys))
+        message = f"{len(keys)}/1024 条；点击“应用”后生效。"
+        if duplicates:
+            message += f" 有 {duplicates} 条重复缩写被前面的条目遮盖，可调整顺序。"
+        self.phrase_warning.set_text(message)
+
+    def _edit_phrase(self, create):
+        model, selected = self.phrase_tree.get_selection().get_selected()
+        if not create and selected is None:
+            return
+        if create and len(model) >= 1024:
+            self.status.set_text("最多可保存 1024 条短语")
+            return
+        dialog = Gtk.Dialog(title="新增短语" if create else "编辑短语",
+                            transient_for=self, modal=True)
+        dialog.add_button("取消", Gtk.ResponseType.CANCEL)
+        dialog.add_button("保存", Gtk.ResponseType.ACCEPT)
+        dialog.set_default_size(540, 340)
+        box = dialog.get_content_area()
+        box.set_border_width(16)
+        box.set_spacing(8)
+        box.pack_start(Gtk.Label(label="缩写（1–32 个英文字母）", xalign=0), False, False, 0)
+        key_entry = Gtk.Entry(max_length=32)
+        box.pack_start(key_entry, False, False, 0)
+        box.pack_start(Gtk.Label(label="内容（保留空格、换行和 Tab，不执行宏）", xalign=0),
+                       False, False, 0)
+        editor = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR)
+        scroller = Gtk.ScrolledWindow()
+        scroller.add(editor)
+        box.pack_start(scroller, True, True, 0)
+        error_label = Gtk.Label(xalign=0, wrap=True)
+        box.pack_start(error_label, False, False, 0)
+        if not create:
+            key_entry.set_text(model[selected][0])
+            editor.get_buffer().set_text(model[selected][1])
+        dialog.show_all()
+        while dialog.run() == Gtk.ResponseType.ACCEPT:
+            buffer = editor.get_buffer()
+            text = buffer.get_text(*buffer.get_bounds(), True)
+            try:
+                key, text = validate_custom_phrases([[key_entry.get_text(), text]])[0]
+            except ControlError as error:
+                error_label.set_text(str(error))
+                continue
+            row = [key, text, phrase_preview(text)]
+            if create:
+                selected = model.append(row)
+            else:
+                model[selected] = row
+            self.phrase_tree.get_selection().select_iter(selected)
+            self._update_phrase_warning()
+            break
+        dialog.destroy()
+
+    def _delete_phrase(self, _button):
+        model, selected = self.phrase_tree.get_selection().get_selected()
+        if selected is not None:
+            model.remove(selected)
+            self._update_phrase_warning()
+
+    def _move_phrase(self, direction):
+        model, selected = self.phrase_tree.get_selection().get_selected()
+        if selected is None:
+            return
+        index = model.get_path(selected).get_indices()[0] + direction
+        if 0 <= index < len(model):
+            model.swap(selected, model.get_iter(Gtk.TreePath.new_from_indices([index])))
+            self._update_phrase_warning()
+
+    def _phrase_file(self, export):
+        dialog = Gtk.FileChooserDialog(
+            title="导出自定义短语" if export else "导入自定义短语（替换当前列表）",
+            transient_for=self,
+            action=Gtk.FileChooserAction.SAVE if export else Gtk.FileChooserAction.OPEN)
+        dialog.add_button("取消", Gtk.ResponseType.CANCEL)
+        dialog.add_button("导出" if export else "导入", Gtk.ResponseType.ACCEPT)
+        if export:
+            dialog.set_do_overwrite_confirmation(True)
+            dialog.set_current_name("custom_phrases.json")
+        file_filter = Gtk.FileFilter()
+        file_filter.set_name("JSON (*.json)")
+        file_filter.add_pattern("*.json")
+        dialog.add_filter(file_filter)
+        path = dialog.get_filename() if dialog.run() == Gtk.ResponseType.ACCEPT else None
+        dialog.destroy()
+        if not path:
+            return
+        try:
+            if export:
+                data = phrases_json(self._phrase_rows())
+                with open(path, "w", encoding="utf-8", newline="\n") as output:
+                    output.write(data + "\n")
+                self.status.set_text("自定义短语已导出")
+            else:
+                with open(path, "rb") as source:
+                    data = source.read(CUSTOM_PHRASES_MAX_JSON + 1)
+                if len(data) > CUSTOM_PHRASES_MAX_JSON:
+                    raise ControlError("短语文件过大")
+                rows = parse_phrases(data.decode("utf-8-sig"))
+                confirm = Gtk.MessageDialog(transient_for=self, modal=True,
+                    message_type=Gtk.MessageType.QUESTION, buttons=Gtk.ButtonsType.NONE,
+                    text=f"用导入的 {len(rows)} 条短语替换当前列表吗？")
+                confirm.add_button("取消", Gtk.ResponseType.CANCEL)
+                confirm.add_button("替换", Gtk.ResponseType.ACCEPT)
+                accepted = confirm.run() == Gtk.ResponseType.ACCEPT
+                confirm.destroy()
+                if accepted:
+                    self._set_phrase_rows(rows)
+                    self.status.set_text("已导入，点击“应用”后生效")
+        except (OSError, UnicodeError, ControlError) as error:
+            self.status.set_text(f"操作失败：{error}")
+
     def _build_advanced_page(self):
         page, content = self._new_page()
         diagnostics = self._new_section("诊断")
@@ -715,6 +944,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         return int(active_id) if active_id is not None else -1
 
     def _show_state(self, state):
+        self._set_phrase_rows(state.get("custom_phrases", []))
         self.loaded_state = dict(state)
         self.current_dictionary_variant = state["dictionary_variant"]
         if state["input_mode"] == 1:
@@ -791,6 +1021,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.candidate_page_size
             ),
             "debug_mode": int(self.debug_mode.get_active()),
+            "custom_phrases": self._phrase_rows(),
         }
         if changes["punctuation_full_width"] and not changes["full_width_mode"]:
             if any(not normalize_ascii_symbols(char)

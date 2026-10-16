@@ -6,7 +6,8 @@
 G_BEGIN_DECLS
 
 #define CASSOTIS_IPC_HEADER_SIZE 44U
-#define CASSOTIS_IPC_MAX_PAYLOAD (8U * 1024U * 1024U)
+#define CASSOTIS_IPC_MAX_PAYLOAD (16U * 1024U * 1024U)
+#define CASSOTIS_CUSTOM_PHRASES_MAX_JSON (CASSOTIS_IPC_MAX_PAYLOAD - 1024U)
 #define CASSOTIS_IPC_FLAG_RESPONSE 0x00000001U
 #define CASSOTIS_IPC_FLAG_ERROR 0x00000002U
 #define CASSOTIS_MARKDOWN_ASCII_SYMBOLS "-#*+_=`~[]<>|@"
@@ -29,7 +30,9 @@ typedef enum {
     CASSOTIS_MESSAGE_SHUTDOWN = 14,
     CASSOTIS_MESSAGE_ERROR = 15,
     CASSOTIS_MESSAGE_CLEAR_USER_DICTIONARY = 16,
-    CASSOTIS_MESSAGE_POLL_RESULT = 17
+    CASSOTIS_MESSAGE_POLL_RESULT = 17,
+    CASSOTIS_MESSAGE_GET_PREFERENCES = 18,
+    CASSOTIS_MESSAGE_SET_PREFERENCES = 19
 } CassotisMessageType;
 
 typedef enum {
@@ -289,6 +292,12 @@ gboolean cassotis_protocol_decode_error(
 
 void cassotis_engine_result_clear(CassotisEngineResult *result);
 GQuark cassotis_protocol_error_quark(void);
+
+GByteArray *cassotis_protocol_build_set_preferences_request(
+    guint64 request_id, const CassotisEngineState *state, const gchar *phrases);
+gboolean cassotis_protocol_decode_preferences(
+    const guint8 *payload, gsize length, CassotisEngineState *state,
+    gchar **phrases, GError **error);
 
 G_END_DECLS
 

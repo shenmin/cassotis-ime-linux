@@ -19,7 +19,7 @@ slow peer cannot corrupt another connection's stream or concurrently enter the
 Pascal engine/SQLite state. Context and buffered-byte counts are bounded.
 
 All integers are little-endian, text is strictly validated UTF-8, and one
-frame payload is limited to 8 MiB.
+frame payload is limited to 16 MiB.
 
 ## Frame Header
 
@@ -64,10 +64,13 @@ Message ordinals are wire ABI and must not be reordered.
 | 15 | `error` | Structured response |
 | 16 | `clear_user_dictionary` | Request/empty response |
 | 17 | `poll_result` | Request; asynchronous `engine_result` response |
+| 18 | `get_preferences` | Empty request; full preferences response |
+| 19 | `set_preferences` | Full preferences request; empty response |
 
 `create_context`, `destroy_context`, `reset_context`,
 `clear_user_dictionary`, and `poll_result` have empty payloads. Structured
-payloads start with `u16 schema_version` and `u16 reserved`.
+payloads start with `u16 schema_version` and `u16 reserved`, except the full
+preferences envelope below, which prefixes the compact state with its byte length.
 
 ## Payload Primitives
 
@@ -189,6 +192,22 @@ schema 1.
 Pinyin ordinals are full pinyin, Microsoft, Xiaohe, Ziranma, Sogou, Ziguang,
 and Pinyin Jiajia. Persisted settings are engine-owned and shared by both
 frameworks. Changes that alter input interpretation clear active compositions.
+
+## Full Preferences
+
+`get_preferences` and `set_preferences` keep potentially large custom phrase
+lists out of the compact state queried during typing. Their payload is a
+little-endian `u32` state-byte count, the existing state payload (at most 1,024
+bytes), and UTF-8 JSON occupying the remaining frame. The JSON is an ordered
+array of `[shortcut, text]` pairs, limited to 1,024 entries, 32 ASCII letters
+per shortcut and 4,096 UTF-16 units per text. JSON is limited to 16 MiB minus
+1,024 bytes; malformed input is rejected before any preferences are changed.
+
+`set_state` preserves stored custom phrases, including requests from older
+clients. Only `set_preferences` replaces them. The CLI reads phrase JSON on
+standard input rather than command-line arguments. A custom phrase result
+contains a bounded single-line preview; the engine retains the literal text
+for commitment. Neither adapter receives the entire phrase list during typing.
 
 ## Errors And Lifecycle
 

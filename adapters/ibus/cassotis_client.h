@@ -88,6 +88,11 @@ gboolean cassotis_client_clear_user_dictionary(CassotisClient *client,
 gboolean cassotis_client_ping(CassotisClient *client, GError **error);
 gboolean cassotis_client_shutdown(CassotisClient *client, GError **error);
 
+gboolean cassotis_client_get_preferences(CassotisClient *client,
+    CassotisEngineState *state, gchar **phrases, GError **error);
+gboolean cassotis_client_set_preferences(CassotisClient *client,
+    const CassotisEngineState *state, const gchar *phrases, GError **error);
+
 G_END_DECLS
 
 #endif

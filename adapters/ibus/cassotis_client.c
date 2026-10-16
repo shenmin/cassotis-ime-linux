@@ -543,6 +543,46 @@ gboolean cassotis_client_set_state(CassotisClient *client,
     return success;
 }
 
+gboolean cassotis_client_get_preferences(CassotisClient *client,
+    CassotisEngineState *state, gchar **phrases, GError **error)
+{
+    guint64 request_id = client->next_request_id++;
+    GByteArray *request = cassotis_protocol_build_empty_request(
+        CASSOTIS_MESSAGE_GET_PREFERENCES, request_id, 0, 0);
+    GByteArray *response = NULL;
+    gboolean success;
+    *phrases = NULL;
+    if (!exchange(client, request, CASSOTIS_MESSAGE_GET_PREFERENCES,
+                  request_id, 0, 0, &response, error))
+        return FALSE;
+    success = cassotis_protocol_decode_preferences(response->data, response->len,
+                                                    state, phrases, error);
+    g_byte_array_unref(response);
+    if (!success)
+        close_socket(client);
+    return success;
+}
+
+gboolean cassotis_client_set_preferences(CassotisClient *client,
+    const CassotisEngineState *state, const gchar *phrases, GError **error)
+{
+    guint64 request_id = client->next_request_id++;
+    GByteArray *request = cassotis_protocol_build_set_preferences_request(
+        request_id, state, phrases);
+    GByteArray *response = NULL;
+    gboolean success;
+    if (request == NULL) {
+        g_set_error_literal(error, cassotis_client_error_quark(), 1,
+                            "invalid preferences request");
+        return FALSE;
+    }
+    success = exchange(client, request, CASSOTIS_MESSAGE_SET_PREFERENCES,
+                       request_id, 0, 0, &response, error);
+    if (response != NULL)
+        g_byte_array_unref(response);
+    return success;
+}
+
 gboolean cassotis_client_ping(CassotisClient *client, GError **error)
 {
     guint64 request_id = client->next_request_id++;

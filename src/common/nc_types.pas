@@ -104,6 +104,12 @@ type
         open_settings: TncShortcut;
     end;
 
+    TncCustomPhrase = record
+        shortcut: string;
+        text: string;
+    end;
+    TncCustomPhraseList = TArray<TncCustomPhrase>;
+
     TncEngineState = record
         input_mode: TncInputMode;
         dictionary_variant: TncDictionaryVariant;
@@ -115,6 +121,7 @@ type
         decimal_period_after_digit: Boolean;
         punctuation_ascii_symbols: string;
         auto_english: Boolean;
+        custom_phrases: TncCustomPhraseList;
         candidate_page_size: Integer;
         candidate_page_key_scheme: TncCandidatePageKeyScheme;
         one_key_completion_key: TncOneKeyCompletionKey;
@@ -136,6 +143,7 @@ type
         decimal_period_after_digit: Boolean;
         punctuation_ascii_symbols: string;
         auto_english: Boolean;
+        custom_phrases: TncCustomPhraseList;
         enable_segment_candidates: Boolean;
         segment_head_only_multi_syllable: Boolean;
         candidate_font_name: string;
@@ -172,7 +180,8 @@ type
         okcs_long_transition,
         okcs_long_neural,
         okcs_document_copy,
-        okcs_exact_tail_fallback
+        okcs_exact_tail_fallback,
+        okcs_custom_phrase
     );
 
     TncOneKeyCompletion = record
@@ -524,6 +533,8 @@ end;
 
 function nc_engine_states_equal(const left_value: TncEngineState;
     const right_value: TncEngineState): Boolean;
+var
+    index: Integer;
     function ShortcutEqual(const left_shortcut: TncShortcut;
         const right_shortcut: TncShortcut): Boolean;
     begin
@@ -565,6 +576,14 @@ begin
         right_value.shortcuts.full_width_toggle) and
         ShortcutEqual(left_value.shortcuts.open_settings,
         right_value.shortcuts.open_settings);
+    if not Result then Exit;
+    Result := Length(left_value.custom_phrases) = Length(right_value.custom_phrases);
+    if not Result then Exit;
+    for index := 0 to High(left_value.custom_phrases) do
+        if (left_value.custom_phrases[index].shortcut <>
+            right_value.custom_phrases[index].shortcut) or
+            (left_value.custom_phrases[index].text <>
+            right_value.custom_phrases[index].text) then Exit(False);
 end;
 
 function nc_join_strings(const separator: string;

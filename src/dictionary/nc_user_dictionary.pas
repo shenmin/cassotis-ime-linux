@@ -61,6 +61,7 @@ implementation
 uses
     SysUtils,
     nc_config,
+    nc_custom_phrases,
     nc_shortcut;
 
 function ShortcutModifierMask(const shortcut: TncShortcut): Integer;
@@ -422,6 +423,7 @@ const
         '''setting.punctuation_full_width'', ' +
         '''setting.decimal_period_after_digit'', ' +
         '''setting.punctuation_ascii_symbols'', ''setting.auto_english'', ' +
+        '''setting.custom_phrases'', ' +
         '''setting.fuzzy_pinyin_enabled'', ' +
         '''setting.fuzzy_pinyin_rules'', ' +
         '''setting.candidate_page_size'', ' +
@@ -469,6 +471,16 @@ begin
                 Exit(False);
             end;
             key_name := FConnection.ColumnText(statement, 0);
+            if key_name = 'setting.custom_phrases' then
+            begin
+                if not nc_parse_custom_phrases(FConnection.ColumnText(statement, 1),
+                    state.custom_phrases) then
+                begin
+                    FErrorMessage := 'invalid stored custom phrases';
+                    Exit(False);
+                end;
+                Continue;
+            end;
             if key_name = 'setting.punctuation_ascii_symbols' then
             begin
                 state.punctuation_ascii_symbols := nc_normalize_punctuation_ascii_symbols(
@@ -609,6 +621,8 @@ begin
         nc_normalize_punctuation_ascii_symbols(state.punctuation_ascii_symbols)) and
         ExecutePairStatement(c_upsert_setting, 'setting.auto_english',
         UTF8Decode(IntToStr(Ord(state.auto_english)))) and
+        ExecutePairStatement(c_upsert_setting, 'setting.custom_phrases',
+        nc_custom_phrases_to_json(state.custom_phrases)) and
         ExecutePairStatement(c_upsert_setting,
         'setting.candidate_page_size', UTF8Decode(IntToStr(
         state.candidate_page_size))) and

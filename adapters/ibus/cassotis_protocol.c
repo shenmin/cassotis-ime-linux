@@ -307,6 +307,54 @@ GByteArray *cassotis_protocol_build_set_state_request(
                        payload);
 }
 
+GByteArray *cassotis_protocol_build_set_preferences_request(
+    guint64 request_id, const CassotisEngineState *state, const gchar *phrases)
+{
+    GByteArray *compact, *payload;
+    gsize length;
+    if (phrases == NULL || !g_utf8_validate(phrases, -1, NULL))
+        return NULL;
+    length = strlen(phrases);
+    if (length == 0 || length > CASSOTIS_CUSTOM_PHRASES_MAX_JSON)
+        return NULL;
+    compact = cassotis_protocol_build_set_state_request(request_id, state);
+    if (compact == NULL)
+        return NULL;
+    payload = g_byte_array_new();
+    append_u32(payload, compact->len - CASSOTIS_IPC_HEADER_SIZE);
+    g_byte_array_append(payload, compact->data + CASSOTIS_IPC_HEADER_SIZE,
+                        compact->len - CASSOTIS_IPC_HEADER_SIZE);
+    g_byte_array_append(payload, (const guint8 *)phrases, length);
+    g_byte_array_unref(compact);
+    return build_frame(CASSOTIS_MESSAGE_SET_PREFERENCES, request_id, 0, 0, payload);
+}
+
+gboolean cassotis_protocol_decode_preferences(
+    const guint8 *payload, gsize length, CassotisEngineState *state,
+    gchar **phrases, GError **error)
+{
+    guint32 state_length;
+    gsize json_length;
+    *phrases = NULL;
+    if (length < 4 || length > CASSOTIS_IPC_MAX_PAYLOAD)
+        goto invalid;
+    state_length = read_u32_at(payload, 0);
+    if (state_length > 1024 || state_length > length - 4)
+        goto invalid;
+    json_length = length - 4 - state_length;
+    if (json_length == 0 || json_length > CASSOTIS_CUSTOM_PHRASES_MAX_JSON ||
+        !g_utf8_validate((const gchar *)payload + 4 + state_length, json_length, NULL))
+        goto invalid;
+    if (!cassotis_protocol_decode_engine_state(payload + 4, state_length, state, error))
+        return FALSE;
+    *phrases = g_strndup((const gchar *)payload + 4 + state_length, json_length);
+    return TRUE;
+invalid:
+    g_set_error_literal(error, cassotis_protocol_error_quark(), 1,
+                        "invalid preferences payload");
+    return FALSE;
+}
+
 static gboolean set_reader_error(PayloadReader *reader, const gchar *message)
 {
     g_set_error_literal(reader->error, cassotis_protocol_error_quark(), 1,
@@ -485,7 +533,7 @@ gboolean cassotis_protocol_parse_header(const guint8 *data,
     header->generation_id = read_u64_at(data, 32);
     header->payload_length = read_u32_at(data, 40);
     if (header->message_type == CASSOTIS_MESSAGE_INVALID ||
-        header->message_type > CASSOTIS_MESSAGE_POLL_RESULT ||
+        header->message_type > CASSOTIS_MESSAGE_SET_PREFERENCES ||
         (header->flags & ~(CASSOTIS_IPC_FLAG_RESPONSE |
                            CASSOTIS_IPC_FLAG_ERROR)) != 0 ||
         header->payload_length > CASSOTIS_IPC_MAX_PAYLOAD) {

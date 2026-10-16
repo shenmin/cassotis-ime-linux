@@ -104,6 +104,7 @@ implementation
 uses
     SysUtils,
     nc_config,
+    nc_custom_phrases,
     nc_platform_compat,
     nc_shortcut;
 
@@ -243,6 +244,7 @@ begin
     config.decimal_period_after_digit := state.decimal_period_after_digit;
     config.punctuation_ascii_symbols := state.punctuation_ascii_symbols;
     config.auto_english := state.auto_english;
+    config.custom_phrases := Copy(state.custom_phrases);
     config.candidate_page_size := state.candidate_page_size;
     config.candidate_page_key_scheme :=
         state.candidate_page_key_scheme;
@@ -268,6 +270,7 @@ begin
         new_state.decimal_period_after_digit) or
         (old_state.punctuation_ascii_symbols <> new_state.punctuation_ascii_symbols) or
         (old_state.auto_english <> new_state.auto_english) or
+        (not nc_custom_phrases_equal(old_state.custom_phrases, new_state.custom_phrases)) or
         (old_state.candidate_page_size <>
         new_state.candidate_page_size) or
         (old_state.candidate_page_key_scheme <>
@@ -320,6 +323,7 @@ begin
         engine_config.decimal_period_after_digit;
     next_state.punctuation_ascii_symbols := engine_config.punctuation_ascii_symbols;
     next_state.auto_english := engine_config.auto_english;
+    next_state.custom_phrases := Copy(engine_config.custom_phrases);
     next_state.candidate_page_size := engine_config.candidate_page_size;
     next_state.candidate_page_key_scheme :=
         engine_config.candidate_page_key_scheme;
@@ -516,6 +520,8 @@ begin
     context.SetCandidates(candidates);
     context.SelectCandidate(FEngine.get_selected_index);
     completion := FEngine.get_one_key_completion;
+    if completion.source = okcs_custom_phrase then
+        completion.text := nc_custom_phrase_preview(completion.text);
     context.SetCompletion(completion.full_pinyin, completion.text,
         completion.source = okcs_exact_tail_fallback);
 end;
@@ -698,6 +704,7 @@ function TncEngineService.GetState(out state: TncEngineState): Boolean;
 begin
     SyncStateFromEngine;
     state := FState;
+    state.custom_phrases := Copy(FState.custom_phrases);
     Result := True;
 end;
 
@@ -709,7 +716,12 @@ var
     previous_config: TncEngineConfig;
     previous_state: TncEngineState;
     dictionary_changed: Boolean;
+    phrase: TncCustomPhrase;
 begin
+    if Length(state.custom_phrases) > c_custom_phrase_max_count then Exit(False);
+    for phrase in state.custom_phrases do
+        if (nc_custom_phrase_key(phrase.shortcut) = '') or
+            not nc_custom_phrase_text_valid(phrase.text) then Exit(False);
     if (state.candidate_page_size < c_min_candidate_page_size) or
         (state.candidate_page_size > c_max_candidate_page_size) then
         Exit(False);
@@ -758,6 +770,7 @@ begin
     end;
     FConfig := FEngine.Config;
     FState := state;
+    FState.custom_phrases := Copy(state.custom_phrases);
     if clear_compositions then
     begin
         FContexts.ClearCompositions;

@@ -104,6 +104,34 @@ or extend it in the background; insufficient-confidence predictions stay hidden.
 Completion is displayed separately from ordinary candidates and does not change
 their order. Ordinary candidate selection remains available while the model works.
 
+## Custom Phrases
+
+Add shortcuts and literal text on the **Custom Phrases** page, then click
+**Apply**. Shortcuts contain 1–32 ASCII letters and are case-insensitive.
+The list supports 1,024 entries with up to 4,096 UTF-16 code units per phrase.
+In Chinese mode, an exact shortcut takes priority in the completion row;
+press the configured `Tab` or backtick key to commit it. Full pinyin and all
+six shuangpin schemes match the keys actually typed, not decoded pinyin.
+
+Numbered candidates and Space selection are unchanged. Whitespace, newlines
+and tabs are preserved; phrases are not converted between scripts or widths
+and are not learned as ordinary user words. The panel shows only a bounded
+single-line preview. Expansion is disabled in English mode and after choosing
+a prefix word within the current composition.
+
+Edit, delete or reorder entries; the first entry wins for duplicate shortcuts.
+Import/export uses the same UTF-8 JSON format as the Windows version:
+
+```json
+[["addr", "My usual address"], ["sig", "First line\nSecond line"]]
+```
+
+Import validates the entire file before asking to replace the editor list;
+click **Apply** to persist it. Restoring defaults and clearing learned words
+do not delete custom phrases. Use the page's Delete button instead. Phrases
+are stored as settings in the user database, shared by both frameworks and
+preserved across restarts.
+
 ## Function Shortcuts
 
 | Action | Default |

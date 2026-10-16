@@ -14,7 +14,7 @@ const
     c_windows_baseline_commit =
         '0a376621dc5030d15946cfe0542d654a48f681ba';
     c_lexicon_baseline_commit =
-        '29af741bb921a7bf14cdfc8252d8531367aa3858';
+        'a759b72daaf2e6c109b1641975d7b512b2da4509';
 
 implementation
 

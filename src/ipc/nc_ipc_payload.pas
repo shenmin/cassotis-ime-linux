@@ -49,6 +49,10 @@ function nc_encode_engine_state_payload(const state: TncIpcEngineState): TBytes;
 function nc_try_decode_engine_state_payload(const payload: TBytes;
     out state: TncIpcEngineState; out error_text: string): Boolean;
 
+function nc_encode_preferences_payload(const state: TncIpcEngineState): TBytes;
+function nc_try_decode_preferences_payload(const payload: TBytes;
+    out state: TncIpcEngineState; out error_text: string): Boolean;
+
 function nc_encode_error_payload(const error_code: Cardinal;
     const error_message: string): TBytes;
 function nc_try_decode_error_payload(const payload: TBytes;
@@ -59,6 +63,8 @@ implementation
 
 uses
     nc_config,
+    nc_custom_phrases,
+    nc_ipc_protocol,
     nc_shortcut;
 
 const
@@ -863,6 +869,45 @@ begin
     finally
         reader.Free;
     end;
+end;
+
+function nc_encode_preferences_payload(const state: TncIpcEngineState): TBytes;
+var state_bytes, phrases: TBytes; i: Integer;
+begin
+    Result := nil;
+    state_bytes := nc_encode_engine_state_payload(state);
+    phrases := nc_utf8_payload(nc_custom_phrases_to_json(state.custom_phrases));
+    if Length(phrases) > c_custom_phrase_max_json_bytes then
+        raise EncIpcPayloadError.Create('Custom phrases exceed payload limit');
+    SetLength(Result, 4 + Length(state_bytes) + Length(phrases));
+    for i := 0 to 3 do Result[i] := Byte(Cardinal(Length(state_bytes)) shr (i * 8));
+    Move(state_bytes[0], Result[4], Length(state_bytes));
+    Move(phrases[0], Result[4 + Length(state_bytes)], Length(phrases));
+end;
+
+function nc_try_decode_preferences_payload(const payload: TBytes;
+    out state: TncIpcEngineState; out error_text: string): Boolean;
+var state_size: Cardinal; i: Integer; phrases: TBytes;
+begin
+    nc_initialize_engine_state(state);
+    Result := False;
+    error_text := 'Invalid preferences payload';
+    if (Length(payload) < 4) or (Length(payload) > c_ipc_max_payload_size) then Exit;
+    state_size := 0;
+    for i := 0 to 3 do state_size := state_size or (Cardinal(payload[i]) shl (i * 8));
+    if (state_size > 1024) or (state_size > Cardinal(Length(payload) - 4)) then Exit;
+    if not nc_try_decode_engine_state_payload(Copy(payload, 4, state_size),
+        state, error_text) then Exit;
+    phrases := Copy(payload, 4 + state_size, Length(payload) - 4 - state_size);
+    if (Length(phrases) = 0) or (Length(phrases) > c_custom_phrase_max_json_bytes) or
+        not IsValidUtf8(phrases, 0, Length(phrases)) or
+        not nc_parse_custom_phrases(nc_payload_as_string(phrases), state.custom_phrases) then
+    begin
+        error_text := 'Invalid custom phrases';
+        Exit;
+    end;
+    error_text := '';
+    Result := True;
 end;
 
 function nc_encode_engine_state_payload(const state: TncIpcEngineState): TBytes;

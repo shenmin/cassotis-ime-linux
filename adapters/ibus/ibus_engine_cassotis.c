@@ -890,7 +890,10 @@ static void cassotis_candidate_clicked(IBusEngine *engine,
     }
     if (self->rendered_completion_row &&
         local_index == self->rendered_page_candidate_count) {
-        send_key(self, CASSOTIS_KEY_TAB, 0, 0, "");
+        if (self->state.one_key_completion_key == CASSOTIS_COMPLETION_BACKTICK)
+            send_key(self, CASSOTIS_KEY_NONE, 0, 0, "`");
+        else
+            send_key(self, CASSOTIS_KEY_TAB, 0, 0, "");
         return;
     }
     if (local_index >= self->rendered_page_candidate_count)

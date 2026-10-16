@@ -1,8 +1,10 @@
 # Dictionary And Ranking Boundary
 
-Cassotis IME for Linux v2.0.0 uses the engine algorithms and dictionary inputs
-from [Cassotis IME v2.1.0](https://github.com/shenmin/cassotis-ime/tree/v2.1.0) and
-[Cassotis Lexicon v2.1.0](https://github.com/shenmin/cassotis-lexicon/tree/v2.1.0).
+Cassotis IME for Linux v2.0.0 is being prepared against the v2.2.0 work in
+[Cassotis IME](https://github.com/shenmin/cassotis-ime) and
+[Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon).
+The reviewed revisions are `f283c33b` (engine) and `a759b72d` (lexicon);
+the v2.2.0 tags must be verified before the release baseline is finalized.
 Base dictionaries are read-only. Learning, preferences, and completion feedback
 are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
 
@@ -10,13 +12,13 @@ are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
 
 - Current schema: `24`; minimum readable schema: `18`.
 - Simplified database SHA-256:
-  `1157f46aa08a80acb405070aa255b3a2e8b26693a81cd5be91c915e95632e1f7`.
+  `7caa08d256f3f6e80edccef45b4ffbe48207df80822c122e660e234b80e6c4f6`.
 - Traditional database SHA-256:
-  `eaea45e13b6dbf4cdfc07ceccc703a66210ebd0be7e4c183f735741a469282b2`.
-- Simplified base: 249,876 rows, including 23,918 single-character rows and
-  225,958 multi-character rows.
-- Traditional base: 253,088 rows, including 24,177 single-character rows and
-  228,911 multi-character rows.
+  `a803f45f76d89233eb56eb00cec482f4b3d47b89e9d8b08d501d3520746dd1e1`.
+- Simplified base: 249,943 rows, including 23,918 single-character rows and
+  226,025 multi-character rows.
+- Traditional base: 253,155 rows, including 24,177 single-character rows and
+  228,978 multi-character rows.
 - Simplified/traditional short-query promotion rows: 1,466 / 2,002.
 - Simplified/traditional completion-competition rows: 42,453 / 42,448.
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379.
@@ -91,6 +93,11 @@ flag. Ordinary base entries and unlearned generated or partially composed
 candidates do not expose a delete control.
 
 ## One-Key Completion
+
+An exact custom shortcut takes priority over predictive completion. It matches
+the raw keystrokes, independent of the selected Pinyin scheme, and commits the
+configured text literally without learning. These entries are settings rather
+than dictionary words; see [Custom Phrases](../CONFIGURATION.md#custom-phrases).
 
 Completion does not reorder the ordinary candidates. A complete prefix of at
 least two syllables can use exact/user continuation, transitions, and bounded

@@ -14,9 +14,15 @@ Linux 的语料规模质量门禁使用与
 [**《永恒的舞动》**](https://www.qidian.com/book/1037259117/)
 （英文名 **Elegance in Timelessness**）。基准案例与对应模型的训练数据保持隔离。
 
-## 基准版本
+## 本轮对齐状态
 
-当前 Linux 引擎依据以下版本完成审查和移植：
+Linux v2.0.0 的目标已调整为 v2.2.0 引擎和词库。当前词库哈希和记录数见
+[词库兼容性说明](docs/DICTIONARY.md#dictionary-compatibility)。下方实测早于本轮更新，不能代替本轮最终发布验收；
+需在 v2.2.0 基线确定后重新运行。短语评分和词库词条变化尤其可能影响补全结果。
+
+## 上轮实测基线
+
+本文已记录的 v2.0.0 实测使用以下基线：
 
 - [Cassotis IME v2.1.0](https://github.com/shenmin/cassotis-ime/tree/v2.1.0)，
   包括半角标点例外、英文识别、部分选词纠错及鼻音边界前缀召回。

@@ -12,7 +12,7 @@ uses
 
 const
     c_ipc_header_size = 44;
-    c_ipc_max_payload_size = 8 * 1024 * 1024;
+    c_ipc_max_payload_size = 16 * 1024 * 1024;
     c_ipc_flag_response = $00000001;
     c_ipc_flag_error = $00000002;
     c_ipc_known_flags = c_ipc_flag_response or c_ipc_flag_error;
@@ -36,7 +36,9 @@ type
         imt_shutdown,
         imt_error,
         imt_clear_user_dictionary,
-        imt_poll_result
+        imt_poll_result,
+        imt_get_preferences,
+        imt_set_preferences
     );
 
     TncIpcEnvelope = record

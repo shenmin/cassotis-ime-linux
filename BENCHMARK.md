@@ -17,9 +17,17 @@ Both benchmarks are derived from the developer's own novel,
 (Chinese title: **永恒的舞动**). Benchmark cases are kept separate from the
 corresponding model-training data.
 
-## Baseline
+## Alignment In Progress
 
-The current Linux engine is reviewed against:
+Linux v2.0.0 now targets the v2.2.0 engine and lexicon. Current dictionary
+hashes and counts are recorded in [Dictionary Compatibility](docs/DICTIONARY.md#dictionary-compatibility).
+The measurements below predate this update and are not its final release gate;
+they must be rerun after the v2.2.0 revisions are finalized. In particular,
+changed clause scoring and dictionary entries can affect completion results.
+
+## Previous Measurement Baseline
+
+The v2.0.0 measurements in this document used:
 
 - [Cassotis IME v2.1.0](https://github.com/shenmin/cassotis-ime/tree/v2.1.0),
   including punctuation exceptions, English recognition, partial-selection

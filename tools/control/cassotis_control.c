@@ -2,6 +2,7 @@
 
 #include <glib.h>
 #include <string.h>
+#include <stdio.h>
 
 static gchar *resolve_executable_path(const gchar *program_path)
 {
@@ -114,6 +115,30 @@ static void print_usage(const gchar *program_name)
         "  %s shutdown\n",
         program_name, program_name, program_name, program_name,
         program_name);
+    g_printerr("  %s get-preferences\n"
+               "  %s set-preferences (same arguments as set-state; phrase JSON on stdin)\n",
+               program_name, program_name);
+}
+
+static gchar *read_phrases(GError **error)
+{
+    GString *text = g_string_new(NULL);
+    gchar buffer[8192];
+    gsize count;
+    while ((count = fread(buffer, 1, sizeof(buffer), stdin)) != 0) {
+        if (text->len + count > CASSOTIS_CUSTOM_PHRASES_MAX_JSON)
+            goto invalid;
+        g_string_append_len(text, buffer, count);
+    }
+    if (ferror(stdin) || text->len == 0 ||
+        !g_utf8_validate(text->str, text->len, NULL))
+        goto invalid;
+    return g_string_free(text, FALSE);
+invalid:
+    g_string_free(text, TRUE);
+    g_set_error_literal(error, cassotis_client_error_quark(), 1,
+                        "expected bounded UTF-8 phrase JSON on stdin");
+    return NULL;
 }
 
 int main(int argc, char **argv)
@@ -130,6 +155,8 @@ int main(int argc, char **argv)
     guint shortcut_offset;
     gboolean extended_state;
     gboolean success = FALSE;
+    gboolean preferences;
+    gchar *phrases = NULL;
 
     if (argc < 2) {
         print_usage(argv[0]);
@@ -142,12 +169,19 @@ int main(int argc, char **argv)
                       ? g_canonicalize_filename(engine_override, NULL)
                       : resolve_sibling(executable_path, "cassotis-engine");
     cassotis_client_init(&client, socket_path, engine_path);
+    preferences = g_strcmp0(argv[1], "set-preferences") == 0;
 
-    if (g_strcmp0(argv[1], "get-state") == 0 && argc == 2) {
+    if (g_strcmp0(argv[1], "get-preferences") == 0 && argc == 2) {
+        success = cassotis_client_get_preferences(&client, &state, &phrases, &error);
+        if (success) {
+            print_state(&state);
+            g_print("custom_phrases=%s\n", phrases);
+        }
+    } else if (g_strcmp0(argv[1], "get-state") == 0 && argc == 2) {
         success = cassotis_client_get_state(&client, &state, &error);
         if (success)
             print_state(&state);
-    } else if (g_strcmp0(argv[1], "set-state") == 0 &&
+    } else if ((g_strcmp0(argv[1], "set-state") == 0 || preferences) &&
                (argc == 9 || argc == 21 || argc == 23 || argc == 24 ||
                 argc == 25 || argc == 27)) {
         cassotis_engine_state_init_defaults(&state);
@@ -259,11 +293,24 @@ int main(int argc, char **argv)
             g_strlcpy(state.punctuation_ascii_symbols, symbols,
                       sizeof(state.punctuation_ascii_symbols));
         }
-        success = cassotis_client_set_state(&client, &state, &error);
-        if (success && cassotis_client_get_state(&client, &state, &error))
+        if (preferences) {
+            phrases = read_phrases(&error);
+            if (phrases == NULL)
+                goto done;
+            success = cassotis_client_set_preferences(&client, &state, phrases, &error);
+            g_clear_pointer(&phrases, g_free);
+            if (success)
+                success = cassotis_client_get_preferences(&client, &state, &phrases, &error);
+        } else {
+            success = cassotis_client_set_state(&client, &state, &error);
+            if (success)
+                success = cassotis_client_get_state(&client, &state, &error);
+        }
+        if (success) {
             print_state(&state);
-        else
-            success = FALSE;
+            if (preferences)
+                g_print("custom_phrases=%s\n", phrases);
+        }
     } else if (g_strcmp0(argv[1], "ping") == 0 && argc == 2) {
         success = cassotis_client_ping(&client, &error);
         if (success)
@@ -284,6 +331,7 @@ int main(int argc, char **argv)
     }
 
 done:
+    g_free(phrases);
     if (!success && error != NULL)
         g_printerr("cassotis-control: %s\n", error->message);
     g_clear_error(&error);

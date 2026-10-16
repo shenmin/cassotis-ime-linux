@@ -91,6 +91,7 @@ var
     key_event: TncKeyEvent;
     engine_result: TncEngineResult;
     engine_state: TncEngineState;
+    current_state: TncEngineState;
     payload_error: string;
     operation_succeeded: Boolean;
 begin
@@ -202,23 +203,41 @@ begin
                 response.payload := nc_encode_engine_result_payload(
                     engine_result);
             end;
-        imt_get_state:
+        imt_get_state, imt_get_preferences:
             begin
                 if not RequireEmptyPayload(request, response) then
                     Exit;
                 operation_succeeded := FEngine.GetState(engine_state);
                 if operation_succeeded then
-                    response.payload := nc_encode_engine_state_payload(
-                        engine_state)
+                begin
+                    if request.message_type = imt_get_preferences then
+                        response.payload := nc_encode_preferences_payload(engine_state)
+                    else
+                        response.payload := nc_encode_engine_state_payload(engine_state);
+                end
                 else
                     SetErrorResponse(request, response,
                         c_ipc_dispatch_error_operation_failed,
                         'Unable to read engine state');
             end;
-        imt_set_state:
+        imt_set_state, imt_set_preferences:
             begin
-                if not nc_try_decode_engine_state_payload(request.payload,
-                    engine_state, payload_error) then
+                if request.message_type = imt_set_preferences then
+                    operation_succeeded := nc_try_decode_preferences_payload(
+                        request.payload, engine_state, payload_error)
+                else
+                begin
+                    operation_succeeded := nc_try_decode_engine_state_payload(
+                        request.payload, engine_state, payload_error);
+                    // Framework toggles use the compact state and must not erase phrases.
+                    if operation_succeeded then
+                    begin
+                        operation_succeeded := FEngine.GetState(current_state);
+                        engine_state.custom_phrases := Copy(current_state.custom_phrases);
+                        if not operation_succeeded then payload_error := 'Unable to read preferences';
+                    end;
+                end;
+                if not operation_succeeded then
                 begin
                     SetErrorResponse(request, response,
                         c_ipc_dispatch_error_invalid_payload, payload_error);
