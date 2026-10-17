@@ -4,12 +4,16 @@
 
 The 2026-10-17 (UTC+8) alignment uses the released Cassotis IME and Cassotis
 Lexicon v2.2.0 tags, fresh schema-24 dictionaries and corrected case readings.
-All four full benchmark groups pass on aarch64. On x86_64, short-word and
-completion gates pass, but **production long-sentence Top1/Top2 remain below
-the frozen floors**; deadline-free accuracy does not qualify that deployed path.
-Quality tolerances and latency/memory ceilings are unchanged. Foreground/background model
-budgets remain 100/120 ms. These budgets are not ceilings on whole-query or
-end-to-end key latency. Measurements are in [BENCHMARK.md](BENCHMARK.md) /
+All four complete corpus suites pass the accuracy and memory requirements on
+both architectures without search, model or completion wall-clock deadlines.
+Accuracy and latency come from the same queries, using eight model threads.
+Latency is reported rather than tested against the superseded timed-run ceilings.
+Production foreground/background model budgets remain 100/120 ms. The earlier
+timed x86_64 long-sentence run scored 37 fewer Top1 and 36 fewer Top2 than its
+deadline-free run and missed the original production accuracy floors. Passing
+the deadline-free corpus suite does not remove that production limitation.
+These budgets are not ceilings on whole-query or end-to-end key latency.
+Measurements are in [BENCHMARK.md](BENCHMARK.md) /
 [Chinese](BENCHMARK.CN.md).
 
 | Platform | Current checks |
@@ -17,7 +21,7 @@ end-to-end key latency. Measurements are in [BENCHMARK.md](BENCHMARK.md) /
 | Ubuntu 26.04.1 x86_64 and aarch64, GNOME Wayland hosts | 887 core tests and 69 final-Tab projection checks per architecture; six settings tests, candidate-layout and shortcut regressions |
 | Both architectures | SC/TC incremental and whole-input candidate checks in static and ready-neural modes; ambiguous nasal boundaries, explicit apostrophes, double Pinyin, partial selection and undo |
 | Both architectures | Isolated IBus normal/debug/disabled-shortcut checks and Fcitx 5 adapter checks, including Shift punctuation, U/I/V quick input, decimal periods and English/raw selection |
-| Both architectures | Full long/short candidate and completion suites, with the x86_64 long production failure noted above; blocked model initialization, independent process-cold input, idle-memory reclamation and native math ABI checks |
+| Both architectures | Full deadline-free long/short candidate and completion suites, with the earlier x86_64 production limitation noted above; blocked model initialization, independent process-cold input, idle-memory reclamation and native math ABI checks |
 | Both architectures | Three fresh-process replays of 500 cases with different argument/environment layouts; all candidate/completion traces identical within each architecture |
 
 The packaging pipeline strips staging copies only, preserves the tested build
