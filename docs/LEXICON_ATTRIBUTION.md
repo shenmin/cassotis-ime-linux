@@ -25,7 +25,7 @@ THUOCL provides broad word-list and document-frequency signals. Filtered IT,
 idiom/allusion, medical and other specialist subsets are used as isolated
 vertical-layer sources. Catalogue-only specialist entries have low weights and
 are excluded from predictive completion; reviewed general-use terms remain
-eligible. See the admission and familiarity records in Cassotis Lexicon v2.1.0.
+eligible. See the admission and familiarity records in Cassotis Lexicon v2.2.0.
 
 ## jieba Dictionary
 
@@ -171,6 +171,43 @@ MeSH descriptors form the concept whitelist for the isolated medical layer.
 
 Chinese labels and aliases are accepted only when their linked MeSH
 descriptor is present in the imported catalog.
+
+## chinese-poetry
+
+- Name: chinese-poetry (Classical Chinese poetry database)
+- Homepage: https://github.com/chinese-poetry/chinese-poetry
+- License: MIT
+- Copyright holder: JackeyGao and chinese-poetry contributors
+
+Public-domain poems are selected from the school curriculum, Tang Poetry 300,
+Qian Jia Shi and Song Ci 300 collections. Reviewed lines and their readings
+provide dictionary entries, prefix completions and next-line continuations.
+The raw dataset is not distributed with the input method. The dataset's
+copyright and permission notice is reproduced below:
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2016 JackeyGao
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
 
 ## Cassotis Project-Maintained Supplements
 

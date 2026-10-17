@@ -17,37 +17,36 @@ Both benchmarks are derived from the developer's own novel,
 (Chinese title: **永恒的舞动**). Benchmark cases are kept separate from the
 corresponding model-training data.
 
-## Alignment In Progress
+## Frozen v2.2.0 Baseline
 
-Linux v2.0.0 now targets the v2.2.0 engine and lexicon. Current dictionary
-hashes and counts are recorded in [Dictionary Compatibility](docs/DICTIONARY.md#dictionary-compatibility).
-The measurements below predate this update and are not its final release gate;
-they must be rerun after the v2.2.0 revisions are finalized. In particular,
-changed clause scoring and dictionary entries can affect completion results.
+Linux v2.0.0 uses the final v2.2.0 engine and lexicon tags. The 2026-10-17
+validation uses newly built dictionaries and the corrected benchmark readings
+(38 long and five short cases). Earlier measurements remain dated historical
+records, not substitutes for the current gate. The corpus sizes are unchanged,
+but the inputs are not byte-identical to the earlier runs.
 
-## Previous Measurement Baseline
-
-The v2.0.0 measurements in this document used:
-
-- [Cassotis IME v2.1.0](https://github.com/shenmin/cassotis-ime/tree/v2.1.0),
-  including punctuation exceptions, English recognition, partial-selection
-  correction and nasal-boundary prefix recall.
-- [Cassotis Lexicon v2.1.0](https://github.com/shenmin/cassotis-lexicon/tree/v2.1.0)
+- [Cassotis IME v2.2.0](https://github.com/shenmin/cassotis-ime/tree/v2.2.0),
+  including custom phrases, revised short-phrase scoring and whole-line poetry
+  continuation, alongside the previously ported input and punctuation features.
+- [Cassotis Lexicon v2.2.0](https://github.com/shenmin/cassotis-lexicon/tree/v2.2.0)
 - Simplified dictionary schema 24, SHA-256
-  `1157f46aa08a80acb405070aa255b3a2e8b26693a81cd5be91c915e95632e1f7`
+  `02ee7f4b31b9ad1ed1f1e3e592269e98878f31e751f4956885a209182c3e8d61`
 - Traditional dictionary schema 24, SHA-256
-  `eaea45e13b6dbf4cdfc07ceccc703a66210ebd0be7e4c183f735741a469282b2`
-- Simplified dictionary: 249,876 text-reading records, including 23,918
-  single-character and 225,958 multi-character records
-- Traditional dictionary: 253,088 text-reading records, including 24,177
-  single-character and 228,911 multi-character records
-- Simplified/traditional short-word promotion rows: 1,466 / 2,002
+  `68cb63fc54525cb3dd428cef15fc1dc6cd24652423a51319dc3caa76021b6ae9`
+- Simplified dictionary: 257,528 text-reading records, including 23,918
+  single-character and 233,610 multi-character records
+- Traditional dictionary: 260,730 text-reading records, including 24,177
+  single-character and 236,553 multi-character records
+- Simplified/traditional short-word promotion rows: 1,487 / 2,020
 - Simplified/traditional completion competition rows: 42,453 / 42,448
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379
-- Simplified long-completion tables: 35,423 visible paths and 97,589 total
+- Simplified long-completion tables: 41,244 visible paths and 103,410 total
   text-recall rows
-- Traditional long-completion tables: 32,481 visible paths and 92,457 total
+- Traditional long-completion tables: 38,302 visible paths and 98,278 total
   text-recall rows
+
+Both databases include all 5,821 reviewed poetry next-line records. Counts and
+compatibility are detailed in [Dictionary Compatibility](docs/DICTIONARY.md#dictionary-compatibility).
 
 Source and data consistency checks cover the engine, parsers, input schemes,
 models, and dictionaries, distinguishing platform adaptations from candidate
@@ -72,7 +71,8 @@ monotonic deadline and rejects a late result even if the cancellation worker
 was scheduled late. Model loading remains asynchronous. Short Tab reranking
 runs in the background, with foreground scoring taking priority and stale
 context/generation results discarded. The long-completion acceptance deadline
-is separate. Short-word benchmarks use and report the deployed inference budget.
+is separate. These production deadlines do not apply to the corpus benchmarks
+described below.
 The inference budget is not a hard ceiling on the full query or end-to-end key
 latency, which also includes dictionary, candidate and framework work.
 
@@ -119,30 +119,30 @@ case sets used by the Windows project:
 This document publishes the methodology and aggregate results. Evaluation
 tools, corpora, and per-case reports are not distributed with the project.
 
-The long-sentence accuracy pass uses deterministic work limits and disables
-wall-clock inference cutoffs. A separate production pass records both candidate
-accuracy and latency with the deployed 100 ms character-LM scoring deadline.
-The production session uses up to six inference threads on x86_64 and eight on
-aarch64; the deadline-free reference uses eight on both. The single session
-reuses its CPU allocation arena, without shape-pattern caching.
-Both passes use the same model and bounded search; the removed conditional
-reranker no longer contributes a separate model or diagnostic timeout.
-Repeated-process checks guard same-platform stability; bitwise-identical neural
-decisions across CPU architectures are not assumed. Accuracy without a deadline
-does not substitute for production-mode quality or responsiveness.
+From 2026-10-17, all corpus benchmarks disable wall-clock search, model scoring
+and completion-acceptance deadlines. Long sentences, short words and both forms
+of completion use deterministic work limits and eight model threads on both
+architectures. Accuracy and latency come from the same query: a slow completed
+answer remains part of both measurements rather than being replaced by a timed
+fallback. The long-sentence report identifies this policy as
+`same_query_deadline_free_v1`. Deterministic search bounds, the model and ranking
+rules are unchanged; this is not an unbounded search.
 
-Long completion has two full 16,300-case tracks. The production track uses
-the deployed 120 ms background result-acceptance deadline, including
-the new character-LM continuation selection. This is an asynchronous result
-cutoff, not a synchronous wait for each keystroke; model loading also remains
-asynchronous. The accuracy track disables the result and character-LM deadlines
-to expose algorithmic differences separately from deadline-related fallback.
-The accuracy track uses eight threads; production uses the architecture's
-default (up to six on x86_64, eight on aarch64, bounded by CPU affinity). Production retains
-the 120 ms background deadline and 100 ms foreground scoring deadline.
-Deadline-free accuracy does not change runtime settings. Both Linux tracks are
-reported separately rather than presenting timeout-related fallback as an
-algorithm-only difference.
+Long completion runs once over all 16,300 cases, with foreground and background
+model deadlines and the result-acceptance cutoff disabled. Both completion
+benchmarks include the time spent waiting for a finished evaluation even when
+it leaves the visible result unchanged (`all_finished_requests_v1`). A slow
+worker emits progress instead of hitting a fixed per-request wait limit.
+Infrastructure errors fail the run; a stalled or interrupted run remains
+incomplete rather than being counted as ordinary incorrect answers.
+
+This protocol changes benchmarks, not the installed input method. Production
+retains its foreground 100 ms and background 120 ms safeguards, lazy model
+loading and architecture-specific thread selection. Separate production service,
+cancellation and cold-start tests check those behaviors. Deadline-free corpus
+accuracy does not claim that the timed production path always returns identical
+candidates. Repeated-process checks guard same-platform stability;
+bitwise-identical neural decisions across CPU architectures are not assumed.
 
 The completion runner resolves the final candidate list before asking the shared
 model for a continuation, matching v2.0.0's
@@ -153,8 +153,8 @@ Visible predictive continuations use the v1.30+ scoring rule: a result must
 extend the typed prefix while remaining a prefix of the reference sentence;
 the same-position pronouns 他 and 她 are equivalent. The strict oracle remains
 a separate diagnostic. Short Tab reports both synchronous keystroke latency
-and settled-display latency when background reranking changes the visible
-completion; the latter includes the background work.
+and settled-display latency after background reranking finishes; the latter
+includes that work even when the visible completion does not change.
 
 Since the v1.24.0 port, long-completion timing includes decoding and resolving
 the final visible candidate list before resolving the Tab result, matching the
@@ -165,12 +165,12 @@ comparable. The post-sample oracle remains outside the measured interval.
 The gate validates the scope, per-case trace signature, counts, and timing
 totals. It recomputes decoding-plus-visible-completion mean/median/P95/maximum
 from each sample and checks final-candidate work and the full visible interval
-separately, so a subtotal cannot hide an end-to-end slowdown. Latency ceilings
-are architecture- and model-version-specific. Existing ceilings remain in place
-unless a separately reviewed change is approved; measured results do not
-automatically redefine acceptance. Accuracy, coverage and inference deadlines
-remain separate requirements. Published tables report measured mean, median, P95 and
-maximum latency, not just the acceptance ceilings.
+separately, so a subtotal cannot hide an end-to-end slowdown. Corpus latency is
+reported, not used as a deadline or a pass/fail ceiling under the new protocol.
+Earlier latency ceilings remain historical metadata; accuracy, coverage and
+memory gates are unchanged. Published tables report measured mean, median, P95
+and maximum latency. Historical timed measurements remain labeled as such and
+are not relabeled as deadline-free results.
 
 Long-sentence scoring reports visible complete-candidate Top1/Top2; the redundant
 long Top5/Top9 metrics were removed with the v1.27.0 protocol. Short-word
@@ -180,14 +180,219 @@ the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
 
-## v2.0.0 Native Measurements
+## v2.0.0 Deadline-Free Measurements
 
-The current measurements use the v2.1.0 engine and dictionary baseline above,
+Both architectures completed all four corpus groups on 2026-10-17 (UTC+8),
+against the frozen v2.2.0 inputs above. Both use eight model threads, deterministic
+search bounds and no inference or completion-acceptance deadline. The same query
+supplies each accuracy result and its latency; timing is not borrowed from a
+different, faster run. Long accuracy and latency traces were checked row for row.
+
+The machines are Ubuntu 26.04.1 VMs with eight vCPUs: x86_64 has 16 GiB RAM on
+an Intel Core i5-12600K host; aarch64 has 8 GiB RAM on Apple silicon. One model
+runner runs at a time on each host. These are separate machine measurements,
+not a controlled hardware comparison. All times below are in milliseconds.
+
+### Deadline-Free Candidate Selection
+
+| Architecture | Track | Top1 | Top2 | Mean | Median | P95 | Maximum |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | Long | 13,397/16,300 | 14,281/16,300 | 147.952 | 148 | 223 | 1,061 |
+| aarch64 | Long | 13,399/16,300 | 14,282/16,300 | 115.221 | 112 | 185 | 536 |
+| x86_64 | Short, no context | 61,173/65,000 | 63,618/65,000 | 4.977 | 3 | 13 | 95 |
+| aarch64 | Short, no context | 61,173/65,000 | 63,618/65,000 | 4.976 | 3 | 13 | 73 |
+| x86_64 | Short, context | 63,364/65,000 | 64,292/65,000 | 8.637 | 5 | 25 | 113 |
+| aarch64 | Short, context | 63,361/65,000 | 64,291/65,000 | 7.909 | 5 | 21 | 84 |
+
+Among 11,728 contested short cases, both architectures score 8,926/10,717
+without context. With context, x86_64 scores 10,533/11,244 and aarch64 scores
+10,532/11,244. Candidate-run process high-water marks are 440,388 KiB
+(430.1 MiB) and 444,484 KiB (434.1 MiB); these are measured peaks, not an
+idle-memory or universal maximum claim.
+
+### Deadline-Free Long Completion
+
+| Architecture | Hits | Predictive prompts | Saved keys | Mean | Median | P95 | Maximum |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 3,766/16,300 | 16,121/16,300 | 9,271 | 158.600 | 154 | 251 | 565 |
+| aarch64 | 3,778/16,300 | 16,114/16,300 | 9,298 | 118.491 | 113 | 194 | 491 |
+
+The respective mean decode/final-candidate/completion intervals are
+7.735/82.601/68.263 ms and 7.366/62.094/49.031 ms. Whole-sentence hits are
+189 and 191. Every finished background request is timed, including evaluations
+that retain the visible hint; there is no fixed worker-wait cutoff. Both the
+platform and reference-count validators check this same complete trace.
+
+### Deadline-Free Short Completion
+
+Each run covers 65,000 cases, yielding 12,831 completion opportunities and
+12,781 visible prompts. Settled timing includes the completed background
+evaluation even if it does not change the hint; initial static hints remain
+available without waiting in normal input.
+
+| Architecture | Hits | Saved keys | Average saved keys per hit | Mean | Median | P95 | Maximum | Key P95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 10,456/12,831 | 27,520 | 2.632 | 18.988 | 17.723 | 58.125 | 145.379 | 2.137 |
+| aarch64 | 10,458/12,831 | 27,525 | 2.632 | 19.511 | 16.730 | 59.205 | 1,738.571 | 2.137 |
+
+Keystroke stability is 2,131/2,193 and 2,133/2,195, respectively. Output
+signatures match each architecture's earlier short-completion run; the higher
+settled timings reflect the expanded measurement scope, not changed candidates.
+The aarch64 maximum is retained, not trimmed as an outlier. Earlier timings only
+included background work when it changed the hint and are not directly comparable.
+
+### Current Corpus Gate Status
+
+All full-corpus accuracy, coverage and memory checks pass on both architectures.
+The existing count floors were not lowered. Latency is published without a
+pass/fail ceiling under the new policy. This completes corpus validation, not
+binary-package installation acceptance or publication. The installed input method
+still uses its foreground 100 ms and background 120 ms safeguards; the earlier
+timed x86_64 long-candidate difference remains recorded below and was not fixed
+by changing the benchmark protocol. Production cancellation, cold-start and
+desktop checks remain separate release requirements.
+
+## Historical v2.0.0 Timed And Diagnostic Measurements
+
+This section preserves the earlier timed runs and separate deadline-free
+diagnostics. Their timing scope predates `all_finished_requests_v1`; they are
+not the replacement measurements above.
+
+These runs started on 2026-10-17 (UTC+8), using the final tagged inputs above.
+Both machines run Ubuntu 26.04.1 with eight vCPUs: x86_64 has 16 GiB RAM on an
+Intel Core i5-12600K host; aarch64 has 8 GiB RAM on Apple silicon. These are
+independent VM measurements, not a controlled hardware comparison. Only one
+model runner runs on each host at a time.
+
+### Candidate Selection
+
+Production accuracy and complete-query latency, in milliseconds:
+
+| Architecture | Track | Top1 | Top2 | Mean | Median | P95 | Maximum |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | Long | 13,360/16,300 | 14,245/16,300 | 120.038 | 118 | 190 | 470 |
+| aarch64 | Long | 13,399/16,300 | 14,282/16,300 | 115.148 | 112 | 185 | 537 |
+| x86_64 | Short, no context | 61,173/65,000 | 63,618/65,000 | 4.973 | 3 | 13 | 268 |
+| aarch64 | Short, no context | 61,173/65,000 | 63,618/65,000 | 4.971 | 3 | 13 | 85 |
+| x86_64 | Short, context | 63,364/65,000 | 64,292/65,000 | 8.068 | 5 | 22 | 95 |
+| aarch64 | Short, context | 63,361/65,000 | 64,291/65,000 | 7.775 | 5 | 21 | 82 |
+
+The separate deadline-free long pass scores 13,397/14,281 Top1/Top2 on x86_64
+and 13,399/14,282 on aarch64. The x86_64 production run loses 37 Top1 and 36
+Top2 against its deadline-free run, outside the existing nine-case allowance.
+**Its production long-candidate quality gate did not pass in this round.** The
+separate deadline-free result did not replace it. The aarch64 counts met the frozen floors;
+no production deadline or quality threshold was relaxed.
+
+Among 11,728 contested short cases, both architectures score 8,926/10,717
+without context. With context, x86_64 scores 10,533/11,244 and aarch64 scores
+10,532/11,244. Candidate-run process high-water marks are 442,232 KiB
+(431.9 MiB) and 448,936 KiB (438.4 MiB). These are measured process peaks,
+not idle-memory or universal maximum claims.
+
+### Production Long Completion
+
+Each architecture processes all 16,300 cases with the deployed 120 ms background
+budget. Times include decoding, final-candidate work and visible completion.
+
+| Architecture | Hits | Predictive prompts | Saved keys | Mean | Median | P95 | Maximum |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 3,766/16,300 | 16,121/16,300 | 9,271 | 119.698 | 115 | 200 | 468 |
+| aarch64 | 3,778/16,300 | 16,114/16,300 | 9,298 | 119.364 | 114 | 195 | 518 |
+
+The respective mean decode/final-candidate/completion intervals are
+7.562/63.048/49.088 ms and 7.411/63.144/48.810 ms. Both production completion
+runs meet the frozen count floors. Whole-sentence hits are 189 and 191.
+
+### Deadline-Free Long Completion
+
+Both architectures also process the full 16,300 cases with eight inference
+threads and no result or character-LM deadline. These are diagnostic timings,
+not the deployed completion latency.
+
+| Architecture | Hits | Predictive prompts | Saved keys | Mean | Median | P95 | Maximum |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 3,766/16,300 | 16,121/16,300 | 9,271 | 155.535 | 151 | 247 | 1,892 |
+| aarch64 | 3,778/16,300 | 16,114/16,300 | 9,298 | 118.654 | 114 | 194 | 500 |
+
+The respective mean decode/final-candidate/completion intervals are
+7.609/81.301/66.625 ms and 7.364/62.636/48.655 ms. Aggregate counts match each
+architecture's production completion run; that does not imply all hints are
+identical. The x86_64 production/deadline-free trace signatures differ, whereas
+the aarch64 signatures match. Both tracks remain separately recorded.
+
+### Short Completion
+
+Each run processes 65,000 cases, giving 12,831 completion opportunities and
+12,781 visible prompts. The 120 ms background budget is unchanged. Times are
+in milliseconds; settled latency includes a background replacement when one
+changes the displayed completion.
+
+| Architecture | Hits | Saved keys | Average saved keys per hit | Mean | Median | P95 | Maximum | Key P95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 10,456/12,831 | 27,520 | 2.632 | 5.913 | 0.842 | 30.467 | 104.601 | 2.072 |
+| aarch64 | 10,458/12,831 | 27,525 | 2.632 | 6.073 | 0.773 | 30.675 | 96.729 | 2.033 |
+
+Keystroke stability is 2,131/2,193 on x86_64 and 2,133/2,195 on aarch64.
+Both short-completion gates pass. The output signatures are
+`A34F731642F4DE48` and `B6E52B699366BAFF`, respectively.
+
+### Cold Start And Memory
+
+These checks use fresh production service processes without dropping OS file
+caches. Startup is measured to IPC readiness; key timings begin after that
+readiness, rather than hiding startup inside a first-key measurement. The
+blocked trial holds model initialization deliberately and releases it before
+checking ready-model input.
+
+| Architecture | Process-cold IPC ready (ms) | Process-cold first key (ms) | Process-cold maximum key (ms) | Blocked-model first / maximum key (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| x86_64 | 930.149 | 4.222 | 31.755 | 4.134 / 27.444 |
+| aarch64 | 1,172.148 | 4.003 | 27.057 | 4.442 / 26.640 |
+
+| Architecture | Loaded RSS (KiB) | RSS after five idle seconds (KiB / MiB) | Idle trim (ms) | Resume first / maximum key (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| x86_64 | 321,724 | 318,380 / 310.9 | 0.318 | 3.472 / 73.985 |
+| aarch64 | 330,644 | 327,332 / 319.7 | 0.700 | 13.748 / 85.791 |
+
+Both cold-start and idle-memory checks pass without unloading the model during
+idle reclamation. They measure the tested service and input sequence, not every
+application's latency or a universal memory bound. Framework regression coverage
+and the distinction from installed-package acceptance are in
+[COMPATIBILITY.md](COMPATIBILITY.md).
+
+### Historical Gate Status
+
+In this earlier round all four full benchmark groups passed on aarch64. On x86_64, the only failed
+quality fields are production long Top1 and Top2; short candidates, all three
+completion tracks, latency, memory and lifecycle gates pass. Three fresh-process
+replays of 500 cases also produce identical candidate/completion traces within
+each architecture. New binary-package installation acceptance is still separate.
+
+A subsequent 295-case x86_64 diagnostic includes changed candidates from the
+full run and regularly spaced controls. With six threads its deterministic
+deadline-free first candidates match the full eight-thread reference exactly
+(225 correct). A 100 ms model deadline yields 223 correct; production search
+yields 222 in both diagnostic processes, although seven first texts differ
+between those processes. The original full production run scores 188 on that
+selected subset. This shows timing sensitivity but does not fully reproduce or
+explain the sustained-run gap. Subset results do not replace full-run scores,
+and did not resolve the x86_64 production long gate. The later deadline-free
+corpus policy and its results are documented separately above.
+
+## Earlier v2.0.0 Measurements Against v2.1.0
+
+These earlier measurements use the v2.1.0 engine and dictionaries,
 with the same shared model and unchanged 100/120 ms foreground/background
 budgets. Runs started on 2026-10-14 (UTC+8), using Ubuntu 26.04.1 virtual
 machines with eight vCPUs. The x86_64 machine has 16 GiB RAM on an Intel Core
 i5-12600K host; aarch64 has 8 GiB RAM on Apple silicon. These are independent
 machine measurements, not a controlled hardware comparison.
+
+The earlier SC/TC dictionaries contained 249,876 / 253,088 text-reading records,
+with SHA-256 `1157f46aa08a80acb405070aa255b3a2e8b26693a81cd5be91c915e95632e1f7`
+and `eaea45e13b6dbf4cdfc07ceccc703a66210ebd0be7e4c183f735741a469282b2`.
+They did not include the final v2.2.0 updates or the 43 corrected benchmark cases.
 
 All four full benchmark groups passed on both architectures, as did isolated
 IBus/Fcitx 5, cold-start and idle-memory checks. Quality tolerances, latency and

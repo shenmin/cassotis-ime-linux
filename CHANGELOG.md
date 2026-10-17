@@ -1,9 +1,9 @@
 # Changelog
 
-## 2.0.0 - 2026-10-14
+## 2.0.0 - 2026-10-18
 
 - Align the engine and dictionaries with Cassotis IME and Cassotis Lexicon
-  v2.1.0. One character language model now handles long and short candidates,
+  v2.2.0. One character language model now handles long and short candidates,
   pinyin-constrained correction, one-key completion and continuation.
 - Consolidate the neural models into one model with seven compact compiled
   parameter units. Remove retired runtime code and clean obsolete model assets
@@ -28,6 +28,12 @@
   `ying`, `jiu` and `bu` scoped to exact input.
 - Strip release ELF debug symbols and use XZ compression for Debian packages;
   retain runtime resources and unstripped development binaries.
+- Add ordered custom phrases with literal multiline commits, JSON import/export,
+  and a dedicated settings page; group diagnostics under Advanced.
+- Preserve all dictionary readings when drafting short phrases, score empty-context
+  input as a clause and avoid learning quoted pinyin as an English preference.
+- Add reviewed poetry entries, prefix completion and next-line continuation.
+  Refresh dictionary pronunciation corrections and matching benchmark cases.
 
 ## 1.0.1 - 2026-10-07
 

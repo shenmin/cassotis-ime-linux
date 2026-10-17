@@ -2,20 +2,23 @@
 
 ## v2.0.0 Validation
 
-The 2026-10-14 (UTC+8) alignment uses the Cassotis IME and Cassotis Lexicon
-v2.1.0 baseline. Both architectures passed all four full benchmark groups,
-including production-mode candidate and completion checks, without widening
-the quality tolerances or latency/memory ceilings. Foreground/background model
+The 2026-10-17 (UTC+8) alignment uses the released Cassotis IME and Cassotis
+Lexicon v2.2.0 tags, fresh schema-24 dictionaries and corrected case readings.
+All four full benchmark groups pass on aarch64. On x86_64, short-word and
+completion gates pass, but **production long-sentence Top1/Top2 remain below
+the frozen floors**; deadline-free accuracy does not qualify that deployed path.
+Quality tolerances and latency/memory ceilings are unchanged. Foreground/background model
 budgets remain 100/120 ms. These budgets are not ceilings on whole-query or
 end-to-end key latency. Measurements are in [BENCHMARK.md](BENCHMARK.md) /
 [Chinese](BENCHMARK.CN.md).
 
 | Platform | Current checks |
 | --- | --- |
-| Ubuntu 26.04.1 x86_64 and aarch64, GNOME Wayland hosts | 869 core tests and 69 final-Tab projection checks per architecture; settings, candidate-layout and shortcut regressions |
+| Ubuntu 26.04.1 x86_64 and aarch64, GNOME Wayland hosts | 887 core tests and 69 final-Tab projection checks per architecture; six settings tests, candidate-layout and shortcut regressions |
 | Both architectures | SC/TC incremental and whole-input candidate checks in static and ready-neural modes; ambiguous nasal boundaries, explicit apostrophes, double Pinyin, partial selection and undo |
 | Both architectures | Isolated IBus normal/debug/disabled-shortcut checks and Fcitx 5 adapter checks, including Shift punctuation, U/I/V quick input, decimal periods and English/raw selection |
-| Both architectures | Full long/short candidate and completion quality/latency gates, blocked model initialization, independent process-cold input, idle-memory reclamation and native math ABI checks |
+| Both architectures | Full long/short candidate and completion suites, with the x86_64 long production failure noted above; blocked model initialization, independent process-cold input, idle-memory reclamation and native math ABI checks |
+| Both architectures | Three fresh-process replays of 500 cases with different argument/environment layouts; all candidate/completion traces identical within each architecture |
 
 The packaging pipeline strips staging copies only, preserves the tested build
 output, and uses XZ for Debian payloads. It checks dictionary and model hashes,
@@ -26,6 +29,14 @@ The installed-package desktop matrix and SteamOS tests below were performed
 before this final engine/dictionary alignment. They are retained with their
 original scope, not claimed as new tests of these final packages. The current
 isolated checks do not restart the user's active desktop input method.
+
+### Earlier v2.1.0 Alignment
+
+The 2026-10-14 alignment against v2.1.0 passed all four complete benchmark
+groups, 869 core tests, 69 final-Tab checks, isolated framework checks and
+cold-start/idle-memory tests on both architectures. Its dictionaries and case
+readings predate the final v2.2.0 updates, so those results do not replace the
+current gate. The earlier measurements remain in the benchmark documents.
 
 ### Earlier v2.0.0 Desktop And Pre-Alignment Validation
 
