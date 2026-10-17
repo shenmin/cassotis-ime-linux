@@ -30,6 +30,8 @@
   retain runtime resources and unstripped development binaries.
 - Add ordered custom phrases with literal multiline commits, JSON import/export,
   and a dedicated settings page; group diagnostics under Advanced.
+- Preserve consecutive Unicode escapes and supplementary characters in custom
+  phrase JSON rather than truncating their UTF-8 representation.
 - Preserve all dictionary readings when drafting short phrases, score empty-context
   input as a clause and avoid learning quoted pinyin as an English preference.
 - Add reviewed poetry entries, prefix completion and next-line continuation.

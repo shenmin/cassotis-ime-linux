@@ -73,11 +73,96 @@ begin
     end;
 end;
 
+function normalize_json_unicode(const value: string; out normalized: string): Boolean;
+var i, written, j, digit, code, low_code: Integer; ch: Char; quoted: Boolean;
+
+    function read_hex(const start: Integer; out number: Integer): Boolean;
+    var k: Integer; c: Char;
+    begin
+        number := 0;
+        Result := start + 3 <= Length(value);
+        if not Result then Exit;
+        for k := start to start + 3 do
+        begin
+            c := value[k];
+            case c of
+                '0'..'9': digit := Ord(c) - Ord('0');
+                'a'..'f': digit := Ord(c) - Ord('a') + 10;
+                'A'..'F': digit := Ord(c) - Ord('A') + 10;
+            else
+                Exit(False);
+            end;
+            number := number * 16 + digit;
+        end;
+    end;
+
+    procedure append(const c: Char);
+    begin
+        Inc(written);
+        normalized[written] := c;
+    end;
+
+begin
+    // FPC 3.2.2 uses a four-byte buffer for two consecutive Unicode escapes.
+    // Decode printable escapes before it can truncate two three-byte characters.
+    Result := False;
+    SetLength(normalized, Length(value));
+    written := 0;
+    i := 1;
+    quoted := False;
+    while i <= Length(value) do
+    begin
+        ch := value[i];
+        if quoted and (ch = '\') then
+        begin
+            if i = Length(value) then Exit;
+            if value[i + 1] = 'u' then
+            begin
+                if not read_hex(i + 2, code) then Exit;
+                if (code >= $D800) and (code <= $DBFF) then
+                begin
+                    if (i + 11 > Length(value)) or (value[i + 6] <> '\') or
+                        (value[i + 7] <> 'u') then Exit;
+                    if not read_hex(i + 8, low_code) or
+                        (low_code < $DC00) or (low_code > $DFFF) then Exit;
+                    append(Char(code));
+                    append(Char(low_code));
+                    Inc(i, 12);
+                end
+                else
+                begin
+                    if (code >= $DC00) and (code <= $DFFF) then Exit;
+                    if (code < 32) or (code = Ord('"')) or (code = Ord('\')) then
+                        for j := i to i + 5 do append(value[j])
+                    else
+                        append(Char(code));
+                    Inc(i, 6);
+                end;
+            end
+            else
+            begin
+                append(ch);
+                append(value[i + 1]);
+                Inc(i, 2);
+            end;
+        end
+        else
+        begin
+            if ch = '"' then quoted := not quoted;
+            append(ch);
+            Inc(i);
+        end;
+    end;
+    SetLength(normalized, written);
+    Result := True;
+end;
+
 function nc_parse_custom_phrases(const value: string;
     out phrases: TncCustomPhraseList): Boolean;
 var root, row: TJSONData; parsed: TncCustomPhraseList; i: Integer;
     parser: TJSONParser;
     ch: Char; depth: Integer; quoted, escaped: Boolean;
+    normalized: string;
 begin
     phrases := nil;
     Result := False;
@@ -102,10 +187,11 @@ begin
             '{', '}': Exit;
         end;
     end;
+    if not normalize_json_unicode(value, normalized) then Exit;
     root := nil;
     try
         try
-            parser := TJSONParser.Create(UTF8Encode(value), [joUTF8, joStrict]);
+            parser := TJSONParser.Create(UTF8Encode(normalized), [joUTF8, joStrict]);
             try
                 root := parser.Parse;
             finally
