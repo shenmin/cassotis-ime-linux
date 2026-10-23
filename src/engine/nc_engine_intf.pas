@@ -28,6 +28,7 @@ uses
     nc_long_ablation,
     nc_short_particle_evidence,
     nc_char_lm,
+    nc_char_lm_traditional,
     nc_dictionary_sqlite,
     nc_document_context_model,
     nc_pinyin_parser,
@@ -859,6 +860,9 @@ type
         m_runtime_long_complete_pool_candidates:
             TncLongCompletePoolRuntimeCandidateArray;
         m_runtime_long_retained_exact_edges: TncLongRetainedExactEdgeArray;
+        // The model given to set_char_lm; m_char_lm is the model as the
+        // dictionary variant uses it (nc_char_lm_traditional).
+        m_char_lm_model: IncCharLm;
         m_char_lm: IncCharLm;
         m_char_lm_long_enabled: Boolean;
         m_char_lm_short_enabled: Boolean;
@@ -867,6 +871,9 @@ type
         m_char_lm_long_pool: TncCandidateList;
         m_char_lm_long_pool_ranks: TArray<Integer>;
         m_char_lm_long_pool_evidence: TArray<TncCharLmLongEvidence>;
+        // The repair given to set_long_local_repair; m_long_local_repair is
+        // the repair as the dictionary variant uses it (TncTraditionalLongRepair).
+        m_long_local_repair_model: IncLongLocalRepair;
         m_long_local_repair: IncLongLocalRepair;
         m_local_repair_query_key, m_local_repair_text, m_local_repair_draft: string;
         m_local_repair_original_path: string;
@@ -874,6 +881,10 @@ type
         // The short-phrase stage's answer for the input it was asked about.
         m_short_phrase_key, m_short_phrase_debug: string;
         m_short_phrase_texts, m_short_phrase_paths: TArray<string>;
+        // The draft the shared LM prefers as the beginning of a longer text
+        // (scored without the comma), when it is not the first phrase shown:
+        // the start of a Tab continuation.
+        m_short_phrase_tab_text, m_short_phrase_tab_path: string;
         m_repaired_completion_query_key: string;
         // The input whose long completion was rebuilt from the settled page.
         m_visible_completion_key: string;
@@ -910,6 +921,17 @@ type
         m_last_committed_text: string;
         m_last_committed_pinyin: string;
         m_confirmed_segments: TList<TncConfirmedSegment>;
+        // For is_predictive_longer_candidate, of m_longer_check_query and the
+        // dictionary of the time: the fewest key groups the input reads as,
+        // the groups that begin at each key (by length) and whether a
+        // character may read one as the beginning of a longer syllable, and
+        // the texts judged so far. The page assembly asks about every
+        // candidate two or three times.
+        m_longer_check_query: string;
+        m_longer_check_min_groups: Integer;
+        m_longer_check_groups: TArray<TArray<string>>;
+        m_longer_check_initials: TArray<TArray<Boolean>>;
+        m_longer_check_verdicts: TDictionary<string, Boolean>;
         procedure refresh_raw_input_candidate;
         procedure set_raw_input_selected_by_user(const selected: Boolean);
         procedure note_raw_input_choice;
@@ -919,6 +941,10 @@ type
         function get_candidate_page_size: Integer;
         function get_total_candidate_limit: Integer;
         function is_fuzzy_pinyin_active: Boolean; inline;
+        function is_predictive_longer_candidate(const candidate: TncCandidate;
+            const query: string): Boolean;
+        function misreads_typed_keys(const text, pinyin, query: string): Boolean;
+        function variant_char(const simplified, traditional: Word): string; inline;
         function create_dictionary_from_config: TncDictionaryProvider;
         function take_cached_dictionary_provider(const variant: TncDictionaryVariant;
             const base_path: string; const user_path: string): TncDictionaryProvider;
@@ -939,8 +965,14 @@ type
         function get_dictionary_write_time(const path: string): TDateTime;
         function visible_candidates_cache_is_current(
             const page_size: Integer): Boolean;
-        procedure cache_visible_candidate_page(const candidates: TncCandidateList;
-            const source_indices: TArray<Integer>; const page_size: Integer);
+        procedure cache_visible_candidate_page(var candidates: TncCandidateList;
+            var source_indices: TArray<Integer>; const page_size: Integer);
+        procedure convert_page_to_traditional(var candidates: TncCandidateList;
+            var source_indices: TArray<Integer>);
+        function get_candidate_page_snapshot_raw(const page_index: Integer): TncCandidateList;
+        function get_one_key_completion_raw: TncOneKeyCompletion;
+        function get_display_text_raw: string;
+        function commit_text_raw(out out_text: string): Boolean;
         function get_candidate_state_signature: UInt64;
         function get_long_visible_candidate_pool_cache_key(
             const page_size: Integer): string;
@@ -1096,6 +1128,8 @@ type
             const comment_text: string; const path_score_hint: Integer);
         procedure remember_segment_path_query_prefix(const encoded_path: string; const query_prefix: string);
         function get_query_prefix_for_segment_path(const encoded_path: string): string;
+        // The text a Tab continuation starts from for a first visible text.
+        function get_tab_start_text(const visible_text: string): string;
         function get_segment_path_for_candidate(const candidate: TncCandidate;
             const candidate_index: Integer = -1): string;
         function infer_segment_path_for_query_text_with_score(
@@ -1253,6 +1287,11 @@ type
             const document_key: string = '';
             const document_snapshot: string = '');
         procedure set_punctuation_preceding_char(const value: Char);
+        // The text before the input that the shared LM ranks the candidates
+        // with, where it comes from, and whether the host reports the text
+        // before the caret (for the debug display of the candidate window).
+        function get_ranking_left_context(out source: TncLeftContextSource;
+            out document_reported: Boolean): string;
         function debug_query_one_key_completion(const query_text: string;
             const left_context: string): TncOneKeyCompletion;
         function debug_query_one_key_completion_candidates(
@@ -1381,6 +1420,9 @@ function nc_search_budget_should_stop(const mode: TncSearchBudgetMode;
     const emergency_budget_ms: UInt64;
     const scale_percent: Integer): Boolean;
 
+{ The repair as the traditional variant uses it (TncTraditionalLongRepair). }
+function nc_traditional_long_repair(const repair: IncLongLocalRepair): IncLongLocalRepair;
+
 implementation
 
 uses
@@ -1400,6 +1442,110 @@ const
     c_fast_repair_promote_margin = 6000;
     c_short_nocontext_protected_baseline_min_weight = 1000;
     c_short_residual_visibility_only_max_weight = 0;
+
+type
+    // The pinyin-conditioned repair in the traditional variant. It is the
+    // character LM, trained on simplified text (nc_char_lm_traditional): it
+    // read a traditional draft as it was and wrote its corrections in
+    // simplified characters, 8% of the long sentences typed in traditional
+    // (這也導致 as 这也到指, 堆滿 as 对滿). It now reads the draft and the text
+    // before it in simplified, a character it keeps stays as typed and one
+    // it changes is written in traditional; where that is no one character
+    // (后: 後 or 后) the draft stays.
+    TncTraditionalLongRepair = class(TInterfacedObject, IncLongLocalRepair,
+        IncShortPhraseCorrector)
+    private
+        m_repair: IncLongLocalRepair;
+        function to_traditional(const draft, simplified_draft, corrected: string;
+            out text: string): Boolean;
+    public
+        constructor Create(const repair: IncLongLocalRepair);
+        procedure set_document_context(const document_key, preceding_text: string);
+        function try_repair(const query_text, draft_text: string;
+            const document_key, preceding_text: string;
+            out repaired_text, aligned_pinyin: string;
+            out minimum_word_ratio: Double): Boolean;
+        function correct_short_phrase(const query_text, draft_text, preceding_text: string;
+            out corrected_text, aligned_pinyin: string; out gain: Single): Integer;
+    end;
+
+constructor TncTraditionalLongRepair.Create(const repair: IncLongLocalRepair);
+begin
+    inherited Create;
+    m_repair := repair;
+end;
+
+function TncTraditionalLongRepair.to_traditional(const draft, simplified_draft,
+    corrected: string; out text: string): Boolean;
+var
+    idx: Integer;
+    converted: string;
+begin
+    text := '';
+    for idx := 1 to Length(corrected) do
+    begin
+        if (Length(corrected) = Length(draft)) and (corrected[idx] = simplified_draft[idx]) then
+            converted := draft[idx]
+        else
+            converted := nc_simplified_char_to_traditional(corrected[idx]);
+        if converted = '' then
+            Exit(False);
+        text := text + converted;
+    end;
+    Result := True;
+end;
+
+procedure TncTraditionalLongRepair.set_document_context(const document_key,
+    preceding_text: string);
+begin
+    m_repair.set_document_context(document_key, nc_traditional_to_simplified(preceding_text));
+end;
+
+function TncTraditionalLongRepair.try_repair(const query_text, draft_text: string;
+    const document_key, preceding_text: string; out repaired_text, aligned_pinyin: string;
+    out minimum_word_ratio: Double): Boolean;
+var
+    simplified_draft, corrected: string;
+begin
+    simplified_draft := nc_traditional_to_simplified(draft_text);
+    Result := m_repair.try_repair(query_text, simplified_draft, document_key,
+        nc_traditional_to_simplified(preceding_text), corrected, aligned_pinyin,
+        minimum_word_ratio) and to_traditional(draft_text, simplified_draft, corrected,
+        repaired_text);
+    if not Result then
+        repaired_text := draft_text;
+end;
+
+function TncTraditionalLongRepair.correct_short_phrase(const query_text, draft_text,
+    preceding_text: string; out corrected_text, aligned_pinyin: string;
+    out gain: Single): Integer;
+var
+    corrector: IncShortPhraseCorrector;
+    simplified_draft, corrected: string;
+begin
+    corrected_text := draft_text;
+    aligned_pinyin := '';
+    gain := 0;
+    if not Supports(m_repair, IncShortPhraseCorrector, corrector) then
+        Exit(-1);
+    simplified_draft := nc_traditional_to_simplified(draft_text);
+    Result := corrector.correct_short_phrase(query_text, simplified_draft,
+        nc_traditional_to_simplified(preceding_text), corrected, aligned_pinyin, gain);
+    if (Result = 1) and not to_traditional(draft_text, simplified_draft, corrected,
+        corrected_text) then
+    begin
+        corrected_text := draft_text;
+        Result := 0;
+    end;
+end;
+
+function nc_traditional_long_repair(const repair: IncLongLocalRepair): IncLongLocalRepair;
+begin
+    if repair = nil then
+        Result := nil
+    else
+        Result := TncTraditionalLongRepair.Create(repair);
+end;
 
 function trim_left_context_to_sentence(const value: string;
     const max_length: Integer): string; forward;
@@ -1640,6 +1786,19 @@ begin
         results[i].has_dict_weight := True;
         results[i].dict_weight := results[i].score;
     end;
+end;
+
+// A character of the engine's tables in the script of the variant: 这 in the
+// simplified one, 這 in the traditional one, whose dictionary, pages and
+// context write it so. Without it the traditional variant's function-word
+// rules never matched (對 is no 对) and its bridges wrote simplified text.
+// Before every use, so that it is inlined there.
+function TncEngine.variant_char(const simplified, traditional: Word): string;
+begin
+    if m_config.dictionary_variant = dv_traditional then
+        Result := string(Char(traditional))
+    else
+        Result := string(Char(simplified));
 end;
 
 constructor TncEngine.create(const config: TncEngineConfig;
@@ -1888,7 +2047,9 @@ end;
 destructor TncEngine.Destroy;
 begin
     m_custom_phrases.Free;
+    m_longer_check_verdicts.Free;
     m_long_local_repair := nil;
+    m_long_local_repair_model := nil;
     if m_document_context_model <> nil then
     begin
         m_document_context_model.Free;
@@ -2744,9 +2905,9 @@ var
         Result := ((last_pinyin = 'le') and
             SameText(units[3], string(Char($4E86)))) or
             ((last_pinyin = 'zhe') and
-            SameText(units[3], string(Char($7740)))) or
+            SameText(units[3], variant_char($7740, $8457))) or
             ((last_pinyin = 'guo') and
-            SameText(units[3], string(Char($8FC7))));
+            SameText(units[3], variant_char($8FC7, $904E)));
     end;
 
     procedure cache_evidence;
@@ -2953,13 +3114,13 @@ var
             ((normalized_particle = 'le') and
             SameText(text_value_local, string(Char($4E86)))) or
             ((normalized_particle = 'zhe') and
-            SameText(text_value_local, string(Char($7740)))) or
+            SameText(text_value_local, variant_char($7740, $8457))) or
             ((normalized_particle = 'la') and
             SameText(text_value_local, string(Char($5566)))) or
             ((normalized_particle = 'ba') and
             SameText(text_value_local, string(Char($5427)))) or
             ((normalized_particle = 'ma') and
-            SameText(text_value_local, string(Char($5417)))) or
+            SameText(text_value_local, variant_char($5417, $55CE))) or
             ((normalized_particle = 'a') and
             SameText(text_value_local, string(Char($554A))));
     end;
@@ -3739,6 +3900,15 @@ begin
     begin
         Result := '';
     end;
+end;
+
+function TncEngine.get_tab_start_text(const visible_text: string): string;
+begin
+    Result := visible_text;
+    if (m_short_phrase_tab_text <> '') and (Length(m_short_phrase_texts) > 0) and
+        (visible_text = m_short_phrase_texts[0]) and
+        (Pos(m_composition_text + #0 + m_last_lookup_key + #0, m_short_phrase_key) = 1) then
+        Result := m_short_phrase_tab_text;
 end;
 
 function TncEngine.get_segment_path_for_candidate(const candidate: TncCandidate;
@@ -5198,6 +5368,10 @@ begin
     begin
         store_current_dictionary_provider(previous_config);
         set_dictionary_provider(create_dictionary_from_config);
+        if m_char_lm_model <> nil then
+            set_char_lm(m_char_lm_model, m_char_lm_long_enabled, m_char_lm_short_enabled);
+        if m_long_local_repair_model <> nil then
+            set_long_local_repair(m_long_local_repair_model);
     end;
     if fuzzy_pinyin_changed and (not dictionary_changed) then
     begin
@@ -5261,6 +5435,8 @@ begin
     end;
 
     m_dictionary := dictionary;
+    // The longer-word verdicts read the dictionary's character readings.
+    m_longer_check_query := '';
     if m_dictionary is TncSqliteDictionary then
         TncSqliteDictionary(m_dictionary).set_user_dictionary_variant(
             m_config.dictionary_variant);
@@ -5300,7 +5476,11 @@ end;
 procedure TncEngine.set_char_lm(const model: IncCharLm; const long_enabled: Boolean;
     const short_enabled: Boolean);
 begin
-    m_char_lm := model;
+    m_char_lm_model := model;
+    if m_config.dictionary_variant = dv_traditional then
+        m_char_lm := nc_traditional_char_lm(model)
+    else
+        m_char_lm := model;
     m_char_lm_long_enabled := long_enabled and (model <> nil);
     m_char_lm_short_enabled := short_enabled and (model <> nil);
     SetLength(m_char_lm_long_pool, 0);
@@ -5310,7 +5490,11 @@ end;
 
 procedure TncEngine.set_long_local_repair(const repair: IncLongLocalRepair);
 begin
-    m_long_local_repair := repair;
+    m_long_local_repair_model := repair;
+    if m_config.dictionary_variant = dv_traditional then
+        m_long_local_repair := nc_traditional_long_repair(repair)
+    else
+        m_long_local_repair := repair;
     m_local_repair_query_key := '';
     m_local_repair_text := '';
     m_local_repair_draft := '';
@@ -5811,6 +5995,33 @@ procedure TncEngine.set_punctuation_preceding_char(const value: Char);
 begin
     // Per-key hint from TSF, never inferred from document or committed text.
     m_punctuation_preceding_char := value;
+end;
+
+function TncEngine.get_ranking_left_context(out source: TncLeftContextSource;
+    out document_reported: Boolean): string;
+begin
+    // The order every LM call of the ranking takes its context in.
+    document_reported := m_external_context_reported;
+    if m_segment_left_context <> '' then
+    begin
+        source := lcs_segment;
+        Result := m_segment_left_context;
+    end
+    else if m_external_left_context <> '' then
+    begin
+        source := lcs_document;
+        Result := m_external_left_context;
+    end
+    else if m_left_context <> '' then
+    begin
+        source := lcs_session;
+        Result := m_left_context;
+    end
+    else
+    begin
+        source := lcs_none;
+        Result := '';
+    end;
 end;
 
 procedure TncEngine.set_external_left_context(const left_context: string;
@@ -6506,7 +6717,7 @@ begin
             (get_candidate_text_unit_count(Trim(m_visible_candidates_cache[idx].text)) =
             Length(syllables)) then
         begin
-            visible_top := Trim(m_visible_candidates_cache[idx].text);
+            visible_top := get_tab_start_text(Trim(m_visible_candidates_cache[idx].text));
             Break;
         end;
     if (visible_top = '') or (m_has_long_neural_completion_request and
@@ -7067,6 +7278,19 @@ begin
     begin
         completion_candidates := m_visible_candidates_cache;
         completion_sources := Copy(m_visible_candidate_source_indices_cache);
+        // The short-phrase stage's first phrase is a clause the user may
+        // commit; a continuation starts from its draft for the beginning of
+        // a sentence.
+        if (Trim(completion_candidates[0].comment) = '') and
+            (get_tab_start_text(Trim(completion_candidates[0].text)) <>
+            Trim(completion_candidates[0].text)) then
+        begin
+            completion_candidates := Copy(completion_candidates);
+            completion_candidates[0].text := m_short_phrase_tab_text;
+            completion_sources[0] := -1;
+            remember_segment_path_for_candidate(m_short_phrase_tab_text, '',
+                m_short_phrase_tab_path);
+        end;
     end;
     if has_validated_completion_prefix and (not corrected_prefix)
         then Exit;
@@ -10288,7 +10512,7 @@ var
             end
             else if particle_key_local = 'zhe' then
             begin
-                particle_text_local := string(Char($7740));
+                particle_text_local := variant_char($7740, $8457);
             end
             else if particle_key_local = 'la' then
             begin
@@ -10300,7 +10524,7 @@ var
             end
             else if particle_key_local = 'ma' then
             begin
-                particle_text_local := string(Char($5417));
+                particle_text_local := variant_char($5417, $55CE);
             end
             else if particle_key_local = 'a' then
             begin
@@ -10465,22 +10689,22 @@ var
             Exit;
         end;
 
-        if SameText(text_value, string(Char($6709)) + string(Char($70B9))) or
+        if SameText(text_value, string(Char($6709)) + variant_char($70B9, $9EDE)) or
 
-            SameText(text_value, string(Char($4E00)) + string(Char($70B9))) or
+            SameText(text_value, string(Char($4E00)) + variant_char($70B9, $9EDE)) or
             SameText(text_value, string(Char($4E0D)) + string(Char($662F))) or
 
-            SameText(text_value, string(Char($4E0D)) + string(Char($4F1A))) or
+            SameText(text_value, string(Char($4E0D)) + variant_char($4F1A, $6703)) or
 
             SameText(text_value, string(Char($4E0D)) + string(Char($80FD))) or
 
             SameText(text_value, string(Char($4E0D)) + string(Char($8981))) or
 
-            SameText(text_value, string(Char($6CA1)) + string(Char($6709))) or
+            SameText(text_value, variant_char($6CA1, $6C92) + string(Char($6709))) or
 
             SameText(text_value, string(Char($53EF)) + string(Char($4EE5))) or
 
-            SameText(text_value, string(Char($5E94)) + string(Char($8BE5))) or
+            SameText(text_value, variant_char($5E94, $61C9) + variant_char($8BE5, $8A72)) or
 
             SameText(text_value, string(Char($9700)) + string(Char($8981))) then
         begin
@@ -10534,13 +10758,13 @@ var
                 ((pinyin_key_value = 'le') and
                 SameText(text_value, string(Char($4E86)))) or
                 ((pinyin_key_value = 'zhe') and
-                SameText(text_value, string(Char($7740)))) or
+                SameText(text_value, variant_char($7740, $8457))) or
                 ((pinyin_key_value = 'la') and
                 SameText(text_value, string(Char($5566)))) or
                 ((pinyin_key_value = 'ba') and
                 SameText(text_value, string(Char($5427)))) or
                 ((pinyin_key_value = 'ma') and
-                SameText(text_value, string(Char($5417)))) or
+                SameText(text_value, variant_char($5417, $55CE))) or
                 ((pinyin_key_value = 'a') and
                 SameText(text_value, string(Char($554A))));
         end;
@@ -11281,11 +11505,11 @@ var
 
                 (value = string(Char($5DF2))) or
 
-                (value = string(Char($5C06))) or
+                (value = variant_char($5C06, $5C07)) or
 
                 (value = string(Char($53EF))) or
 
-                (value = string(Char($4F1A))) or
+                (value = variant_char($4F1A, $6703)) or
 
                 (value = string(Char($80FD))) or
 
@@ -11293,9 +11517,9 @@ var
 
                 (value = string(Char($60F3))) or
 
-                (value = string(Char($6CA1))) or
+                (value = variant_char($6CA1, $6C92)) or
 
-                (value = string(Char($65E0))) or
+                (value = variant_char($65E0, $7121)) or
 
                 (value = string(Char($975E))) or
 
@@ -11305,7 +11529,7 @@ var
 
                 (value = string(Char($90FD))) or
 
-                (value = string(Char($8FD8))) or
+                (value = variant_char($8FD8, $9084)) or
 
                 (value = string(Char($624D))) or
 
@@ -11313,7 +11537,7 @@ var
 
                 (value = string(Char($53EA))) or
 
-                (value = string(Char($522B))) or
+                (value = variant_char($522B, $5225)) or
 
                 (value = string(Char($591A))) or
 
@@ -11327,35 +11551,35 @@ var
 
                 (value = string(Char($633A))) or
 
-                (value = string(Char($8F83))) or
+                (value = variant_char($8F83, $8F03)) or
 
-                (value = string(Char($9887))) or
+                (value = variant_char($9887, $9817)) or
 
-                (value = string(Char($6781))) or
+                (value = variant_char($6781, $6975)) or
 
                 (value = string(Char($628A))) or
 
                 (value = string(Char($88AB))) or
 
-                (value = string(Char($8BA9))) or
+                (value = variant_char($8BA9, $8B93)) or
 
-                (value = string(Char($7ED9))) or
+                (value = variant_char($7ED9, $7D66)) or
 
                 (value = string(Char($5411))) or
 
-                (value = string(Char($5BF9))) or
+                (value = variant_char($5BF9, $5C0D)) or
 
-                (value = string(Char($4ECE))) or
+                (value = variant_char($4ECE, $5F9E)) or
 
-                (value = string(Char($4E8E))) or
+                (value = variant_char($4E8E, $65BC)) or
 
                 (value = string(Char($548C))) or
 
-                (value = string(Char($4E0E))) or
+                (value = variant_char($4E0E, $8207)) or
 
                 (value = string(Char($4F46))) or
 
-                (value = string(Char($867D))) or
+                (value = variant_char($867D, $96D6)) or
 
                 (value = string(Char($800C))) or
 
@@ -14416,7 +14640,7 @@ var
                             (((key_value_local = 'er') or
                             (key_value_local = 'liang')) and
                             ((text_value_local = string(Char($4E8C))) or
-                            (text_value_local = string(Char($4E24))))) or
+                            (text_value_local = variant_char($4E24, $5169)))) or
                             ((key_value_local = 'san') and
                             (text_value_local = string(Char($4E09)))) or
                             ((key_value_local = 'si') and
@@ -14438,25 +14662,25 @@ var
                             ((key_value_local = 'zi') and
                             (text_value_local = string(Char($5B57)))) or
                             ((key_value_local = 'xiang') and
-                            (text_value_local = string(Char($9879)))) or
+                            (text_value_local = variant_char($9879, $9805))) or
                             ((key_value_local = 'ci') and
                             (text_value_local = string(Char($6B21)))) or
                             ((key_value_local = 'ge') and
-                            (text_value_local = string(Char($4E2A)))) or
+                            (text_value_local = variant_char($4E2A, $500B))) or
                             ((key_value_local = 'tiao') and
-                            (text_value_local = string(Char($6761)))) or
+                            (text_value_local = variant_char($6761, $689D))) or
                             ((key_value_local = 'zhang') and
-                            (text_value_local = string(Char($5F20)))) or
+                            (text_value_local = variant_char($5F20, $5F35))) or
                             ((key_value_local = 'dian') and
-                            (text_value_local = string(Char($70B9)))) or
+                            (text_value_local = variant_char($70B9, $9EDE))) or
                             ((key_value_local = 'bu') and
                             (text_value_local = string(Char($6B65)))) or
                             ((key_value_local = 'lun') and
-                            (text_value_local = string(Char($8F6E)))) or
+                            (text_value_local = variant_char($8F6E, $8F2A))) or
                             ((key_value_local = 'jie') and
-                            (text_value_local = string(Char($8282)))) or
+                            (text_value_local = variant_char($8282, $7BC0))) or
                             ((key_value_local = 'ye') and
-                            (text_value_local = string(Char($9875)))) or
+                            (text_value_local = variant_char($9875, $9801))) or
                             ((key_value_local = 'duan') and
                             (text_value_local = string(Char($6BB5)))) or
                             ((key_value_local = 'hang') and
@@ -14784,30 +15008,30 @@ var
                 end;
 
                 Result :=
-                    (suffix_head = string(Char($533A))) or
+                    (suffix_head = variant_char($533A, $5340)) or
                     (suffix_head = string(Char($5E02))) or
                     (suffix_head = string(Char($7701))) or
-                    (suffix_head = string(Char($53BF))) or
-                    (suffix_head = string(Char($9547))) or
-                    (suffix_head = string(Char($4E61))) or
+                    (suffix_head = variant_char($53BF, $7E23)) or
+                    (suffix_head = variant_char($9547, $93AE)) or
+                    (suffix_head = variant_char($4E61, $9109)) or
                     (suffix_head = string(Char($8DEF))) or
                     (suffix_head = string(Char($8857))) or
                     (suffix_head = string(Char($9053))) or
                     (suffix_head = string(Char($4E0B))) or
                     (suffix_head = string(Char($4E0A))) or
                     (suffix_head = string(Char($4E2D))) or
-                    (suffix_head = string(Char($5185))) or
+                    (suffix_head = variant_char($5185, $5167)) or
                     (suffix_head = string(Char($5916))) or
                     (suffix_head = string(Char($524D))) or
-                    (suffix_head = string(Char($540E))) or
-                    (suffix_head = string(Char($4E1C))) or
+                    (suffix_head = variant_char($540E, $5F8C)) or
+                    (suffix_head = variant_char($4E1C, $6771)) or
                     (suffix_head = string(Char($897F))) or
                     (suffix_head = string(Char($5357))) or
                     (suffix_head = string(Char($5317))) or
-                    (suffix_head = string(Char($8FB9))) or
+                    (suffix_head = variant_char($8FB9, $908A)) or
                     (suffix_head = string(Char($9762))) or
                     (suffix_head = string(Char($7248))) or
-                    (suffix_head = string(Char($53F7))) or
+                    (suffix_head = variant_char($53F7, $865F)) or
                     (suffix_head = string(Char($5E97)));
             end;
         begin
@@ -14957,7 +15181,7 @@ var
                 else if normalized_local = 'ye' then
                     out_text_local := string(Char($4E5F))
                 else if normalized_local = 'hai' then
-                    out_text_local := string(Char($8FD8))
+                    out_text_local := variant_char($8FD8, $9084)
                 else if normalized_local = 'dou' then
                     out_text_local := string(Char($90FD))
                 else if normalized_local = 'jiu' then
@@ -14965,23 +15189,23 @@ var
                 else if normalized_local = 'de' then
                     out_text_local := string(Char($7684))
                 else if normalized_local = 'dui' then
-                    out_text_local := string(Char($5BF9))
+                    out_text_local := variant_char($5BF9, $5C0D)
                 else if normalized_local = 'dao' then
                     out_text_local := string(Char($5230))
                 else if normalized_local = 'cong' then
-                    out_text_local := string(Char($4ECE))
+                    out_text_local := variant_char($4ECE, $5F9E)
                 else if normalized_local = 'he' then
                     out_text_local := string(Char($548C))
                 else if normalized_local = 'yu' then
-                    out_text_local := string(Char($4E0E))
+                    out_text_local := variant_char($4E0E, $8207)
                 else if normalized_local = 'ba' then
                     out_text_local := string(Char($628A))
                 else if normalized_local = 'bei' then
                     out_text_local := string(Char($88AB))
                 else if normalized_local = 'gei' then
-                    out_text_local := string(Char($7ED9))
+                    out_text_local := variant_char($7ED9, $7D66)
                 else if normalized_local = 'rang' then
-                    out_text_local := string(Char($8BA9))
+                    out_text_local := variant_char($8BA9, $8B93)
                 else if normalized_local = 'suo' then
                     out_text_local := string(Char($6240))
                 else if normalized_local = 'shi' then
@@ -15059,28 +15283,28 @@ var
                     Result := (unit_value_local = string(Char($5BB6))) or
                         (unit_value_local = string(Char($5E97))) or
                         (unit_value_local = string(Char($5C4B))) or
-                        (unit_value_local = string(Char($697C))) or
+                        (unit_value_local = variant_char($697C, $6A13)) or
                         (unit_value_local = string(Char($57CE))) or
                         (unit_value_local = string(Char($6751))) or
-                        (unit_value_local = string(Char($53BF))) or
+                        (unit_value_local = variant_char($53BF, $7E23)) or
                         (unit_value_local = string(Char($5E02))) or
                         (unit_value_local = string(Char($6821))) or
                         (unit_value_local = string(Char($9662))) or
-                        (unit_value_local = string(Char($5382))) or
-                        (unit_value_local = string(Char($9986))) or
+                        (unit_value_local = variant_char($5382, $5EE0)) or
+                        (unit_value_local = variant_char($9986, $9928)) or
                         (unit_value_local = string(Char($7AD9))) or
                         (unit_value_local = string(Char($5C40))) or
                         (unit_value_local = string(Char($6240))) or
-                        (unit_value_local = string(Char($56ED))) or
-                        (unit_value_local = string(Char($533A))) or
+                        (unit_value_local = variant_char($56ED, $5712)) or
+                        (unit_value_local = variant_char($533A, $5340)) or
                         (unit_value_local = string(Char($5708))) or
                         (unit_value_local = string(Char($8DEF))) or
                         (unit_value_local = string(Char($8857))) or
-                        (unit_value_local = string(Char($95E8))) or
+                        (unit_value_local = variant_char($95E8, $9580)) or
                         (unit_value_local = string(Char($5BA4))) or
                         (unit_value_local = string(Char($623F))) or
-                        (unit_value_local = string(Char($5385))) or
-                        (unit_value_local = string(Char($573A))) or
+                        (unit_value_local = variant_char($5385, $5EF3)) or
+                        (unit_value_local = variant_char($573A, $5834)) or
                         (unit_value_local = string(Char($53F8)));
                 end;
 
@@ -15445,28 +15669,28 @@ var
                 Result := (unit_value_local = string(Char($5BB6))) or
                     (unit_value_local = string(Char($5E97))) or
                     (unit_value_local = string(Char($5C4B))) or
-                    (unit_value_local = string(Char($697C))) or
+                    (unit_value_local = variant_char($697C, $6A13)) or
                     (unit_value_local = string(Char($57CE))) or
                     (unit_value_local = string(Char($6751))) or
-                    (unit_value_local = string(Char($53BF))) or
+                    (unit_value_local = variant_char($53BF, $7E23)) or
                     (unit_value_local = string(Char($5E02))) or
                     (unit_value_local = string(Char($6821))) or
                     (unit_value_local = string(Char($9662))) or
-                    (unit_value_local = string(Char($5382))) or
-                    (unit_value_local = string(Char($9986))) or
+                    (unit_value_local = variant_char($5382, $5EE0)) or
+                    (unit_value_local = variant_char($9986, $9928)) or
                     (unit_value_local = string(Char($7AD9))) or
                     (unit_value_local = string(Char($5C40))) or
                     (unit_value_local = string(Char($6240))) or
-                    (unit_value_local = string(Char($56ED))) or
-                    (unit_value_local = string(Char($533A))) or
+                    (unit_value_local = variant_char($56ED, $5712)) or
+                    (unit_value_local = variant_char($533A, $5340)) or
                     (unit_value_local = string(Char($5708))) or
                     (unit_value_local = string(Char($8DEF))) or
                     (unit_value_local = string(Char($8857))) or
-                    (unit_value_local = string(Char($95E8))) or
+                    (unit_value_local = variant_char($95E8, $9580)) or
                     (unit_value_local = string(Char($5BA4))) or
                     (unit_value_local = string(Char($623F))) or
-                    (unit_value_local = string(Char($5385))) or
-                    (unit_value_local = string(Char($573A))) or
+                    (unit_value_local = variant_char($5385, $5EF3)) or
+                    (unit_value_local = variant_char($573A, $5834)) or
                     (unit_value_local = string(Char($53F8)));
             end;
 
@@ -15536,14 +15760,14 @@ var
                 second_unit_local := units_local[1];
                 if not (SameText(first_unit_local, string(Char($5317))) or
                     SameText(first_unit_local, string(Char($5357))) or
-                    SameText(first_unit_local, string(Char($4E1C))) or
+                    SameText(first_unit_local, variant_char($4E1C, $6771)) or
                     SameText(first_unit_local, string(Char($897F))) or
                     SameText(first_unit_local, string(Char($524D))) or
-                    SameText(first_unit_local, string(Char($540E))) or
+                    SameText(first_unit_local, variant_char($540E, $5F8C)) or
                     SameText(first_unit_local, string(Char($4E0A))) or
                     SameText(first_unit_local, string(Char($4E0B))) or
-                    SameText(first_unit_local, string(Char($91CC))) or
-                    SameText(first_unit_local, string(Char($5185))) or
+                    SameText(first_unit_local, variant_char($91CC, $88E1)) or
+                    SameText(first_unit_local, variant_char($5185, $5167)) or
                     SameText(first_unit_local, string(Char($5916))) or
                     SameText(first_unit_local, string(Char($5DE6))) or
                     SameText(first_unit_local, string(Char($53F3)))) then
@@ -15552,8 +15776,8 @@ var
                 end;
 
                 Result := SameText(second_unit_local, string(Char($9762))) or
-                    SameText(second_unit_local, string(Char($8FB9))) or
-                    SameText(second_unit_local, string(Char($4FA7))) or
+                    SameText(second_unit_local, variant_char($8FB9, $908A)) or
+                    SameText(second_unit_local, variant_char($4FA7, $5074)) or
                     SameText(second_unit_local, string(Char($65B9))) or
                     SameText(second_unit_local, string(Char($90E8)));
             end;
@@ -17279,17 +17503,17 @@ var
                     Result := (((normalized_query_local = 'naer') or
                         (normalized_query_local = 'ner')) and
                         SameText(text_value, string(Char($54EA)) +
-                        string(Char($513F)))) or
+                        variant_char($513F, $5152))) or
                         (((normalized_query_local = 'qunaer') or
                         (normalized_query_local = 'qner')) and
                         SameText(text_value, string(Char($53BB)) +
-                        string(Char($54EA)) + string(Char($513F)))) or
+                        string(Char($54EA)) + variant_char($513F, $5152))) or
                         ((normalized_query_local = 'nli') and
                         SameText(text_value, string(Char($54EA)) +
-                        string(Char($91CC)))) or
+                        variant_char($91CC, $88E1))) or
                         ((normalized_query_local = 'qnli') and
                         SameText(text_value, string(Char($53BB)) +
-                        string(Char($54EA)) + string(Char($91CC))));
+                        string(Char($54EA)) + variant_char($91CC, $88E1)));
                 end;
 
             begin
@@ -21575,7 +21799,7 @@ var
         end
         else if normalized_syllable = 'sui' then
         begin
-            Result := string(Char($867D));
+            Result := variant_char($867D, $96D6);
         end
         else if normalized_syllable = 'wo' then
         begin
@@ -21611,7 +21835,7 @@ var
         end
         else if normalized_syllable = 'hui' then
         begin
-            Result := string(Char($4F1A));
+            Result := variant_char($4F1A, $6703);
         end
         else if normalized_syllable = 'ba' then
         begin
@@ -21627,15 +21851,15 @@ var
         end
         else if normalized_syllable = 'zhe' then
         begin
-            Result := string(Char($8FD9));
+            Result := variant_char($8FD9, $9019);
         end
         else if normalized_syllable = 'que' then
         begin
-            Result := string(Char($5374));
+            Result := variant_char($5374, $537B);
         end
         else if normalized_syllable = 'bing' then
         begin
-            Result := string(Char($5E76));
+            Result := variant_char($5E76, $4E26);
         end
         else if normalized_syllable = 'qie' then
         begin
@@ -24076,7 +24300,7 @@ var
             end
             else if local_key = 'shuo' then
             begin
-                Result := string(Char($8BF4));
+                Result := variant_char($8BF4, $8AAA);
             end
             else if local_key = 'de' then
             begin
@@ -24092,7 +24316,7 @@ var
             end
             else if local_key = 'yu' then
             begin
-                Result := string(Char($4E0E));
+                Result := variant_char($4E0E, $8207);
             end
             else if local_key = 'zai' then
             begin
@@ -24104,11 +24328,11 @@ var
             end
             else if local_key = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if local_key = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end;
         end;
 
@@ -24185,7 +24409,7 @@ var
             end
             else if tail_key_local = 'ma' then
             begin
-                Result := string(Char($5417));
+                Result := variant_char($5417, $55CE);
             end
             else if tail_key_local = 'ne' then
             begin
@@ -24622,7 +24846,7 @@ var
                 end;
                 if SameText(normalize_pinyin_text(
                     syllables_local[local_start_idx].text), 'yu') and
-                    (single_text = string(Char($4E0E))) then
+                    (single_text = variant_char($4E0E, $8207)) then
                 begin
                     Inc(single_score, 160);
                 end;
@@ -26404,7 +26628,7 @@ var
                     ((c_probe_limit - single_idx_local) * 32);
                 if has_preceding_local and
                     (has_following_exact_local or has_following_chain_local) and
-                    ((candidate_text_local = string(Char($4E0E))) or
+                    ((candidate_text_local = variant_char($4E0E, $8207)) or
                     (candidate_text_local = string(Char($548C)))) then
                 begin
                     Inc(ranked_weight_local, 260);
@@ -27085,15 +27309,15 @@ var
             end
             else if normalized_syllable_local = 'ge' then
             begin
-                Result := string(Char($4E2A));
+                Result := variant_char($4E2A, $500B);
             end
             else if normalized_syllable_local = 'tiao' then
             begin
-                Result := string(Char($6761));
+                Result := variant_char($6761, $689D);
             end
             else if normalized_syllable_local = 'zhang' then
             begin
-                Result := string(Char($5F20));
+                Result := variant_char($5F20, $5F35);
             end
             else if normalized_syllable_local = 'ben' then
             begin
@@ -27109,7 +27333,7 @@ var
             end
             else if normalized_syllable_local = 'lun' then
             begin
-                Result := string(Char($8F6E));
+                Result := variant_char($8F6E, $8F2A);
             end
             else if normalized_syllable_local = 'hui' then
             begin
@@ -27944,7 +28168,7 @@ var
             end
             else if normalized_syllable = 'sui' then
             begin
-                Result := string(Char($867D));
+                Result := variant_char($867D, $96D6);
             end
             else if normalized_syllable = 'yi' then
             begin
@@ -27972,7 +28196,7 @@ var
             end
             else if normalized_syllable = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable = 'ba' then
             begin
@@ -27988,15 +28212,15 @@ var
             end
             else if normalized_syllable = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if normalized_syllable = 'que' then
             begin
-                Result := string(Char($5374));
+                Result := variant_char($5374, $537B);
             end
             else if normalized_syllable = 'bing' then
             begin
-                Result := string(Char($5E76));
+                Result := variant_char($5E76, $4E26);
             end
             else if normalized_syllable = 'qie' then
             begin
@@ -30585,22 +30809,22 @@ var
             end;
             head_unit_local := units_local[0];
             tail_unit_local := units_local[1];
-            Result := ((head_unit_local = string(Char($4E1C))) or
+            Result := ((head_unit_local = variant_char($4E1C, $6771)) or
                 (head_unit_local = string(Char($5357))) or
                 (head_unit_local = string(Char($897F))) or
                 (head_unit_local = string(Char($5317))) or
                 (head_unit_local = string(Char($4E0A))) or
                 (head_unit_local = string(Char($4E0B))) or
                 (head_unit_local = string(Char($524D))) or
-                (head_unit_local = string(Char($540E))) or
-                (head_unit_local = string(Char($91CC))) or
+                (head_unit_local = variant_char($540E, $5F8C)) or
+                (head_unit_local = variant_char($91CC, $88E1)) or
                 (head_unit_local = string(Char($5916))) or
                 (head_unit_local = string(Char($5DE6))) or
                 (head_unit_local = string(Char($53F3)))) and
                 ((tail_unit_local = string(Char($9762))) or
-                (tail_unit_local = string(Char($8FB9))) or
+                (tail_unit_local = variant_char($8FB9, $908A)) or
                 (tail_unit_local = string(Char($65B9))) or
-                (tail_unit_local = string(Char($4FA7))) or
+                (tail_unit_local = variant_char($4FA7, $5074)) or
                 (tail_unit_local = string(Char($90E8))));
         end;
     begin
@@ -31299,15 +31523,15 @@ var
         tail_unit_local: string;
         function is_direction_unit_local(const unit_value: string): Boolean;
         begin
-            Result := (unit_value = string(Char($4E1C))) or
+            Result := (unit_value = variant_char($4E1C, $6771)) or
                 (unit_value = string(Char($5357))) or
                 (unit_value = string(Char($897F))) or
                 (unit_value = string(Char($5317))) or
                 (unit_value = string(Char($4E0A))) or
                 (unit_value = string(Char($4E0B))) or
                 (unit_value = string(Char($524D))) or
-                (unit_value = string(Char($540E))) or
-                (unit_value = string(Char($91CC))) or
+                (unit_value = variant_char($540E, $5F8C)) or
+                (unit_value = variant_char($91CC, $88E1)) or
                 (unit_value = string(Char($5916))) or
                 (unit_value = string(Char($5DE6))) or
                 (unit_value = string(Char($53F3)));
@@ -31315,9 +31539,9 @@ var
         function is_locative_tail_unit_local(const unit_value: string): Boolean;
         begin
             Result := (unit_value = string(Char($9762))) or
-                (unit_value = string(Char($8FB9))) or
+                (unit_value = variant_char($8FB9, $908A)) or
                 (unit_value = string(Char($65B9))) or
-                (unit_value = string(Char($4FA7))) or
+                (unit_value = variant_char($4FA7, $5074)) or
                 (unit_value = string(Char($90E8)));
         end;
     begin
@@ -32973,7 +33197,7 @@ var
                 end
                 else if normalized_local = 'hui' then
                 begin
-                    Result := string(Char($4F1A));
+                    Result := variant_char($4F1A, $6703);
                 end
                 else if normalized_local = 'de' then
                 begin
@@ -32989,7 +33213,7 @@ var
                 end
                 else if normalized_local = 'liang' then
                 begin
-                    Result := string(Char($4E24));
+                    Result := variant_char($4E24, $5169);
                 end
                 else if normalized_local = 'nian' then
                 begin
@@ -32997,7 +33221,7 @@ var
                 end
                 else if normalized_local = 'suo' then
                 begin
-                    Result := string(Char($7F29));
+                    Result := variant_char($7F29, $7E2E);
                 end;
             end;
         begin
@@ -33035,7 +33259,7 @@ var
                         Inc(candidate_score, c_user_score_bonus);
                     end;
                     if SameText(normalize_pinyin_text(syllables_local[local_idx].text),
-                        'yu') and (candidate_text = string(Char($4E0E))) then
+                        'yu') and (candidate_text = variant_char($4E0E, $8207)) then
                     begin
                         Inc(candidate_score, 160);
                     end;
@@ -33124,7 +33348,7 @@ var
             end
             else if normalized_syllable_local = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable_local = 'qian' then
             begin
@@ -33132,7 +33356,7 @@ var
             end
             else if normalized_syllable_local = 'liang' then
             begin
-                Result := string(Char($4E24));
+                Result := variant_char($4E24, $5169);
             end
             else if normalized_syllable_local = 'nian' then
             begin
@@ -33140,11 +33364,11 @@ var
             end
             else if normalized_syllable_local = 'suo' then
             begin
-                Result := string(Char($7F29));
+                Result := variant_char($7F29, $7E2E);
             end
             else if normalized_syllable_local = 'ma' then
             begin
-                Result := string(Char($5417));
+                Result := variant_char($5417, $55CE);
             end
             else if normalized_syllable_local = 'ne' then
             begin
@@ -34147,7 +34371,7 @@ var
             end
             else if normalized_tail_key_local = 'zhe' then
             begin
-                Result := string(Char($7740));
+                Result := variant_char($7740, $8457);
             end
             else if normalized_tail_key_local = 'la' then
             begin
@@ -34159,7 +34383,7 @@ var
             end
             else if normalized_tail_key_local = 'ma' then
             begin
-                Result := string(Char($5417));
+                Result := variant_char($5417, $55CE);
             end
             else if normalized_tail_key_local = 'a' then
             begin
@@ -34464,7 +34688,7 @@ var
             end
             else if normalized_syllable = 'sui' then
             begin
-                Result := string(Char($867D));
+                Result := variant_char($867D, $96D6);
             end
             else if normalized_syllable = 'yi' then
             begin
@@ -34508,11 +34732,11 @@ var
             end
             else if normalized_syllable = 'yu' then
             begin
-                Result := string(Char($4E8E));
+                Result := variant_char($4E8E, $65BC);
             end
             else if normalized_syllable = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable = 'ba' then
             begin
@@ -34528,15 +34752,15 @@ var
             end
             else if normalized_syllable = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if normalized_syllable = 'que' then
             begin
-                Result := string(Char($5374));
+                Result := variant_char($5374, $537B);
             end
             else if normalized_syllable = 'bing' then
             begin
-                Result := string(Char($5E76));
+                Result := variant_char($5E76, $4E26);
             end
             else if normalized_syllable = 'qie' then
             begin
@@ -35138,7 +35362,7 @@ var
             end
             else if last_syllable_key = 'ma' then
             begin
-                expected_text := string(Char($5417));
+                expected_text := variant_char($5417, $55CE);
             end
             else if last_syllable_key = 'ne' then
             begin
@@ -38655,7 +38879,7 @@ var
             end
             else if normalized_syllable = 'sui' then
             begin
-                Result := string(Char($867D));
+                Result := variant_char($867D, $96D6);
             end
             else if normalized_syllable = 'yi' then
             begin
@@ -38695,7 +38919,7 @@ var
             end
             else if normalized_syllable = 'yu' then
             begin
-                Result := string(Char($4E8E));
+                Result := variant_char($4E8E, $65BC);
             end
             else if normalized_syllable = 'de' then
             begin
@@ -38715,11 +38939,11 @@ var
             end
             else if normalized_syllable = 'bing' then
             begin
-                Result := string(Char($5E76));
+                Result := variant_char($5E76, $4E26);
             end
             else if normalized_syllable = 'que' then
             begin
-                Result := string(Char($5374));
+                Result := variant_char($5374, $537B);
             end
             else if normalized_syllable = 'jiu' then
             begin
@@ -40412,7 +40636,7 @@ var
             end
             else if local_text_local = 'ma' then
             begin
-                expected_tail_text_local := string(Char($5417));
+                expected_tail_text_local := variant_char($5417, $55CE);
             end
             else if local_text_local = 'ne' then
             begin
@@ -42252,7 +42476,7 @@ var
                 end
                 else if query_key_local = 'yu' then
                 begin
-                    Result := string(Char($4E8E));
+                    Result := variant_char($4E8E, $65BC);
                 end
                 else if query_key_local = 'zai' then
                 begin
@@ -42900,7 +43124,7 @@ var
             end
             else if normalized_syllable = 'ma' then
             begin
-                Result := string(Char($5417));
+                Result := variant_char($5417, $55CE);
             end
             else if normalized_syllable = 'ne' then
             begin
@@ -44142,7 +44366,7 @@ var
             end
             else if normalized_syllable = 'xiang' then
             begin
-                Result := string(Char($9879));
+                Result := variant_char($9879, $9805);
             end
             else if normalized_syllable = 'ci' then
             begin
@@ -44150,19 +44374,19 @@ var
             end
             else if normalized_syllable = 'ge' then
             begin
-                Result := string(Char($4E2A));
+                Result := variant_char($4E2A, $500B);
             end
             else if normalized_syllable = 'tiao' then
             begin
-                Result := string(Char($6761));
+                Result := variant_char($6761, $689D);
             end
             else if normalized_syllable = 'zhang' then
             begin
-                Result := string(Char($5F20));
+                Result := variant_char($5F20, $5F35);
             end
             else if normalized_syllable = 'dian' then
             begin
-                Result := string(Char($70B9));
+                Result := variant_char($70B9, $9EDE);
             end
             else if normalized_syllable = 'bu' then
             begin
@@ -44170,15 +44394,15 @@ var
             end
             else if normalized_syllable = 'lun' then
             begin
-                Result := string(Char($8F6E));
+                Result := variant_char($8F6E, $8F2A);
             end
             else if normalized_syllable = 'jie' then
             begin
-                Result := string(Char($8282));
+                Result := variant_char($8282, $7BC0);
             end
             else if normalized_syllable = 'ye' then
             begin
-                Result := string(Char($9875));
+                Result := variant_char($9875, $9801);
             end
             else if normalized_syllable = 'duan' then
             begin
@@ -44675,10 +44899,10 @@ var
         function is_sentence_particle_unit_local(const unit_value: string): Boolean;
         begin
             Result := (unit_value = string(Char($4E86))) or
-                (unit_value = string(Char($7740))) or
+                (unit_value = variant_char($7740, $8457)) or
 
-                (unit_value = string(Char($8FC7))) or
-                (unit_value = string(Char($5417))) or
+                (unit_value = variant_char($8FC7, $904E)) or
+                (unit_value = variant_char($5417, $55CE)) or
                 (unit_value = string(Char($561B))) or
                 (unit_value = string(Char($5427))) or
                 (unit_value = string(Char($5462))) or
@@ -46452,11 +46676,11 @@ var
 
                     (value = string(Char($5DF2))) or
 
-                    (value = string(Char($5C06))) or
+                    (value = variant_char($5C06, $5C07)) or
 
                     (value = string(Char($53EF))) or
 
-                    (value = string(Char($4F1A))) or
+                    (value = variant_char($4F1A, $6703)) or
 
                     (value = string(Char($80FD))) or
 
@@ -46464,9 +46688,9 @@ var
 
                     (value = string(Char($60F3))) or
 
-                    (value = string(Char($6CA1))) or
+                    (value = variant_char($6CA1, $6C92)) or
 
-                    (value = string(Char($65E0))) or
+                    (value = variant_char($65E0, $7121)) or
 
                     (value = string(Char($975E))) or
 
@@ -46476,7 +46700,7 @@ var
 
                     (value = string(Char($90FD))) or
 
-                    (value = string(Char($8FD8))) or
+                    (value = variant_char($8FD8, $9084)) or
 
                     (value = string(Char($624D))) or
 
@@ -46484,7 +46708,7 @@ var
 
                     (value = string(Char($53EA))) or
 
-                    (value = string(Char($522B))) or
+                    (value = variant_char($522B, $5225)) or
 
                     (value = string(Char($591A))) or
 
@@ -46498,31 +46722,31 @@ var
 
                     (value = string(Char($633A))) or
 
-                    (value = string(Char($8F83))) or
+                    (value = variant_char($8F83, $8F03)) or
 
-                    (value = string(Char($9887))) or
+                    (value = variant_char($9887, $9817)) or
 
-                    (value = string(Char($6781))) or
+                    (value = variant_char($6781, $6975)) or
 
                     (value = string(Char($628A))) or
 
                     (value = string(Char($88AB))) or
 
-                    (value = string(Char($8BA9))) or
+                    (value = variant_char($8BA9, $8B93)) or
 
-                    (value = string(Char($7ED9))) or
+                    (value = variant_char($7ED9, $7D66)) or
 
                     (value = string(Char($5411))) or
 
-                    (value = string(Char($5BF9))) or
+                    (value = variant_char($5BF9, $5C0D)) or
 
-                    (value = string(Char($4ECE))) or
+                    (value = variant_char($4ECE, $5F9E)) or
 
-                    (value = string(Char($4E8E))) or
+                    (value = variant_char($4E8E, $65BC)) or
 
                     (value = string(Char($548C))) or
 
-                    (value = string(Char($4E0E))) or
+                    (value = variant_char($4E0E, $8207)) or
 
                     (value = string(Char($662F))) or
 
@@ -47196,23 +47420,23 @@ var
                 (value = string(Char($53C8))) or
                 (value = string(Char($4E5F))) or
                 (value = string(Char($5DF2))) or
-                (value = string(Char($5C06))) or
+                (value = variant_char($5C06, $5C07)) or
                 (value = string(Char($53EF))) or
-                (value = string(Char($4F1A))) or
+                (value = variant_char($4F1A, $6703)) or
                 (value = string(Char($80FD))) or
                 (value = string(Char($8981))) or
                 (value = string(Char($60F3))) or
-                (value = string(Char($6CA1))) or
-                (value = string(Char($65E0))) or
+                (value = variant_char($6CA1, $6C92)) or
+                (value = variant_char($65E0, $7121)) or
                 (value = string(Char($975E))) or
                 (value = string(Char($672A))) or
                 (value = string(Char($4ECD))) or
                 (value = string(Char($90FD))) or
-                (value = string(Char($8FD8))) or
+                (value = variant_char($8FD8, $9084)) or
                 (value = string(Char($624D))) or
                 (value = string(Char($5C31))) or
                 (value = string(Char($53EA))) or
-                (value = string(Char($522B))) or
+                (value = variant_char($522B, $5225)) or
                 (value = string(Char($591A))) or
                 (value = string(Char($5C11))) or
                 (value = string(Char($65B0))) or
@@ -47224,19 +47448,19 @@ var
                 (value = string(Char($771F))) or
                 (value = string(Char($597D))) or
                 (value = string(Char($633A))) or
-                (value = string(Char($8F83))) or
-                (value = string(Char($9887))) or
-                (value = string(Char($6781))) or
+                (value = variant_char($8F83, $8F03)) or
+                (value = variant_char($9887, $9817)) or
+                (value = variant_char($6781, $6975)) or
                 (value = string(Char($628A))) or
                 (value = string(Char($88AB))) or
-                (value = string(Char($8BA9))) or
-                (value = string(Char($7ED9))) or
+                (value = variant_char($8BA9, $8B93)) or
+                (value = variant_char($7ED9, $7D66)) or
                 (value = string(Char($5411))) or
-                (value = string(Char($5BF9))) or
-                (value = string(Char($4ECE))) or
-                (value = string(Char($4E8E))) or
+                (value = variant_char($5BF9, $5C0D)) or
+                (value = variant_char($4ECE, $5F9E)) or
+                (value = variant_char($4E8E, $65BC)) or
                 (value = string(Char($548C))) or
-                (value = string(Char($4E0E)));
+                (value = variant_char($4E0E, $8207));
         end;
 
         *)
@@ -47716,7 +47940,7 @@ var
             end
             else if normalized_syllable = 'sui' then
             begin
-                Result := string(Char($867D));
+                Result := variant_char($867D, $96D6);
             end
             else if normalized_syllable = 'er' then
             begin
@@ -47752,11 +47976,11 @@ var
             end
             else if normalized_syllable = 'yu' then
             begin
-                Result := string(Char($4E8E));
+                Result := variant_char($4E8E, $65BC);
             end
             else if normalized_syllable = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable = 'ba' then
             begin
@@ -47780,15 +48004,15 @@ var
             end
             else if normalized_syllable = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if normalized_syllable = 'que' then
             begin
-                Result := string(Char($5374));
+                Result := variant_char($5374, $537B);
             end
             else if normalized_syllable = 'bing' then
             begin
-                Result := string(Char($5E76));
+                Result := variant_char($5E76, $4E26);
             end
             else if normalized_syllable = 'qie' then
             begin
@@ -47796,15 +48020,15 @@ var
             end
             else if normalized_syllable = 'jiang' then
             begin
-                Result := string(Char($5C06));
+                Result := variant_char($5C06, $5C07);
             end
             else if normalized_syllable = 'rang' then
             begin
-                Result := string(Char($8BA9));
+                Result := variant_char($8BA9, $8B93);
             end
             else if normalized_syllable = 'dui' then
             begin
-                Result := string(Char($5BF9));
+                Result := variant_char($5BF9, $5C0D);
             end
             else if normalized_syllable = 'dao' then
             begin
@@ -47812,7 +48036,7 @@ var
             end
             else if normalized_syllable = 'cong' then
             begin
-                Result := string(Char($4ECE));
+                Result := variant_char($4ECE, $5F9E);
             end
             else if normalized_syllable = 'you' then
             begin
@@ -47824,11 +48048,11 @@ var
             end
             else if normalized_syllable = 'hai' then
             begin
-                Result := string(Char($8FD8));
+                Result := variant_char($8FD8, $9084);
             end
             else if normalized_syllable = 'mai' then
             begin
-                Result := string(Char($4E70));
+                Result := variant_char($4E70, $8CB7);
             end
             else if (normalized_syllable = 'le') or (normalized_syllable = 'liao') then
             begin
@@ -50192,7 +50416,7 @@ var
                 end
                 else if normalized_syllable = 'sui' then
                 begin
-                    Result := string(Char($867D));
+                    Result := variant_char($867D, $96D6);
                 end
                 else if normalized_syllable = 'er' then
                 begin
@@ -50228,7 +50452,7 @@ var
                 end
                 else if normalized_syllable = 'yu' then
                 begin
-                    Result := string(Char($4E8E));
+                    Result := variant_char($4E8E, $65BC);
                 end
                 else if normalized_syllable = 'de' then
                 begin
@@ -50248,11 +50472,11 @@ var
                 end
                 else if normalized_syllable = 'bing' then
                 begin
-                    Result := string(Char($5E76));
+                    Result := variant_char($5E76, $4E26);
                 end
                 else if normalized_syllable = 'que' then
                 begin
-                    Result := string(Char($5374));
+                    Result := variant_char($5374, $537B);
                 end
                 else if normalized_syllable = 'jiu' then
                 begin
@@ -52580,28 +52804,28 @@ var
                 Result := (unit_value_local = string(Char($5BB6))) or
                     (unit_value_local = string(Char($5E97))) or
                     (unit_value_local = string(Char($5C4B))) or
-                    (unit_value_local = string(Char($697C))) or
+                    (unit_value_local = variant_char($697C, $6A13)) or
                     (unit_value_local = string(Char($57CE))) or
                     (unit_value_local = string(Char($6751))) or
-                    (unit_value_local = string(Char($53BF))) or
+                    (unit_value_local = variant_char($53BF, $7E23)) or
                     (unit_value_local = string(Char($5E02))) or
                     (unit_value_local = string(Char($6821))) or
                     (unit_value_local = string(Char($9662))) or
-                    (unit_value_local = string(Char($5382))) or
-                    (unit_value_local = string(Char($9986))) or
+                    (unit_value_local = variant_char($5382, $5EE0)) or
+                    (unit_value_local = variant_char($9986, $9928)) or
                     (unit_value_local = string(Char($7AD9))) or
                     (unit_value_local = string(Char($5C40))) or
                     (unit_value_local = string(Char($6240))) or
-                    (unit_value_local = string(Char($56ED))) or
-                    (unit_value_local = string(Char($533A))) or
+                    (unit_value_local = variant_char($56ED, $5712)) or
+                    (unit_value_local = variant_char($533A, $5340)) or
                     (unit_value_local = string(Char($5708))) or
                     (unit_value_local = string(Char($8DEF))) or
                     (unit_value_local = string(Char($8857))) or
-                    (unit_value_local = string(Char($95E8))) or
+                    (unit_value_local = variant_char($95E8, $9580)) or
                     (unit_value_local = string(Char($5BA4))) or
                     (unit_value_local = string(Char($623F))) or
-                    (unit_value_local = string(Char($5385))) or
-                    (unit_value_local = string(Char($573A))) or
+                    (unit_value_local = variant_char($5385, $5EF3)) or
+                    (unit_value_local = variant_char($573A, $5834)) or
                     (unit_value_local = string(Char($53F8)));
             end;
 
@@ -52623,14 +52847,14 @@ var
                 second_unit_local := units_local[1];
                 if not (SameText(first_unit_local, string(Char($5317))) or
                     SameText(first_unit_local, string(Char($5357))) or
-                    SameText(first_unit_local, string(Char($4E1C))) or
+                    SameText(first_unit_local, variant_char($4E1C, $6771)) or
                     SameText(first_unit_local, string(Char($897F))) or
                     SameText(first_unit_local, string(Char($524D))) or
-                    SameText(first_unit_local, string(Char($540E))) or
+                    SameText(first_unit_local, variant_char($540E, $5F8C)) or
                     SameText(first_unit_local, string(Char($4E0A))) or
                     SameText(first_unit_local, string(Char($4E0B))) or
-                    SameText(first_unit_local, string(Char($91CC))) or
-                    SameText(first_unit_local, string(Char($5185))) or
+                    SameText(first_unit_local, variant_char($91CC, $88E1)) or
+                    SameText(first_unit_local, variant_char($5185, $5167)) or
                     SameText(first_unit_local, string(Char($5916))) or
                     SameText(first_unit_local, string(Char($5DE6))) or
                     SameText(first_unit_local, string(Char($53F3)))) then
@@ -52639,8 +52863,8 @@ var
                 end;
 
                 Result := SameText(second_unit_local, string(Char($9762))) or
-                    SameText(second_unit_local, string(Char($8FB9))) or
-                    SameText(second_unit_local, string(Char($4FA7))) or
+                    SameText(second_unit_local, variant_char($8FB9, $908A)) or
+                    SameText(second_unit_local, variant_char($4FA7, $5074)) or
                     SameText(second_unit_local, string(Char($65B9))) or
                     SameText(second_unit_local, string(Char($90E8)));
             end;
@@ -52714,15 +52938,15 @@ var
                 end
                 else if SameText(key_local, 'ge') then
                 begin
-                    Result := string(Char($4E2A));
+                    Result := variant_char($4E2A, $500B);
                 end
                 else if SameText(key_local, 'tiao') then
                 begin
-                    Result := string(Char($6761));
+                    Result := variant_char($6761, $689D);
                 end
                 else if SameText(key_local, 'zhang') then
                 begin
-                    Result := string(Char($5F20));
+                    Result := variant_char($5F20, $5F35);
                 end
                 else if SameText(key_local, 'ben') then
                 begin
@@ -52738,7 +52962,7 @@ var
                 end
                 else if SameText(key_local, 'lun') then
                 begin
-                    Result := string(Char($8F6E));
+                    Result := variant_char($8F6E, $8F2A);
                 end
                 else if SameText(key_local, 'hui') then
                 begin
@@ -53465,11 +53689,11 @@ var
             else if last_syllable_local = 'yi' then
             begin
                 if is_text_unit_code_context_local(last_unit_local, $4EE5) and
-                    ((suffix_first_unit_local = string(Char($4E3A))) or
+                    ((suffix_first_unit_local = variant_char($4E3A, $70BA)) or
                     (suffix_first_unit_local = string(Char($53CA))) or
-                    (suffix_first_unit_local = string(Char($540E))) or
+                    (suffix_first_unit_local = variant_char($540E, $5F8C)) or
                     (suffix_first_unit_local = string(Char($524D))) or
-                    (suffix_first_unit_local = string(Char($6765))) or
+                    (suffix_first_unit_local = variant_char($6765, $4F86)) or
                     (suffix_first_unit_local = string(Char($4E0A))) or
                     (suffix_first_unit_local = string(Char($4E0B))) or
                     is_yi_preposition_suffix_head_context_local(
@@ -53846,7 +54070,7 @@ var
                 if is_text_unit_code_context_local(particle_unit_local, $4E0E) and
                     is_text_unit_code_context_local(next_unit_local, $662F) then
                 begin
-                    replacement_text_local := string(Char($4E8E));
+                    replacement_text_local := variant_char($4E8E, $65BC);
                     out_adjustment_local := 52000;
                 end
                 else if is_bound_yu_preposition_left_unit_context_local(
@@ -53854,7 +54078,7 @@ var
                     (not is_text_unit_code_context_local(particle_unit_local,
                     $4E8E)) then
                 begin
-                    replacement_text_local := string(Char($4E8E));
+                    replacement_text_local := variant_char($4E8E, $65BC);
                     out_adjustment_local := 42000;
                 end
                 else if (not is_bound_yu_preposition_left_unit_context_local(
@@ -53864,7 +54088,7 @@ var
                     is_nominal_or_pronoun_head_unit_context_local(
                     next_unit_local) then
                 begin
-                    replacement_text_local := string(Char($4E0E));
+                    replacement_text_local := variant_char($4E0E, $8207);
                     out_adjustment_local := 16000;
                 end;
             end
@@ -53876,7 +54100,7 @@ var
                     is_de_adverbial_left_unit_context_local(next_unit_local) and
                     is_text_unit_code_context_local(particle_unit_local, $672A) then
                 begin
-                    replacement_text_local := string(Char($4E3A));
+                    replacement_text_local := variant_char($4E3A, $70BA);
                     out_adjustment_local := 36000;
                 end;
             end
@@ -53949,7 +54173,7 @@ var
             else if last_syllable_local = 'le' then
             begin
                 Result := (last_unit_local <> string(Char($4E86))) and
-                    (last_unit_local <> string(Char($4E50))) and
+                    (last_unit_local <> variant_char($4E50, $6A02)) and
                     (raw_weight_local < 900);
             end;
         end;
@@ -54147,33 +54371,33 @@ var
                 (prefix_text_local = string(Char($592A))) or
                 (prefix_text_local = string(Char($8981))) or
                 (prefix_text_local = string(Char($80FD))) or
-                (prefix_text_local = string(Char($6CA1))) or
-                (prefix_text_local = string(Char($65E0))) or
+                (prefix_text_local = variant_char($6CA1, $6C92)) or
+                (prefix_text_local = variant_char($65E0, $7121)) or
                 (prefix_text_local = string(Char($975E))) or
                 (prefix_text_local = string(Char($53EF))) or
-                (prefix_text_local = string(Char($4F1A))) or
-                (prefix_text_local = string(Char($5E94))) or
-                (prefix_text_local = string(Char($5C06))) or
+                (prefix_text_local = variant_char($4F1A, $6703)) or
+                (prefix_text_local = variant_char($5E94, $61C9)) or
+                (prefix_text_local = variant_char($5C06, $5C07)) or
                 (prefix_text_local = string(Char($672A))) or
                 (prefix_text_local = string(Char($5DF2))) or
                 (prefix_text_local = string(Char($6B63))) or
                 (prefix_text_local = string(Char($53C8))) or
                 (prefix_text_local = string(Char($4E5F))) or
-                (prefix_text_local = string(Char($8FD8))) or
+                (prefix_text_local = variant_char($8FD8, $9084)) or
                 (prefix_text_local = string(Char($90FD))) or
                 (prefix_text_local = string(Char($5C31))) or
-                (prefix_text_local = string(Char($522B))) or
+                (prefix_text_local = variant_char($522B, $5225)) or
                 (prefix_text_local = string(Char($6709))) or
-                (prefix_text_local = string(Char($5BF9))) or
+                (prefix_text_local = variant_char($5BF9, $5C0D)) or
                 (prefix_text_local = string(Char($5230))) or
-                (prefix_text_local = string(Char($4ECE))) or
+                (prefix_text_local = variant_char($4ECE, $5F9E)) or
                 (prefix_text_local = string(Char($548C))) or
-                (prefix_text_local = string(Char($4E0E))) or
-                (prefix_text_local = string(Char($4E8E))) or
+                (prefix_text_local = variant_char($4E0E, $8207)) or
+                (prefix_text_local = variant_char($4E8E, $65BC)) or
                 (prefix_text_local = string(Char($628A))) or
                 (prefix_text_local = string(Char($88AB))) or
-                (prefix_text_local = string(Char($7ED9))) or
-                (prefix_text_local = string(Char($8BA9))) or
+                (prefix_text_local = variant_char($7ED9, $7D66)) or
+                (prefix_text_local = variant_char($8BA9, $8B93)) or
                 (prefix_text_local = string(Char($5148))) or
                 (prefix_text_local = string(Char($800C))) or
                 (prefix_text_local = string(Char($5728))) or
@@ -54184,9 +54408,9 @@ var
                 (prefix_text_local = string(Char($662F))) or
                 (prefix_text_local = string(Char($53EA))) or
                 (prefix_text_local = string(Char($624D))) or
-                (prefix_text_local = string(Char($5E76))) or
+                (prefix_text_local = variant_char($5E76, $4E26)) or
                 (prefix_text_local = string(Char($4E14))) or
-                (prefix_text_local = string(Char($4E3A)));
+                (prefix_text_local = variant_char($4E3A, $70BA));
         end;
 
         function is_directional_location_phrase_text_local(
@@ -54207,23 +54431,23 @@ var
             second_unit_local := units_local[1];
 
             if SameText(text_local, string(Char($9644)) + string(Char($8FD1))) or
-                SameText(text_local, string(Char($5BF9)) + string(Char($9762))) or
-                SameText(text_local, string(Char($65C1)) + string(Char($8FB9))) or
-                SameText(text_local, string(Char($5468)) + string(Char($8FB9))) then
+                SameText(text_local, variant_char($5BF9, $5C0D) + string(Char($9762))) or
+                SameText(text_local, string(Char($65C1)) + variant_char($8FB9, $908A)) or
+                SameText(text_local, string(Char($5468)) + variant_char($8FB9, $908A)) then
             begin
                 Exit(True);
             end;
 
             if not (SameText(first_unit_local, string(Char($5317))) or
                 SameText(first_unit_local, string(Char($5357))) or
-                SameText(first_unit_local, string(Char($4E1C))) or
+                SameText(first_unit_local, variant_char($4E1C, $6771)) or
                 SameText(first_unit_local, string(Char($897F))) or
                 SameText(first_unit_local, string(Char($524D))) or
-                SameText(first_unit_local, string(Char($540E))) or
+                SameText(first_unit_local, variant_char($540E, $5F8C)) or
                 SameText(first_unit_local, string(Char($4E0A))) or
                 SameText(first_unit_local, string(Char($4E0B))) or
-                SameText(first_unit_local, string(Char($91CC))) or
-                SameText(first_unit_local, string(Char($5185))) or
+                SameText(first_unit_local, variant_char($91CC, $88E1)) or
+                SameText(first_unit_local, variant_char($5185, $5167)) or
                 SameText(first_unit_local, string(Char($5916))) or
                 SameText(first_unit_local, string(Char($5DE6))) or
                 SameText(first_unit_local, string(Char($53F3)))) then
@@ -54232,12 +54456,12 @@ var
             end;
 
             Result := SameText(second_unit_local, string(Char($9762))) or
-                SameText(second_unit_local, string(Char($8FB9))) or
-                SameText(second_unit_local, string(Char($4FA7))) or
+                SameText(second_unit_local, variant_char($8FB9, $908A)) or
+                SameText(second_unit_local, variant_char($4FA7, $5074)) or
                 SameText(second_unit_local, string(Char($65B9))) or
                 SameText(second_unit_local, string(Char($90E8))) or
                 SameText(second_unit_local, string(Char($7AEF))) or
-                SameText(second_unit_local, string(Char($5934)));
+                SameText(second_unit_local, variant_char($5934, $982D));
         end;
 
         function get_exact_chunk_semantic_bonus_local(
@@ -54273,34 +54497,34 @@ var
                 (prefix_text_local = string(Char($592A))) or
                 (prefix_text_local = string(Char($8981))) or
                 (prefix_text_local = string(Char($80FD))) or
-                (prefix_text_local = string(Char($6CA1))) or
-                (prefix_text_local = string(Char($65E0))) or
+                (prefix_text_local = variant_char($6CA1, $6C92)) or
+                (prefix_text_local = variant_char($65E0, $7121)) or
                 (prefix_text_local = string(Char($975E))) or
                 (prefix_text_local = string(Char($53EF))) or
-                (prefix_text_local = string(Char($4F1A))) or
-                (prefix_text_local = string(Char($5E94))) or
-                (prefix_text_local = string(Char($5C06))) or
+                (prefix_text_local = variant_char($4F1A, $6703)) or
+                (prefix_text_local = variant_char($5E94, $61C9)) or
+                (prefix_text_local = variant_char($5C06, $5C07)) or
                 (prefix_text_local = string(Char($672A))) or
                 (prefix_text_local = string(Char($5DF2))) or
                 (prefix_text_local = string(Char($6B63))) or
                 (prefix_text_local = string(Char($53C8))) or
                 (prefix_text_local = string(Char($4E5F))) or
-                (prefix_text_local = string(Char($8FD8))) or
+                (prefix_text_local = variant_char($8FD8, $9084)) or
                 (prefix_text_local = string(Char($90FD))) or
                 (prefix_text_local = string(Char($5C31))) or
-                (prefix_text_local = string(Char($522B))) or
+                (prefix_text_local = variant_char($522B, $5225)) or
                 (prefix_text_local = string(Char($6709))) or
                 (prefix_text_local = string(Char($5728))) or
                 (prefix_text_local = string(Char($6240))) or
-                (prefix_text_local = string(Char($5BF9))) or
-                (prefix_text_local = string(Char($4ECE))) or
-                (prefix_text_local = string(Char($4E8E))) or
-                (prefix_text_local = string(Char($4E0E))) or
+                (prefix_text_local = variant_char($5BF9, $5C0D)) or
+                (prefix_text_local = variant_char($4ECE, $5F9E)) or
+                (prefix_text_local = variant_char($4E8E, $65BC)) or
+                (prefix_text_local = variant_char($4E0E, $8207)) or
                 (prefix_text_local = string(Char($548C))) or
                 (prefix_text_local = string(Char($628A))) or
                 (prefix_text_local = string(Char($88AB))) or
-                (prefix_text_local = string(Char($7ED9))) or
-                (prefix_text_local = string(Char($8BA9))) or
+                (prefix_text_local = variant_char($7ED9, $7D66)) or
+                (prefix_text_local = variant_char($8BA9, $8B93)) or
                 (prefix_text_local = string(Char($800C))) or
                 (prefix_text_local = string(Char($7684)));
         end;
@@ -54349,7 +54573,7 @@ var
             end
             else if normalized_syllable = 'sui' then
             begin
-                Result := string(Char($867D));
+                Result := variant_char($867D, $96D6);
             end
             else if normalized_syllable = 'er' then
             begin
@@ -54389,11 +54613,11 @@ var
             end
             else if normalized_syllable = 'yu' then
             begin
-                Result := string(Char($4E8E));
+                Result := variant_char($4E8E, $65BC);
             end
             else if normalized_syllable = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable = 'ba' then
             begin
@@ -54417,15 +54641,15 @@ var
             end
             else if normalized_syllable = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if normalized_syllable = 'que' then
             begin
-                Result := string(Char($5374));
+                Result := variant_char($5374, $537B);
             end
             else if normalized_syllable = 'bing' then
             begin
-                Result := string(Char($5E76));
+                Result := variant_char($5E76, $4E26);
             end
             else if normalized_syllable = 'qie' then
             begin
@@ -54433,15 +54657,15 @@ var
             end
             else if normalized_syllable = 'jiang' then
             begin
-                Result := string(Char($5C06));
+                Result := variant_char($5C06, $5C07);
             end
             else if normalized_syllable = 'rang' then
             begin
-                Result := string(Char($8BA9));
+                Result := variant_char($8BA9, $8B93);
             end
             else if normalized_syllable = 'gei' then
             begin
-                Result := string(Char($7ED9));
+                Result := variant_char($7ED9, $7D66);
             end
             else if normalized_syllable = 'bei' then
             begin
@@ -54449,7 +54673,7 @@ var
             end
             else if normalized_syllable = 'dui' then
             begin
-                Result := string(Char($5BF9));
+                Result := variant_char($5BF9, $5C0D);
             end
             else if normalized_syllable = 'dao' then
             begin
@@ -54457,7 +54681,7 @@ var
             end
             else if normalized_syllable = 'cong' then
             begin
-                Result := string(Char($4ECE));
+                Result := variant_char($4ECE, $5F9E);
             end
             else if normalized_syllable = 'you' then
             begin
@@ -54469,7 +54693,7 @@ var
             end
             else if normalized_syllable = 'hai' then
             begin
-                Result := string(Char($8FD8));
+                Result := variant_char($8FD8, $9084);
             end
             else if normalized_syllable = 'suo' then
             begin
@@ -54477,11 +54701,11 @@ var
             end
             else if normalized_syllable = 'wei' then
             begin
-                Result := string(Char($4E3A));
+                Result := variant_char($4E3A, $70BA);
             end
             else if normalized_syllable = 'mai' then
             begin
-                Result := string(Char($4E70));
+                Result := variant_char($4E70, $8CB7);
             end
             else if (normalized_syllable = 'le') or (normalized_syllable = 'liao') then
             begin
@@ -54638,20 +54862,20 @@ var
                 SameText(first_unit_local, string(Char($8981))) or
                 SameText(first_unit_local, string(Char($80FD))) or
                 SameText(first_unit_local, string(Char($53EF))) or
-                SameText(first_unit_local, string(Char($4F1A))) or
-                SameText(first_unit_local, string(Char($5E94))) or
+                SameText(first_unit_local, variant_char($4F1A, $6703)) or
+                SameText(first_unit_local, variant_char($5E94, $61C9)) or
                 SameText(first_unit_local, string(Char($5DF2))) or
-                SameText(first_unit_local, string(Char($5C06))) or
+                SameText(first_unit_local, variant_char($5C06, $5C07)) or
                 SameText(first_unit_local, string(Char($6B63))) or
                 SameText(first_unit_local, string(Char($53C8))) or
                 SameText(first_unit_local, string(Char($4E5F))) or
-                SameText(first_unit_local, string(Char($8FD8))) or
+                SameText(first_unit_local, variant_char($8FD8, $9084)) or
                 SameText(first_unit_local, string(Char($90FD))) or
                 SameText(first_unit_local, string(Char($5C31))) or
-                SameText(first_unit_local, string(Char($522B))) or
+                SameText(first_unit_local, variant_char($522B, $5225)) or
                 SameText(first_unit_local, string(Char($975E))) or
-                SameText(first_unit_local, string(Char($6CA1))) or
-                SameText(first_unit_local, string(Char($65E0))) or
+                SameText(first_unit_local, variant_char($6CA1, $6C92)) or
+                SameText(first_unit_local, variant_char($65E0, $7121)) or
                 SameText(first_unit_local, string(Char($672A))) then
             begin
                 Result := 7200;
@@ -54660,16 +54884,16 @@ var
                 SameText(first_unit_local, string(Char($800C))) or
                 SameText(first_unit_local, string(Char($6709))) or
                 SameText(first_unit_local, string(Char($5728))) or
-                SameText(first_unit_local, string(Char($5BF9))) or
+                SameText(first_unit_local, variant_char($5BF9, $5C0D)) or
                 SameText(first_unit_local, string(Char($5230))) or
-                SameText(first_unit_local, string(Char($4ECE))) or
+                SameText(first_unit_local, variant_char($4ECE, $5F9E)) or
                 SameText(first_unit_local, string(Char($548C))) or
-                SameText(first_unit_local, string(Char($4E0E))) or
-                SameText(first_unit_local, string(Char($4E8E))) or
+                SameText(first_unit_local, variant_char($4E0E, $8207)) or
+                SameText(first_unit_local, variant_char($4E8E, $65BC)) or
                 SameText(first_unit_local, string(Char($628A))) or
                 SameText(first_unit_local, string(Char($88AB))) or
-                SameText(first_unit_local, string(Char($7ED9))) or
-                SameText(first_unit_local, string(Char($8BA9))) or
+                SameText(first_unit_local, variant_char($7ED9, $7D66)) or
+                SameText(first_unit_local, variant_char($8BA9, $8B93)) or
                 SameText(first_unit_local, string(Char($7684))) or
                 SameText(first_unit_local, string(Char($6240))) or
 
@@ -54731,11 +54955,11 @@ var
             end
             else if normalized_syllable = 'hui' then
             begin
-                out_text := string(Char($4F1A));
+                out_text := variant_char($4F1A, $6703);
             end
             else if normalized_syllable = 'ying' then
             begin
-                out_text := string(Char($5E94));
+                out_text := variant_char($5E94, $61C9);
             end
             else if normalized_syllable = 'yi' then
             begin
@@ -54743,7 +54967,7 @@ var
             end
             else if normalized_syllable = 'jiang' then
             begin
-                out_text := string(Char($5C06));
+                out_text := variant_char($5C06, $5C07);
             end
             else if normalized_syllable = 'zheng' then
             begin
@@ -54767,7 +54991,7 @@ var
             end
             else if normalized_syllable = 'hai' then
             begin
-                out_text := string(Char($8FD8));
+                out_text := variant_char($8FD8, $9084);
             end
             else if normalized_syllable = 'dou' then
             begin
@@ -54779,7 +55003,7 @@ var
             end
             else if normalized_syllable = 'bie' then
             begin
-                out_text := string(Char($522B));
+                out_text := variant_char($522B, $5225);
             end
             else if normalized_syllable = 'fei' then
             begin
@@ -54787,11 +55011,11 @@ var
             end
             else if normalized_syllable = 'mei' then
             begin
-                out_text := string(Char($6CA1));
+                out_text := variant_char($6CA1, $6C92);
             end
             else if normalized_syllable = 'wu' then
             begin
-                out_text := string(Char($65E0));
+                out_text := variant_char($65E0, $7121);
             end
             else if normalized_syllable = 'wei' then
             begin
@@ -54799,7 +55023,7 @@ var
             end
             else if normalized_syllable = 'dui' then
             begin
-                out_text := string(Char($5BF9));
+                out_text := variant_char($5BF9, $5C0D);
             end
             else if normalized_syllable = 'dao' then
             begin
@@ -54807,7 +55031,7 @@ var
             end
             else if normalized_syllable = 'cong' then
             begin
-                out_text := string(Char($4ECE));
+                out_text := variant_char($4ECE, $5F9E);
             end
             else if normalized_syllable = 'he' then
             begin
@@ -54815,7 +55039,7 @@ var
             end
             else if normalized_syllable = 'yu' then
             begin
-                out_text := string(Char($4E8E));
+                out_text := variant_char($4E8E, $65BC);
             end
             else if normalized_syllable = 'ba' then
             begin
@@ -54827,11 +55051,11 @@ var
             end
             else if normalized_syllable = 'gei' then
             begin
-                out_text := string(Char($7ED9));
+                out_text := variant_char($7ED9, $7D66);
             end
             else if normalized_syllable = 'rang' then
             begin
-                out_text := string(Char($8BA9));
+                out_text := variant_char($8BA9, $8B93);
             end
             else if normalized_syllable = 'de' then
             begin
@@ -54859,7 +55083,7 @@ var
             end
             else if normalized_syllable = 'bing' then
             begin
-                out_text := string(Char($5E76));
+                out_text := variant_char($5E76, $4E26);
             end
             else if normalized_syllable = 'qie' then
             begin
@@ -56959,28 +57183,28 @@ var
                     Result := (unit_value = string(Char($5BB6))) or
                         (unit_value = string(Char($5E97))) or
                         (unit_value = string(Char($5C4B))) or
-                        (unit_value = string(Char($697C))) or
+                        (unit_value = variant_char($697C, $6A13)) or
                         (unit_value = string(Char($57CE))) or
                         (unit_value = string(Char($6751))) or
-                        (unit_value = string(Char($53BF))) or
+                        (unit_value = variant_char($53BF, $7E23)) or
                         (unit_value = string(Char($5E02))) or
                         (unit_value = string(Char($6821))) or
                         (unit_value = string(Char($9662))) or
-                        (unit_value = string(Char($5382))) or
-                        (unit_value = string(Char($9986))) or
+                        (unit_value = variant_char($5382, $5EE0)) or
+                        (unit_value = variant_char($9986, $9928)) or
                         (unit_value = string(Char($7AD9))) or
                         (unit_value = string(Char($5C40))) or
                         (unit_value = string(Char($6240))) or
-                        (unit_value = string(Char($56ED))) or
-                        (unit_value = string(Char($533A))) or
+                        (unit_value = variant_char($56ED, $5712)) or
+                        (unit_value = variant_char($533A, $5340)) or
                         (unit_value = string(Char($5708))) or
                         (unit_value = string(Char($8DEF))) or
                         (unit_value = string(Char($8857))) or
-                        (unit_value = string(Char($95E8))) or
+                        (unit_value = variant_char($95E8, $9580)) or
                         (unit_value = string(Char($5BA4))) or
                         (unit_value = string(Char($623F))) or
-                        (unit_value = string(Char($5385))) or
-                        (unit_value = string(Char($573A))) or
+                        (unit_value = variant_char($5385, $5EF3)) or
+                        (unit_value = variant_char($573A, $5834)) or
                         (unit_value = string(Char($53F8)));
                 end;
 
@@ -57864,7 +58088,7 @@ var
                 end
                 else if normalized_key_local = 'ma' then
                 begin
-                    out_text_local := string(Char($5417));
+                    out_text_local := variant_char($5417, $55CE);
                 end
                 else if normalized_key_local = 'ne' then
                 begin
@@ -58394,7 +58618,7 @@ var
                         (text_value_local = string(Char($7684))) or
                         (text_value_local = string(Char($4E86))) or
                         (text_value_local = string(Char($5427))) or
-                        (text_value_local = string(Char($5417)));
+                        (text_value_local = variant_char($5417, $55CE));
                 end;
 
                 function expand_unambiguous_function_tail_path_local(
@@ -59249,7 +59473,7 @@ var
                     (text_value_local = string(Char($7684))) or
                     (text_value_local = string(Char($4E86))) or
                     (text_value_local = string(Char($5427))) or
-                    (text_value_local = string(Char($5417)));
+                    (text_value_local = variant_char($5417, $55CE));
             end;
 
             function expand_function_tail_path_fast_local(
@@ -62180,28 +62404,28 @@ var
                     Result := (unit_value_inner = string(Char($5BB6))) or
                         (unit_value_inner = string(Char($5E97))) or
                         (unit_value_inner = string(Char($5C4B))) or
-                        (unit_value_inner = string(Char($697C))) or
+                        (unit_value_inner = variant_char($697C, $6A13)) or
                         (unit_value_inner = string(Char($57CE))) or
                         (unit_value_inner = string(Char($6751))) or
-                        (unit_value_inner = string(Char($53BF))) or
+                        (unit_value_inner = variant_char($53BF, $7E23)) or
                         (unit_value_inner = string(Char($5E02))) or
                         (unit_value_inner = string(Char($6821))) or
                         (unit_value_inner = string(Char($9662))) or
-                        (unit_value_inner = string(Char($5382))) or
-                        (unit_value_inner = string(Char($9986))) or
+                        (unit_value_inner = variant_char($5382, $5EE0)) or
+                        (unit_value_inner = variant_char($9986, $9928)) or
                         (unit_value_inner = string(Char($7AD9))) or
                         (unit_value_inner = string(Char($5C40))) or
                         (unit_value_inner = string(Char($6240))) or
-                        (unit_value_inner = string(Char($56ED))) or
-                        (unit_value_inner = string(Char($533A))) or
+                        (unit_value_inner = variant_char($56ED, $5712)) or
+                        (unit_value_inner = variant_char($533A, $5340)) or
                         (unit_value_inner = string(Char($5708))) or
                         (unit_value_inner = string(Char($8DEF))) or
                         (unit_value_inner = string(Char($8857))) or
-                        (unit_value_inner = string(Char($95E8))) or
+                        (unit_value_inner = variant_char($95E8, $9580)) or
                         (unit_value_inner = string(Char($5BA4))) or
                         (unit_value_inner = string(Char($623F))) or
-                        (unit_value_inner = string(Char($5385))) or
-                        (unit_value_inner = string(Char($573A))) or
+                        (unit_value_inner = variant_char($5385, $5EF3)) or
+                        (unit_value_inner = variant_char($573A, $5834)) or
                         (unit_value_inner = string(Char($53F8)));
                 end;
 
@@ -62930,16 +63154,16 @@ var
                                 add_fixed_single_option_inner(string(Char($672A)),
                                     1800);
                             end;
-                            if not SameText(text_inner, string(Char($4E3A))) then
+                            if not SameText(text_inner, variant_char($4E3A, $70BA)) then
                             begin
-                                add_fixed_single_option_inner(string(Char($4E3A)),
+                                add_fixed_single_option_inner(variant_char($4E3A, $70BA),
                                     2400);
                             end;
                         end
                         else if (normalized_single_key_inner = 'yu') and
-                            (not SameText(text_inner, string(Char($4E0E)))) then
+                            (not SameText(text_inner, variant_char($4E0E, $8207))) then
                         begin
-                            add_fixed_single_option_inner(string(Char($4E0E)),
+                            add_fixed_single_option_inner(variant_char($4E0E, $8207),
                                 2200);
                         end;
                         if use_exact_edge_ranker_expansion_local then
@@ -62957,16 +63181,16 @@ var
                             add_fixed_single_option_inner(string(Char($672A)),
                                 1800);
                         end;
-                        if not SameText(text_inner, string(Char($4E3A))) then
+                        if not SameText(text_inner, variant_char($4E3A, $70BA)) then
                         begin
-                            add_fixed_single_option_inner(string(Char($4E3A)),
+                            add_fixed_single_option_inner(variant_char($4E3A, $70BA),
                                 2400);
                         end;
                     end
                     else if (normalized_single_key_inner = 'yu') and
-                        (not SameText(text_inner, string(Char($4E0E)))) then
+                        (not SameText(text_inner, variant_char($4E0E, $8207))) then
                     begin
-                        add_fixed_single_option_inner(string(Char($4E0E)), 2200);
+                        add_fixed_single_option_inner(variant_char($4E0E, $8207), 2200);
                     end;
                     if use_exact_edge_ranker_expansion_local then
                     begin
@@ -64751,28 +64975,28 @@ var
                     Result := (unit_value = string(Char($5BB6))) or
                         (unit_value = string(Char($5E97))) or
                         (unit_value = string(Char($5C4B))) or
-                        (unit_value = string(Char($697C))) or
+                        (unit_value = variant_char($697C, $6A13)) or
                         (unit_value = string(Char($57CE))) or
                         (unit_value = string(Char($6751))) or
-                        (unit_value = string(Char($53BF))) or
+                        (unit_value = variant_char($53BF, $7E23)) or
                         (unit_value = string(Char($5E02))) or
                         (unit_value = string(Char($6821))) or
                         (unit_value = string(Char($9662))) or
-                        (unit_value = string(Char($5382))) or
-                        (unit_value = string(Char($9986))) or
+                        (unit_value = variant_char($5382, $5EE0)) or
+                        (unit_value = variant_char($9986, $9928)) or
                         (unit_value = string(Char($7AD9))) or
                         (unit_value = string(Char($5C40))) or
                         (unit_value = string(Char($6240))) or
-                        (unit_value = string(Char($56ED))) or
-                        (unit_value = string(Char($533A))) or
+                        (unit_value = variant_char($56ED, $5712)) or
+                        (unit_value = variant_char($533A, $5340)) or
                         (unit_value = string(Char($5708))) or
                         (unit_value = string(Char($8DEF))) or
                         (unit_value = string(Char($8857))) or
-                        (unit_value = string(Char($95E8))) or
+                        (unit_value = variant_char($95E8, $9580)) or
                         (unit_value = string(Char($5BA4))) or
                         (unit_value = string(Char($623F))) or
-                        (unit_value = string(Char($5385))) or
-                        (unit_value = string(Char($573A))) or
+                        (unit_value = variant_char($5385, $5EF3)) or
+                        (unit_value = variant_char($573A, $5834)) or
                         (unit_value = string(Char($53F8)));
                 end;
 
@@ -64887,20 +65111,20 @@ var
                     const text_value_local: string): Boolean;
                 begin
                     Result :=
-                        SameText(text_value_local, string(Char($65F6)) +
-                        string(Char($95F4))) or
-                        SameText(text_value_local, string(Char($65F6)) +
+                        SameText(text_value_local, variant_char($65F6, $6642) +
+                        variant_char($95F4, $9593)) or
+                        SameText(text_value_local, variant_char($65F6, $6642) +
                         string(Char($5019))) or
                         SameText(text_value_local, string(Char($671F)) +
-                        string(Char($95F4))) or
-                        SameText(text_value_local, string(Char($8FC7)) +
+                        variant_char($95F4, $9593)) or
+                        SameText(text_value_local, variant_char($8FC7, $904E) +
                         string(Char($7A0B))) or
-                        SameText(text_value_local, string(Char($9636)) +
+                        SameText(text_value_local, variant_char($9636, $968E) +
                         string(Char($6BB5))) or
-                        SameText(text_value_local, string(Char($65F6)) +
+                        SameText(text_value_local, variant_char($65F6, $6642) +
                         string(Char($523B))) or
                         SameText(text_value_local, string(Char($77AC)) +
-                        string(Char($95F4))) or
+                        variant_char($95F4, $9593)) or
                         SameText(text_value_local, string(Char($65E9)) +
                         string(Char($6668))) or
                         SameText(text_value_local, string(Char($591C)) +
@@ -64913,7 +65137,7 @@ var
                         string(Char($5348))) or
                         SameText(text_value_local, string(Char($5E74)) +
                         string(Char($4EE3))) or
-                        SameText(text_value_local, string(Char($65F6)) +
+                        SameText(text_value_local, variant_char($65F6, $6642) +
                         string(Char($4EE3)));
                 end;
 
@@ -65332,9 +65556,9 @@ var
                             SameText(unit_value_local, string(Char($7684))) or
                             SameText(unit_value_local, string(Char($5730))) or
                             SameText(unit_value_local, string(Char($5F97))) or
-                            SameText(unit_value_local, string(Char($5BF9))) or
+                            SameText(unit_value_local, variant_char($5BF9, $5C0D)) or
                             SameText(unit_value_local, string(Char($548C))) or
-                            SameText(unit_value_local, string(Char($4E0E))) or
+                            SameText(unit_value_local, variant_char($4E0E, $8207)) or
                             SameText(unit_value_local, string(Char($50CF)));
                     end;
 
@@ -65659,28 +65883,28 @@ var
                     Result := (unit_value_local = string(Char($5BB6))) or
                         (unit_value_local = string(Char($5E97))) or
                         (unit_value_local = string(Char($5C4B))) or
-                        (unit_value_local = string(Char($697C))) or
+                        (unit_value_local = variant_char($697C, $6A13)) or
                         (unit_value_local = string(Char($57CE))) or
                         (unit_value_local = string(Char($6751))) or
-                        (unit_value_local = string(Char($53BF))) or
+                        (unit_value_local = variant_char($53BF, $7E23)) or
                         (unit_value_local = string(Char($5E02))) or
                         (unit_value_local = string(Char($6821))) or
                         (unit_value_local = string(Char($9662))) or
-                        (unit_value_local = string(Char($5382))) or
-                        (unit_value_local = string(Char($9986))) or
+                        (unit_value_local = variant_char($5382, $5EE0)) or
+                        (unit_value_local = variant_char($9986, $9928)) or
                         (unit_value_local = string(Char($7AD9))) or
                         (unit_value_local = string(Char($5C40))) or
                         (unit_value_local = string(Char($6240))) or
-                        (unit_value_local = string(Char($56ED))) or
-                        (unit_value_local = string(Char($533A))) or
+                        (unit_value_local = variant_char($56ED, $5712)) or
+                        (unit_value_local = variant_char($533A, $5340)) or
                         (unit_value_local = string(Char($5708))) or
                         (unit_value_local = string(Char($8DEF))) or
                         (unit_value_local = string(Char($8857))) or
-                        (unit_value_local = string(Char($95E8))) or
+                        (unit_value_local = variant_char($95E8, $9580)) or
                         (unit_value_local = string(Char($5BA4))) or
                         (unit_value_local = string(Char($623F))) or
-                        (unit_value_local = string(Char($5385))) or
-                        (unit_value_local = string(Char($573A))) or
+                        (unit_value_local = variant_char($5385, $5EF3)) or
+                        (unit_value_local = variant_char($573A, $5834)) or
                         (unit_value_local = string(Char($53F8)));
                 end;
 
@@ -66025,15 +66249,15 @@ var
                 end
                 else if SameText(key_local, 'ge') then
                 begin
-                    Result := string(Char($4E2A));
+                    Result := variant_char($4E2A, $500B);
                 end
                 else if SameText(key_local, 'tiao') then
                 begin
-                    Result := string(Char($6761));
+                    Result := variant_char($6761, $689D);
                 end
                 else if SameText(key_local, 'zhang') then
                 begin
-                    Result := string(Char($5F20));
+                    Result := variant_char($5F20, $5F35);
                 end
                 else if SameText(key_local, 'ben') then
                 begin
@@ -66049,7 +66273,7 @@ var
                 end
                 else if SameText(key_local, 'lun') then
                 begin
-                    Result := string(Char($8F6E));
+                    Result := variant_char($8F6E, $8F2A);
                 end
                 else if SameText(key_local, 'hui') then
                 begin
@@ -66185,7 +66409,7 @@ var
                 end
                 else if SameText(key_local, 'dui') then
                 begin
-                    Result := string(Char($5BF9));
+                    Result := variant_char($5BF9, $5C0D);
                 end
                 else if SameText(key_local, 'qie') then
                 begin
@@ -66197,11 +66421,11 @@ var
                 end
                 else if SameText(key_local, 'bing') then
                 begin
-                    Result := string(Char($5E76));
+                    Result := variant_char($5E76, $4E26);
                 end
                 else if SameText(key_local, 'li') then
                 begin
-                    Result := string(Char($91CC));
+                    Result := variant_char($91CC, $88E1);
                 end
                 else if SameText(key_local, 'geng') then
                 begin
@@ -66221,7 +66445,7 @@ var
                 end
                 else if SameText(key_local, 'nei') then
                 begin
-                    Result := string(Char($5185));
+                    Result := variant_char($5185, $5167);
                 end
                 else if SameText(key_local, 'wai') then
                 begin
@@ -66233,7 +66457,7 @@ var
                 end
                 else if SameText(key_local, 'hou') then
                 begin
-                    Result := string(Char($540E));
+                    Result := variant_char($540E, $5F8C);
                 end
             end;
 
@@ -66921,9 +67145,9 @@ var
                     SameText(prefix_text_value_local, string(Char($7684))) or
                     SameText(prefix_text_value_local, string(Char($5730))) or
                     SameText(prefix_text_value_local, string(Char($5F97))) or
-                    SameText(prefix_text_value_local, string(Char($5BF9))) or
+                    SameText(prefix_text_value_local, variant_char($5BF9, $5C0D)) or
                     SameText(prefix_text_value_local, string(Char($548C))) or
-                    SameText(prefix_text_value_local, string(Char($4E0E))) or
+                    SameText(prefix_text_value_local, variant_char($4E0E, $8207)) or
                     SameText(prefix_text_value_local, string(Char($50CF)));
             end;
 
@@ -67027,7 +67251,7 @@ var
                     SameText(prefix_text_local, string(Char($5F97)));
                 prefix_is_connector_local :=
                     SameText(prefix_text_local, string(Char($548C))) or
-                    SameText(prefix_text_local, string(Char($4E0E)));
+                    SameText(prefix_text_local, variant_char($4E0E, $8207));
 
                 tail_key_local := build_query_key_local(
                     segment_query_offset_local + 1, 2);
@@ -69711,7 +69935,7 @@ var
             end
             else if normalized_syllable = 'sui' then
             begin
-                Result := string(Char($867D));
+                Result := variant_char($867D, $96D6);
             end
             else if normalized_syllable = 'er' then
             begin
@@ -69747,11 +69971,11 @@ var
             end
             else if normalized_syllable = 'yu' then
             begin
-                Result := string(Char($4E8E));
+                Result := variant_char($4E8E, $65BC);
             end
             else if normalized_syllable = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable = 'ba' then
             begin
@@ -69775,15 +69999,15 @@ var
             end
             else if normalized_syllable = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if normalized_syllable = 'que' then
             begin
-                Result := string(Char($5374));
+                Result := variant_char($5374, $537B);
             end
             else if normalized_syllable = 'bing' then
             begin
-                Result := string(Char($5E76));
+                Result := variant_char($5E76, $4E26);
             end
             else if normalized_syllable = 'qie' then
             begin
@@ -69804,11 +70028,11 @@ var
             end
             else if normalized_syllable = 'hou' then
             begin
-                Result := string(Char($540E));
+                Result := variant_char($540E, $5F8C);
             end
             else if normalized_syllable = 'li' then
             begin
-                Result := string(Char($91CC));
+                Result := variant_char($91CC, $88E1);
             end
             else if normalized_syllable = 'wai' then
             begin
@@ -69824,7 +70048,7 @@ var
             end
             else if normalized_syllable = 'dong' then
             begin
-                Result := string(Char($4E1C));
+                Result := variant_char($4E1C, $6771);
             end
             else if normalized_syllable = 'nan' then
             begin
@@ -70271,12 +70495,12 @@ var
         function is_directional_surface_modifier_local(const text: string): Boolean;
         begin
             Result := SameText(Trim(text), string(Char($524D)) + string(Char($9762))) or
-                SameText(Trim(text), string(Char($540E)) + string(Char($9762))) or
-                SameText(Trim(text), string(Char($91CC)) + string(Char($9762))) or
+                SameText(Trim(text), variant_char($540E, $5F8C) + string(Char($9762))) or
+                SameText(Trim(text), variant_char($91CC, $88E1) + string(Char($9762))) or
                 SameText(Trim(text), string(Char($5916)) + string(Char($9762))) or
                 SameText(Trim(text), string(Char($4E0A)) + string(Char($9762))) or
                 SameText(Trim(text), string(Char($4E0B)) + string(Char($9762))) or
-                SameText(Trim(text), string(Char($4E1C)) + string(Char($9762))) or
+                SameText(Trim(text), variant_char($4E1C, $6771) + string(Char($9762))) or
                 SameText(Trim(text), string(Char($5357)) + string(Char($9762))) or
                 SameText(Trim(text), string(Char($897F)) + string(Char($9762))) or
                 SameText(Trim(text), string(Char($5317)) + string(Char($9762)));
@@ -70285,12 +70509,12 @@ var
         function is_directional_single_unit_local(const text: string): Boolean;
         begin
             Result := SameText(Trim(text), string(Char($524D))) or
-                SameText(Trim(text), string(Char($540E))) or
-                SameText(Trim(text), string(Char($91CC))) or
+                SameText(Trim(text), variant_char($540E, $5F8C)) or
+                SameText(Trim(text), variant_char($91CC, $88E1)) or
                 SameText(Trim(text), string(Char($5916))) or
                 SameText(Trim(text), string(Char($4E0A))) or
                 SameText(Trim(text), string(Char($4E0B))) or
-                SameText(Trim(text), string(Char($4E1C))) or
+                SameText(Trim(text), variant_char($4E1C, $6771)) or
                 SameText(Trim(text), string(Char($5357))) or
                 SameText(Trim(text), string(Char($897F))) or
                 SameText(Trim(text), string(Char($5317)));
@@ -71094,7 +71318,7 @@ var
             end
             else if normalized_syllable = 'shuo' then
             begin
-                Result := string(Char($8BF4));
+                Result := variant_char($8BF4, $8AAA);
             end
             else if normalized_syllable = 'de' then
             begin
@@ -71106,7 +71330,7 @@ var
             end
             else if normalized_syllable = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if normalized_syllable = 'yi' then
             begin
@@ -71552,7 +71776,7 @@ var
             end
             else if normalized_syllable = 'sui' then
             begin
-                Result := string(Char($867D));
+                Result := variant_char($867D, $96D6);
             end
             else if normalized_syllable = 'er' then
             begin
@@ -71588,11 +71812,11 @@ var
             end
             else if normalized_syllable = 'yu' then
             begin
-                Result := string(Char($4E8E));
+                Result := variant_char($4E8E, $65BC);
             end
             else if normalized_syllable = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable = 'ba' then
             begin
@@ -71608,15 +71832,15 @@ var
             end
             else if normalized_syllable = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if normalized_syllable = 'que' then
             begin
-                Result := string(Char($5374));
+                Result := variant_char($5374, $537B);
             end
             else if normalized_syllable = 'bing' then
             begin
-                Result := string(Char($5E76));
+                Result := variant_char($5E76, $4E26);
             end
             else if normalized_syllable = 'qie' then
             begin
@@ -71624,7 +71848,7 @@ var
             end
             else if normalized_syllable = 'qing' then
             begin
-                Result := string(Char($8BF7));
+                Result := variant_char($8BF7, $8ACB);
             end;
         end;
 
@@ -72706,7 +72930,7 @@ var
             end
             else if normalized_syllable = 'sui' then
             begin
-                Result := string(Char($867D));
+                Result := variant_char($867D, $96D6);
             end
             else if normalized_syllable = 'er' then
             begin
@@ -72742,11 +72966,11 @@ var
             end
             else if normalized_syllable = 'yu' then
             begin
-                Result := string(Char($4E8E));
+                Result := variant_char($4E8E, $65BC);
             end
             else if normalized_syllable = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable = 'ba' then
             begin
@@ -72762,15 +72986,15 @@ var
             end
             else if normalized_syllable = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if normalized_syllable = 'que' then
             begin
-                Result := string(Char($5374));
+                Result := variant_char($5374, $537B);
             end
             else if normalized_syllable = 'bing' then
             begin
-                Result := string(Char($5E76));
+                Result := variant_char($5E76, $4E26);
             end
             else if normalized_syllable = 'qie' then
             begin
@@ -72778,15 +73002,15 @@ var
             end
             else if normalized_syllable = 'jiang' then
             begin
-                Result := string(Char($5C06));
+                Result := variant_char($5C06, $5C07);
             end
             else if normalized_syllable = 'rang' then
             begin
-                Result := string(Char($8BA9));
+                Result := variant_char($8BA9, $8B93);
             end
             else if normalized_syllable = 'dui' then
             begin
-                Result := string(Char($5BF9));
+                Result := variant_char($5BF9, $5C0D);
             end
             else if normalized_syllable = 'dao' then
             begin
@@ -72794,7 +73018,7 @@ var
             end
             else if normalized_syllable = 'cong' then
             begin
-                Result := string(Char($4ECE));
+                Result := variant_char($4ECE, $5F9E);
             end
             else if normalized_syllable = 'you' then
             begin
@@ -77526,7 +77750,7 @@ var
             end
             else if normalized_syllable = 'sui' then
             begin
-                Result := string(Char($867D));
+                Result := variant_char($867D, $96D6);
             end
             else if normalized_syllable = 'er' then
             begin
@@ -77562,11 +77786,11 @@ var
             end
             else if normalized_syllable = 'yu' then
             begin
-                Result := string(Char($4E8E));
+                Result := variant_char($4E8E, $65BC);
             end
             else if normalized_syllable = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable = 'ba' then
             begin
@@ -77582,15 +77806,15 @@ var
             end
             else if normalized_syllable = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if normalized_syllable = 'que' then
             begin
-                Result := string(Char($5374));
+                Result := variant_char($5374, $537B);
             end
             else if normalized_syllable = 'bing' then
             begin
-                Result := string(Char($5E76));
+                Result := variant_char($5E76, $4E26);
             end
             else if normalized_syllable = 'qie' then
             begin
@@ -77598,7 +77822,7 @@ var
             end
             else if normalized_syllable = 'qing' then
             begin
-                Result := string(Char($8BF7));
+                Result := variant_char($8BF7, $8ACB);
             end;
         end;
 
@@ -78164,7 +78388,7 @@ var
             end
             else if normalized_syllable = 'sui' then
             begin
-                Result := string(Char($867D));
+                Result := variant_char($867D, $96D6);
             end
             else if normalized_syllable = 'er' then
             begin
@@ -78200,11 +78424,11 @@ var
             end
             else if normalized_syllable = 'yu' then
             begin
-                Result := string(Char($4E8E));
+                Result := variant_char($4E8E, $65BC);
             end
             else if normalized_syllable = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable = 'ba' then
             begin
@@ -78220,15 +78444,15 @@ var
             end
             else if normalized_syllable = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if normalized_syllable = 'que' then
             begin
-                Result := string(Char($5374));
+                Result := variant_char($5374, $537B);
             end
             else if normalized_syllable = 'bing' then
             begin
-                Result := string(Char($5E76));
+                Result := variant_char($5E76, $4E26);
             end
             else if normalized_syllable = 'qie' then
             begin
@@ -78236,7 +78460,7 @@ var
             end
             else if normalized_syllable = 'qing' then
             begin
-                Result := string(Char($8BF7));
+                Result := variant_char($8BF7, $8ACB);
             end;
         end;
     begin
@@ -78533,13 +78757,13 @@ var
                 text_value_local) or
                 matches_particle_suffix_rule_local('la', string(Char($5566)),
                 text_value_local) or
-                matches_particle_suffix_rule_local('ma', string(Char($5417)),
+                matches_particle_suffix_rule_local('ma', variant_char($5417, $55CE),
                 text_value_local) or
                 matches_particle_suffix_rule_local('ba', string(Char($5427)),
                 text_value_local) or
                 ((normalized_query_local = 'dema') and
                 SameText(text_value_local, string(Char($7684)) +
-                string(Char($5417)))) or
+                variant_char($5417, $55CE))) or
                 ((normalized_query_local = 'deba') and
                 SameText(text_value_local, string(Char($7684)) +
                 string(Char($5427)))) or
@@ -78551,7 +78775,7 @@ var
                 string(Char($5427)))) or
                 ((normalized_query_local = 'lema') and
                 SameText(text_value_local, string(Char($4E86)) +
-                string(Char($5417))));
+                variant_char($5417, $55CE)));
         end;
 
         function should_drop_short_complete_local(
@@ -82133,7 +82357,7 @@ var
             end
             else if normalized_syllable = 'sui' then
             begin
-                Result := string(Char($867D));
+                Result := variant_char($867D, $96D6);
             end
             else if normalized_syllable = 'er' then
             begin
@@ -82169,11 +82393,11 @@ var
             end
             else if normalized_syllable = 'yu' then
             begin
-                Result := string(Char($4E8E));
+                Result := variant_char($4E8E, $65BC);
             end
             else if normalized_syllable = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable = 'de' then
             begin
@@ -82181,7 +82405,7 @@ var
             end
             else if normalized_syllable = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if normalized_syllable = 'ya' then
             begin
@@ -82338,7 +82562,7 @@ var
             end
             else if normalized_syllable = 'sui' then
             begin
-                Result := string(Char($867D));
+                Result := variant_char($867D, $96D6);
             end
             else if normalized_syllable = 'er' then
             begin
@@ -82370,11 +82594,11 @@ var
             end
             else if normalized_syllable = 'yu' then
             begin
-                Result := string(Char($4E8E));
+                Result := variant_char($4E8E, $65BC);
             end
             else if normalized_syllable = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable = 'de' then
             begin
@@ -82382,7 +82606,7 @@ var
             end
             else if normalized_syllable = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if normalized_syllable = 'ya' then
             begin
@@ -83095,7 +83319,7 @@ var
             end
             else if normalized_key = 'ma' then
             begin
-                expected_text := string(Char($5417));
+                expected_text := variant_char($5417, $55CE);
             end
             else if normalized_key = 'ne' then
             begin
@@ -86756,7 +86980,7 @@ var
             end
             else if normalized_syllable = 'sui' then
             begin
-                Result := string(Char($867D));
+                Result := variant_char($867D, $96D6);
             end
             else if normalized_syllable = 'er' then
             begin
@@ -86788,7 +87012,7 @@ var
             end
             else if normalized_syllable = 'yu' then
             begin
-                Result := string(Char($4E8E));
+                Result := variant_char($4E8E, $65BC);
             end
             else if normalized_syllable = 'de' then
             begin
@@ -86808,11 +87032,11 @@ var
             end
             else if normalized_syllable = 'bing' then
             begin
-                Result := string(Char($5E76));
+                Result := variant_char($5E76, $4E26);
             end
             else if normalized_syllable = 'que' then
             begin
-                Result := string(Char($5374));
+                Result := variant_char($5374, $537B);
             end;
         end;
 
@@ -88562,30 +88786,30 @@ var
             end;
 
             Result :=
-                (suffix_head = string(Char($533A))) or
+                (suffix_head = variant_char($533A, $5340)) or
                 (suffix_head = string(Char($5E02))) or
                 (suffix_head = string(Char($7701))) or
-                (suffix_head = string(Char($53BF))) or
-                (suffix_head = string(Char($9547))) or
-                (suffix_head = string(Char($4E61))) or
+                (suffix_head = variant_char($53BF, $7E23)) or
+                (suffix_head = variant_char($9547, $93AE)) or
+                (suffix_head = variant_char($4E61, $9109)) or
                 (suffix_head = string(Char($8DEF))) or
                 (suffix_head = string(Char($8857))) or
                 (suffix_head = string(Char($9053))) or
                 (suffix_head = string(Char($4E0B))) or
                 (suffix_head = string(Char($4E0A))) or
                 (suffix_head = string(Char($4E2D))) or
-                (suffix_head = string(Char($5185))) or
+                (suffix_head = variant_char($5185, $5167)) or
                 (suffix_head = string(Char($5916))) or
                 (suffix_head = string(Char($524D))) or
-                (suffix_head = string(Char($540E))) or
-                (suffix_head = string(Char($4E1C))) or
+                (suffix_head = variant_char($540E, $5F8C)) or
+                (suffix_head = variant_char($4E1C, $6771)) or
                 (suffix_head = string(Char($897F))) or
                 (suffix_head = string(Char($5357))) or
                 (suffix_head = string(Char($5317))) or
-                (suffix_head = string(Char($8FB9))) or
+                (suffix_head = variant_char($8FB9, $908A)) or
                 (suffix_head = string(Char($9762))) or
                 (suffix_head = string(Char($7248))) or
-                (suffix_head = string(Char($53F7))) or
+                (suffix_head = variant_char($53F7, $865F)) or
                 (suffix_head = string(Char($5E97)));
         end;
 
@@ -90860,7 +91084,7 @@ var
         end
         else if tail_key = 'ma' then
         begin
-            tail_text := string(Char($5417));
+            tail_text := variant_char($5417, $55CE);
         end
         else if tail_key = 'ne' then
         begin
@@ -91027,7 +91251,7 @@ var
         end
         else if tail_key = 'ma' then
         begin
-            expected_tail_text := string(Char($5417));
+            expected_tail_text := variant_char($5417, $55CE);
         end
         else if tail_key = 'ne' then
         begin
@@ -91857,7 +92081,7 @@ var
         end
         else if tail_key = 'ma' then
         begin
-            expected_text := string(Char($5417));
+            expected_text := variant_char($5417, $55CE);
         end
         else if tail_key = 'ne' then
         begin
@@ -92068,27 +92292,27 @@ var
         begin
             Result :=
                 SameText(unit_text, string(Char($6B21))) or
-                SameText(unit_text, string(Char($4E2A))) or
+                SameText(unit_text, variant_char($4E2A, $500B)) or
                 SameText(unit_text, string(Char($5929))) or
                 SameText(unit_text, string(Char($65E5))) or
-                SameText(unit_text, string(Char($8F6E))) or
+                SameText(unit_text, variant_char($8F6E, $8F2A)) or
                 SameText(unit_text, string(Char($6B65))) or
-                SameText(unit_text, string(Char($6761))) or
+                SameText(unit_text, variant_char($6761, $689D)) or
                 SameText(unit_text, string(Char($6839))) or
                 SameText(unit_text, string(Char($6279))) or
                 SameText(unit_text, string(Char($5339))) or
-                SameText(unit_text, string(Char($53F0))) or
+                SameText(unit_text, variant_char($53F0, $81FA)) or
                 SameText(unit_text, string(Char($628A))) or
                 SameText(unit_text, string(Char($526F))) or
-                SameText(unit_text, string(Char($5BF9))) or
-                SameText(unit_text, string(Char($53CC))) or
+                SameText(unit_text, variant_char($5BF9, $5C0D)) or
+                SameText(unit_text, variant_char($53CC, $96D9)) or
                 SameText(unit_text, string(Char($74F6))) or
                 SameText(unit_text, string(Char($6876))) or
-                SameText(unit_text, string(Char($680B))) or
+                SameText(unit_text, variant_char($680B, $68DF)) or
                 SameText(unit_text, string(Char($5E62))) or
                 SameText(unit_text, string(Char($7247))) or
-                SameText(unit_text, string(Char($76D8))) or
-                SameText(unit_text, string(Char($53EA)));
+                SameText(unit_text, variant_char($76D8, $76E4)) or
+                SameText(unit_text, variant_char($53EA, $96BB));
         end;
 
         function candidate_ends_with_units_local(const units: TArray<string>;
@@ -92289,7 +92513,7 @@ var
         end
         else if tail_key = 'ma' then
         begin
-            expected_text := string(Char($5417));
+            expected_text := variant_char($5417, $55CE);
         end
         else if tail_key = 'ne' then
         begin
@@ -96592,7 +96816,7 @@ var
             end;
             if SameText(normalize_pinyin_text(syllables_local[0].text), 'zhe') then
             begin
-                head_text := string(Char($8FD9));
+                head_text := variant_char($8FD9, $9019);
             end
             else if SameText(normalize_pinyin_text(syllables_local[0].text), 'na') or
                 SameText(normalize_pinyin_text(syllables_local[0].text), 'nei') then
@@ -97028,7 +97252,7 @@ var
         out_text := '';
         if SameText(syllable_text, 'zhe') then
         begin
-            out_text := string(Char($8FD9));
+            out_text := variant_char($8FD9, $9019);
         end
         else if SameText(syllable_text, 'na') or SameText(syllable_text, 'nei') then
         begin
@@ -97040,11 +97264,11 @@ var
         end
         else if SameText(syllable_text, 'liang') then
         begin
-            out_text := string(Char($4E24));
+            out_text := variant_char($4E24, $5169);
         end
         else if SameText(syllable_text, 'ji') then
         begin
-            out_text := string(Char($51E0));
+            out_text := variant_char($51E0, $5E7E);
         end
         else if SameText(syllable_text, 'mei') then
         begin
@@ -97061,11 +97285,11 @@ var
             out_text := '';
             if SameText(syllable_text, 'li') then
             begin
-                out_text := string(Char($91CC));
+                out_text := variant_char($91CC, $88E1);
             end
             else if SameText(syllable_text, 'er') then
             begin
-                out_text := string(Char($513F));
+                out_text := variant_char($513F, $5152);
             end;
             Result := out_text <> '';
         end;
@@ -97095,7 +97319,7 @@ var
         end;
 
         if (units[1] = string(Char($5427))) or
-            (units[1] = string(Char($5417))) or
+            (units[1] = variant_char($5417, $55CE)) or
             (units[1] = string(Char($5462))) then
         begin
             Result := True;
@@ -97619,36 +97843,36 @@ var
                 (value = string(Char($4ED6))) or
                 (value = string(Char($5979))) or
                 (value = string(Char($5B83))) or
-                (value = string(Char($4EEC))) or
+                (value = variant_char($4EEC, $5011)) or
                 (value = string(Char($548C))) or
                 (value = string(Char($53BB))) or
-                (value = string(Char($6765))) or
+                (value = variant_char($6765, $4F86)) or
                 (value = string(Char($5728))) or
                 (value = string(Char($662F))) or
                 (value = string(Char($6709))) or
                 (value = string(Char($8981))) or
                 (value = string(Char($60F3))) or
-                (value = string(Char($4F1A))) or
+                (value = variant_char($4F1A, $6703)) or
                 (value = string(Char($80FD))) or
                 (value = string(Char($53EA))) or
                 (value = string(Char($628A))) or
                 (value = string(Char($88AB))) or
-                (value = string(Char($8BA9))) or
-                (value = string(Char($7ED9))) or
+                (value = variant_char($8BA9, $8B93)) or
+                (value = variant_char($7ED9, $7D66)) or
                 (value = string(Char($5411))) or
-                (value = string(Char($5BF9))) or
-                (value = string(Char($4E8E))) or
-                (value = string(Char($4E3A))) or
+                (value = variant_char($5BF9, $5C0D)) or
+                (value = variant_char($4E8E, $65BC)) or
+                (value = variant_char($4E3A, $70BA)) or
                 (value = string(Char($8DDF))) or
                 (value = string(Char($540C))) or
-                (value = string(Char($4ECE))) or
-                (value = string(Char($4E0E))) or
+                (value = variant_char($4ECE, $5F9E)) or
+                (value = variant_char($4E0E, $8207)) or
                 (value = string(Char($800C))) or
-                (value = string(Char($5E76))) or
+                (value = variant_char($5E76, $4E26)) or
                 (value = string(Char($5C31))) or
                 (value = string(Char($4E5F))) or
                 (value = string(Char($90FD))) or
-                (value = string(Char($8FD8))) or
+                (value = variant_char($8FD8, $9084)) or
                 (value = string(Char($53C8))) or
                 (value = string(Char($518D))) or
                 (value = string(Char($4E0D))) or
@@ -97658,7 +97882,7 @@ var
                 (value = string(Char($5F97))) or
                 (value = string(Char($7684))) or
                 (value = string(Char($4EBA))) or
-                (value = string(Char($4E2A))) or
+                (value = variant_char($4E2A, $500B)) or
                 (value = string(Char($4E00))) or
                 (value = string(Char($4EE5))) or
                 (value = string(Char($5176))) or
@@ -97668,15 +97892,15 @@ var
                 (value = string(Char($4E0A))) or
                 (value = string(Char($4E0B))) or
                 (value = string(Char($524D))) or
-                (value = string(Char($540E))) or
-                (value = string(Char($5185))) or
+                (value = variant_char($540E, $5F8C)) or
+                (value = variant_char($5185, $5167)) or
                 (value = string(Char($5916))) or
-                (value = string(Char($91CC))) or
-                (value = string(Char($8BE5))) or
+                (value = variant_char($91CC, $88E1)) or
+                (value = variant_char($8BE5, $8A72)) or
                 (value = string(Char($6B64))) or
                 (value = string(Char($6BCF))) or
-                (value = string(Char($7740))) or
-                (value = string(Char($8FD9)));
+                (value = variant_char($7740, $8457)) or
+                (value = variant_char($8FD9, $9019));
         end;
         function is_long_sentence_allowed_single_char_text_codepoint_local(
             const value: string): Boolean;
@@ -97760,7 +97984,7 @@ var
             end
             else if normalized_syllable = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable = 'ba' then
             begin
@@ -97776,15 +98000,15 @@ var
             end
             else if normalized_syllable = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if normalized_syllable = 'que' then
             begin
-                Result := string(Char($5374));
+                Result := variant_char($5374, $537B);
             end
             else if normalized_syllable = 'bing' then
             begin
-                Result := string(Char($5E76));
+                Result := variant_char($5E76, $4E26);
             end
             else if normalized_syllable = 'qie' then
             begin
@@ -102681,7 +102905,7 @@ var
             end
             else if syllable_equals(syllable_text, 'ma') then
             begin
-                out_text := string(Char($5417));
+                out_text := variant_char($5417, $55CE);
             end
             else if syllable_equals(syllable_text, 'ne') then
             begin
@@ -102781,78 +103005,78 @@ var
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'zhe') and
                 syllable_equals(syllables[1].text, 'ge') then
             begin
-                out_units := TArray<string>.Create(string(Char($8FD9)), string(Char($4E2A)));
+                out_units := TArray<string>.Create(variant_char($8FD9, $9019), variant_char($4E2A, $500B));
             end
             else if (Length(syllables) = 2) and
                 ((syllable_equals(syllables[0].text, 'na') or syllable_equals(syllables[0].text, 'nei')) and
                 syllable_equals(syllables[1].text, 'ge')) then
             begin
-                out_units := TArray<string>.Create(string(Char($90A3)), string(Char($4E2A)));
+                out_units := TArray<string>.Create(string(Char($90A3)), variant_char($4E2A, $500B));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'yi') and
                 syllable_equals(syllables[1].text, 'ge') then
             begin
-                out_units := TArray<string>.Create(string(Char($4E00)), string(Char($4E2A)));
+                out_units := TArray<string>.Create(string(Char($4E00)), variant_char($4E2A, $500B));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'liang') and
                 syllable_equals(syllables[1].text, 'ge') then
             begin
-                out_units := TArray<string>.Create(string(Char($4E24)), string(Char($4E2A)));
+                out_units := TArray<string>.Create(variant_char($4E24, $5169), variant_char($4E2A, $500B));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'ji') and
                 syllable_equals(syllables[1].text, 'ge') then
             begin
-                out_units := TArray<string>.Create(string(Char($51E0)), string(Char($4E2A)));
+                out_units := TArray<string>.Create(variant_char($51E0, $5E7E), variant_char($4E2A, $500B));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'mei') and
                 syllable_equals(syllables[1].text, 'ge') then
             begin
-                out_units := TArray<string>.Create(string(Char($6BCF)), string(Char($4E2A)));
+                out_units := TArray<string>.Create(string(Char($6BCF)), variant_char($4E2A, $500B));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'san') and
                 syllable_equals(syllables[1].text, 'ge') then
             begin
-                out_units := TArray<string>.Create(string(Char($4E09)), string(Char($4E2A)));
+                out_units := TArray<string>.Create(string(Char($4E09)), variant_char($4E2A, $500B));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'si') and
                 syllable_equals(syllables[1].text, 'ge') then
             begin
-                out_units := TArray<string>.Create(string(Char($56DB)), string(Char($4E2A)));
+                out_units := TArray<string>.Create(string(Char($56DB)), variant_char($4E2A, $500B));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'wu') and
                 syllable_equals(syllables[1].text, 'ge') then
             begin
-                out_units := TArray<string>.Create(string(Char($4E94)), string(Char($4E2A)));
+                out_units := TArray<string>.Create(string(Char($4E94)), variant_char($4E2A, $500B));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'liu') and
                 syllable_equals(syllables[1].text, 'ge') then
             begin
-                out_units := TArray<string>.Create(string(Char($516D)), string(Char($4E2A)));
+                out_units := TArray<string>.Create(string(Char($516D)), variant_char($4E2A, $500B));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'qi') and
                 syllable_equals(syllables[1].text, 'ge') then
             begin
-                out_units := TArray<string>.Create(string(Char($4E03)), string(Char($4E2A)));
+                out_units := TArray<string>.Create(string(Char($4E03)), variant_char($4E2A, $500B));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'ba') and
                 syllable_equals(syllables[1].text, 'ge') then
             begin
-                out_units := TArray<string>.Create(string(Char($516B)), string(Char($4E2A)));
+                out_units := TArray<string>.Create(string(Char($516B)), variant_char($4E2A, $500B));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'jiu') and
                 syllable_equals(syllables[1].text, 'ge') then
             begin
-                out_units := TArray<string>.Create(string(Char($4E5D)), string(Char($4E2A)));
+                out_units := TArray<string>.Create(string(Char($4E5D)), variant_char($4E2A, $500B));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'shi') and
                 syllable_equals(syllables[1].text, 'ge') then
             begin
-                out_units := TArray<string>.Create(string(Char($5341)), string(Char($4E2A)));
+                out_units := TArray<string>.Create(string(Char($5341)), variant_char($4E2A, $500B));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'zhe') and
                 syllable_equals(syllables[1].text, 'xie') then
             begin
-                out_units := TArray<string>.Create(string(Char($8FD9)), string(Char($4E9B)));
+                out_units := TArray<string>.Create(variant_char($8FD9, $9019), string(Char($4E9B)));
             end
             else if (Length(syllables) = 2) and
                 ((syllable_equals(syllables[0].text, 'na') or syllable_equals(syllables[0].text, 'nei')) and
@@ -102868,7 +103092,7 @@ var
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'yi') and
                 syllable_equals(syllables[1].text, 'dian') then
             begin
-                out_units := TArray<string>.Create(string(Char($4E00)), string(Char($70B9)));
+                out_units := TArray<string>.Create(string(Char($4E00)), variant_char($70B9, $9EDE));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'yi') and
                 syllable_equals(syllables[1].text, 'xia') then
@@ -102878,72 +103102,72 @@ var
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'zhe') and
                 syllable_equals(syllables[1].text, 'yang') then
             begin
-                out_units := TArray<string>.Create(string(Char($8FD9)), string(Char($6837)));
+                out_units := TArray<string>.Create(variant_char($8FD9, $9019), variant_char($6837, $6A23));
             end
             else if (Length(syllables) = 2) and
                 ((syllable_equals(syllables[0].text, 'na') or syllable_equals(syllables[0].text, 'nei')) and
                 syllable_equals(syllables[1].text, 'yang')) then
             begin
-                out_units := TArray<string>.Create(string(Char($90A3)), string(Char($6837)));
+                out_units := TArray<string>.Create(string(Char($90A3)), variant_char($6837, $6A23));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'zhe') and
                 syllable_equals(syllables[1].text, 'me') then
             begin
-                out_units := TArray<string>.Create(string(Char($8FD9)), string(Char($4E48)));
+                out_units := TArray<string>.Create(variant_char($8FD9, $9019), variant_char($4E48, $9EBC));
             end
             else if (Length(syllables) = 2) and
                 ((syllable_equals(syllables[0].text, 'na') or syllable_equals(syllables[0].text, 'nei')) and
                 syllable_equals(syllables[1].text, 'me')) then
             begin
-                out_units := TArray<string>.Create(string(Char($90A3)), string(Char($4E48)));
+                out_units := TArray<string>.Create(string(Char($90A3)), variant_char($4E48, $9EBC));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'zen') and
                 syllable_equals(syllables[1].text, 'me') then
             begin
-                out_units := TArray<string>.Create(string(Char($600E)), string(Char($4E48)));
+                out_units := TArray<string>.Create(string(Char($600E)), variant_char($4E48, $9EBC));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'you') and
                 syllable_equals(syllables[1].text, 'dian') then
             begin
-                out_units := TArray<string>.Create(string(Char($6709)), string(Char($70B9)));
+                out_units := TArray<string>.Create(string(Char($6709)), variant_char($70B9, $9EDE));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'shen') and
                 syllable_equals(syllables[1].text, 'me') then
             begin
-                out_units := TArray<string>.Create(string(Char($4EC0)), string(Char($4E48)));
+                out_units := TArray<string>.Create(string(Char($4EC0)), variant_char($4E48, $9EBC));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'zhe') and
                 syllable_equals(syllables[1].text, 'zhong') then
             begin
-                out_units := TArray<string>.Create(string(Char($8FD9)), string(Char($79CD)));
+                out_units := TArray<string>.Create(variant_char($8FD9, $9019), variant_char($79CD, $7A2E));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'zhe') and
                 syllable_equals(syllables[1].text, 'li') then
             begin
-                out_units := TArray<string>.Create(string(Char($8FD9)), string(Char($91CC)));
+                out_units := TArray<string>.Create(variant_char($8FD9, $9019), variant_char($91CC, $88E1));
             end
             else if (Length(syllables) = 2) and syllable_equals(syllables[0].text, 'yi') and
                 syllable_equals(syllables[1].text, 'hou') then
             begin
-                out_units := TArray<string>.Create(string(Char($4EE5)), string(Char($540E)));
+                out_units := TArray<string>.Create(string(Char($4EE5)), variant_char($540E, $5F8C));
             end
             else if (Length(syllables) = 2) and
                 ((syllable_equals(syllables[0].text, 'na') or syllable_equals(syllables[0].text, 'nei')) and
                 syllable_equals(syllables[1].text, 'zhong')) then
             begin
-                out_units := TArray<string>.Create(string(Char($90A3)), string(Char($79CD)));
+                out_units := TArray<string>.Create(string(Char($90A3)), variant_char($79CD, $7A2E));
             end
             else if (Length(syllables) = 3) and syllable_equals(syllables[0].text, 'wei') and
                 syllable_equals(syllables[1].text, 'shen') and syllable_equals(syllables[2].text, 'me') then
             begin
                 out_units := TArray<string>.Create(
-                    string(Char($4E3A)), string(Char($4EC0)), string(Char($4E48)));
+                    variant_char($4E3A, $70BA), string(Char($4EC0)), variant_char($4E48, $9EBC));
             end
             else if (Length(syllables) = 3) and syllable_equals(syllables[0].text, 'zen') and
                 syllable_equals(syllables[1].text, 'me') and syllable_equals(syllables[2].text, 'yang') then
             begin
                 out_units := TArray<string>.Create(
-                    string(Char($600E)), string(Char($4E48)), string(Char($6837)));
+                    string(Char($600E)), variant_char($4E48, $9EBC), variant_char($6837, $6A23));
             end
             else
             begin
@@ -103075,35 +103299,35 @@ var
         if normalized_query = 'ner' then
         begin
             expected_syllables := TArray<string>.Create('na', 'er');
-            expected_units := TArray<string>.Create(string(Char($54EA)), string(Char($513F)));
+            expected_units := TArray<string>.Create(string(Char($54EA)), variant_char($513F, $5152));
         end
         else if normalized_query = 'naer' then
         begin
             expected_syllables := TArray<string>.Create('na', 'er');
-            expected_units := TArray<string>.Create(string(Char($54EA)), string(Char($513F)));
+            expected_units := TArray<string>.Create(string(Char($54EA)), variant_char($513F, $5152));
         end
         else if normalized_query = 'qner' then
         begin
             expected_syllables := TArray<string>.Create('qu', 'na', 'er');
             expected_units := TArray<string>.Create(
-                string(Char($53BB)), string(Char($54EA)), string(Char($513F)));
+                string(Char($53BB)), string(Char($54EA)), variant_char($513F, $5152));
         end
         else if normalized_query = 'qunaer' then
         begin
             expected_syllables := TArray<string>.Create('qu', 'na', 'er');
             expected_units := TArray<string>.Create(
-                string(Char($53BB)), string(Char($54EA)), string(Char($513F)));
+                string(Char($53BB)), string(Char($54EA)), variant_char($513F, $5152));
         end
         else if normalized_query = 'nli' then
         begin
             expected_syllables := TArray<string>.Create('na', 'li');
-            expected_units := TArray<string>.Create(string(Char($54EA)), string(Char($91CC)));
+            expected_units := TArray<string>.Create(string(Char($54EA)), variant_char($91CC, $88E1));
         end
         else if normalized_query = 'qnli' then
         begin
             expected_syllables := TArray<string>.Create('qu', 'na', 'li');
             expected_units := TArray<string>.Create(
-                string(Char($53BB)), string(Char($54EA)), string(Char($91CC)));
+                string(Char($53BB)), string(Char($54EA)), variant_char($91CC, $88E1));
         end
         else
         begin
@@ -103391,7 +103615,7 @@ var
         out_text := '';
         if SameText(syllable_text, 'zhe') then
         begin
-            out_text := string(Char($8FD9));
+            out_text := variant_char($8FD9, $9019);
         end
         else if SameText(syllable_text, 'na') or SameText(syllable_text, 'nei') then
         begin
@@ -103413,7 +103637,7 @@ var
         out_text := '';
         if SameText(syllable_text, 'ge') then
         begin
-            out_text := string(Char($4E2A));
+            out_text := variant_char($4E2A, $500B);
         end
         else if SameText(syllable_text, 'xie') then
         begin
@@ -103421,19 +103645,19 @@ var
         end
         else if SameText(syllable_text, 'zhong') then
         begin
-            out_text := string(Char($79CD));
+            out_text := variant_char($79CD, $7A2E);
         end
         else if SameText(syllable_text, 'li') then
         begin
-            out_text := string(Char($91CC));
+            out_text := variant_char($91CC, $88E1);
         end
         else if SameText(syllable_text, 'yang') then
         begin
-            out_text := string(Char($6837));
+            out_text := variant_char($6837, $6A23);
         end
         else if SameText(syllable_text, 'me') then
         begin
-            out_text := string(Char($4E48));
+            out_text := variant_char($4E48, $9EBC);
         end
         else if SameText(syllable_text, 'ci') then
         begin
@@ -103445,15 +103669,15 @@ var
         end
         else if SameText(syllable_text, 'lun') then
         begin
-            out_text := string(Char($8F6E));
+            out_text := variant_char($8F6E, $8F2A);
         end
         else if SameText(syllable_text, 'lei') then
         begin
-            out_text := string(Char($7C7B));
+            out_text := variant_char($7C7B, $985E);
         end
         else if SameText(syllable_text, 'bian') then
         begin
-            out_text := string(Char($8FB9));
+            out_text := variant_char($8FB9, $908A);
         end
         else if SameText(syllable_text, 'mian') then
         begin
@@ -103481,11 +103705,11 @@ var
         end
         else if SameText(syllable_text, 'sheng') then
         begin
-            out_text := string(Char($58F0));
+            out_text := variant_char($58F0, $8072);
         end
         else if SameText(syllable_text, 'dian') then
         begin
-            out_text := string(Char($70B9));
+            out_text := variant_char($70B9, $9EDE);
         end
         else if SameText(syllable_text, 'wei') then
         begin
@@ -104632,23 +104856,23 @@ var
         end;
 
         Result :=
-            (normalized_text_value = string(Char($4E2A))) or
+            (normalized_text_value = variant_char($4E2A, $500B)) or
             (normalized_text_value = string(Char($4F4D))) or
             (normalized_text_value = string(Char($6B21))) or
-            (normalized_text_value = string(Char($70B9))) or
+            (normalized_text_value = variant_char($70B9, $9EDE)) or
             (normalized_text_value = string(Char($4E9B))) or
-            (normalized_text_value = string(Char($79CD))) or
+            (normalized_text_value = variant_char($79CD, $7A2E)) or
             (normalized_text_value = string(Char($5929))) or
             (normalized_text_value = string(Char($5E74))) or
             (normalized_text_value = string(Char($6708))) or
-            (normalized_text_value = string(Char($91CC))) or
+            (normalized_text_value = variant_char($91CC, $88E1)) or
             (normalized_text_value = string(Char($4E0B))) or
             (normalized_text_value = string(Char($56DE))) or
             (normalized_text_value = string(Char($904D))) or
-            (normalized_text_value = string(Char($58F0))) or
+            (normalized_text_value = variant_char($58F0, $8072)) or
             (normalized_text_value = string(Char($9762))) or
             (normalized_text_value = string(Char($773C))) or
-            (normalized_text_value = string(Char($8FB9)));
+            (normalized_text_value = variant_char($8FB9, $908A));
     end;
 
     function is_quantity_like_prefix_for_boundary_unit_partial(const text_value: string): Boolean;
@@ -104675,10 +104899,10 @@ var
             (normalized_text_value = string(Char($5341))) or
             (normalized_text_value = string(Char($767E))) or
             (normalized_text_value = string(Char($5343))) or
-            (normalized_text_value = string(Char($4E07))) or
-            (normalized_text_value = string(Char($4E24))) or
-            (normalized_text_value = string(Char($51E0))) or
-            (normalized_text_value = string(Char($8FD9))) or
+            (normalized_text_value = variant_char($4E07, $842C)) or
+            (normalized_text_value = variant_char($4E24, $5169)) or
+            (normalized_text_value = variant_char($51E0, $5E7E)) or
+            (normalized_text_value = variant_char($8FD9, $9019)) or
             (normalized_text_value = string(Char($90A3))) or
             (normalized_text_value = string(Char($54EA))) or
             (normalized_text_value = string(Char($6BCF))) or
@@ -104686,9 +104910,9 @@ var
             (normalized_text_value = string(Char($534A))) or
             (normalized_text_value = string(Char($591A))) or
             (normalized_text_value = string(Char($6574))) or
-            (normalized_text_value = string(Char($5355))) or
-            (normalized_text_value = string(Char($53CC))) or
-            (normalized_text_value = string(Char($4FE9))) or
+            (normalized_text_value = variant_char($5355, $55AE)) or
+            (normalized_text_value = variant_char($53CC, $96D9)) or
+            (normalized_text_value = variant_char($4FE9, $5006)) or
             (normalized_text_value = string(Char($4EE8)));
     end;
 
@@ -106163,7 +106387,7 @@ var
             end
             else if normalized_syllable = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable = 'ba' then
             begin
@@ -106179,15 +106403,15 @@ var
             end
             else if normalized_syllable = 'zhe' then
             begin
-                Result := string(Char($8FD9));
+                Result := variant_char($8FD9, $9019);
             end
             else if normalized_syllable = 'que' then
             begin
-                Result := string(Char($5374));
+                Result := variant_char($5374, $537B);
             end
             else if normalized_syllable = 'bing' then
             begin
-                Result := string(Char($5E76));
+                Result := variant_char($5E76, $4E26);
             end
             else if normalized_syllable = 'qie' then
             begin
@@ -106195,7 +106419,7 @@ var
             end
             else if normalized_syllable = 'qing' then
             begin
-                Result := string(Char($8BF7));
+                Result := variant_char($8BF7, $8ACB);
             end;
         end;
 
@@ -106546,7 +106770,7 @@ var
         end
         else if out_tail_key = 'ma' then
         begin
-            out_tail_text := string(Char($5417));
+            out_tail_text := variant_char($5417, $55CE);
         end
         else if out_tail_key = 'ne' then
         begin
@@ -107066,15 +107290,15 @@ var
             end
             else if normalized_syllable_local = 'mei' then
             begin
-                Result := string(Char($6CA1));
+                Result := variant_char($6CA1, $6C92);
             end
             else if normalized_syllable_local = 'ying' then
             begin
-                Result := string(Char($5E94));
+                Result := variant_char($5E94, $61C9);
             end
             else if normalized_syllable_local = 'jiang' then
             begin
-                Result := string(Char($5C06));
+                Result := variant_char($5C06, $5C07);
             end
             else if normalized_syllable_local = 'zheng' then
             begin
@@ -107086,7 +107310,7 @@ var
             end
             else if normalized_syllable_local = 'hai' then
             begin
-                Result := string(Char($8FD8));
+                Result := variant_char($8FD8, $9084);
             end
             else if normalized_syllable_local = 'dou' then
             begin
@@ -107098,7 +107322,7 @@ var
             end
             else if normalized_syllable_local = 'bie' then
             begin
-                Result := string(Char($522B));
+                Result := variant_char($522B, $5225);
             end
             else if normalized_syllable_local = 'le' then
             begin
@@ -107918,7 +108142,7 @@ var
             end
             else if normalized_syllable_local = 'hui' then
             begin
-                Result := string(Char($4F1A));
+                Result := variant_char($4F1A, $6703);
             end
             else if normalized_syllable_local = 'de' then
             begin
@@ -107934,7 +108158,7 @@ var
             end
             else if normalized_syllable_local = 'mei' then
             begin
-                Result := string(Char($6CA1));
+                Result := variant_char($6CA1, $6C92);
             end
             else if normalized_syllable_local = 'le' then
             begin
@@ -107979,7 +108203,7 @@ var
                 (text_value = string(Char($53BB))) or
                 (text_value = string(Char($662F))) or
                 (text_value = string(Char($628A))) or
-                (text_value = string(Char($4F1A))) or
+                (text_value = variant_char($4F1A, $6703)) or
                 (text_value = string(Char($4E0D))) or
                 (text_value = string(Char($5F88))) or
                 (text_value = string(Char($66F4))) or
@@ -107988,17 +108212,17 @@ var
                 (text_value = string(Char($8981))) or
                 (text_value = string(Char($80FD))) or
                 (text_value = string(Char($53EF))) or
-                (text_value = string(Char($5E94))) or
-                (text_value = string(Char($5C06))) or
+                (text_value = variant_char($5E94, $61C9)) or
+                (text_value = variant_char($5C06, $5C07)) or
                 (text_value = string(Char($6B63))) or
                 (text_value = string(Char($53C8))) or
-                (text_value = string(Char($8FD8))) or
+                (text_value = variant_char($8FD8, $9084)) or
                 (text_value = string(Char($90FD))) or
                 (text_value = string(Char($5C31))) or
-                (text_value = string(Char($522B))) or
+                (text_value = variant_char($522B, $5225)) or
                 (text_value = string(Char($4E5F))) or
                 (text_value = string(Char($5728))) or
-                (text_value = string(Char($6CA1))) or
+                (text_value = variant_char($6CA1, $6C92)) or
                 (text_value = string(Char($90FD))) or
                 (text_value = string(Char($5565))) or
                 (text_value = string(Char($7684))) or
@@ -108014,7 +108238,7 @@ var
             Result := (text_value = string(Char($662F))) or
                 (text_value = string(Char($7684))) or
                 (text_value = string(Char($628A))) or
-                (text_value = string(Char($4F1A)));
+                (text_value = variant_char($4F1A, $6703));
         end;
 
         function is_place_noun_unit_local(const unit_value: string): Boolean;
@@ -108022,28 +108246,28 @@ var
             Result := (unit_value = string(Char($5BB6))) or
                 (unit_value = string(Char($5E97))) or
                 (unit_value = string(Char($5C4B))) or
-                (unit_value = string(Char($697C))) or
+                (unit_value = variant_char($697C, $6A13)) or
                 (unit_value = string(Char($57CE))) or
                 (unit_value = string(Char($6751))) or
-                (unit_value = string(Char($53BF))) or
+                (unit_value = variant_char($53BF, $7E23)) or
                 (unit_value = string(Char($5E02))) or
                 (unit_value = string(Char($6821))) or
                 (unit_value = string(Char($9662))) or
-                (unit_value = string(Char($5382))) or
-                (unit_value = string(Char($9986))) or
+                (unit_value = variant_char($5382, $5EE0)) or
+                (unit_value = variant_char($9986, $9928)) or
                 (unit_value = string(Char($7AD9))) or
                 (unit_value = string(Char($5C40))) or
                 (unit_value = string(Char($6240))) or
-                (unit_value = string(Char($56ED))) or
-                (unit_value = string(Char($533A))) or
+                (unit_value = variant_char($56ED, $5712)) or
+                (unit_value = variant_char($533A, $5340)) or
                 (unit_value = string(Char($5708))) or
                 (unit_value = string(Char($8DEF))) or
                 (unit_value = string(Char($8857))) or
-                (unit_value = string(Char($95E8))) or
+                (unit_value = variant_char($95E8, $9580)) or
                 (unit_value = string(Char($5BA4))) or
                 (unit_value = string(Char($623F))) or
-                (unit_value = string(Char($5385))) or
-                (unit_value = string(Char($573A))) or
+                (unit_value = variant_char($5385, $5EF3)) or
+                (unit_value = variant_char($573A, $5834)) or
                 (unit_value = string(Char($53F8)));
         end;
 
@@ -108107,20 +108331,20 @@ var
             const text_value_local: string): Boolean;
         begin
             Result :=
-                SameText(text_value_local, string(Char($65F6)) +
-                string(Char($95F4))) or
-                SameText(text_value_local, string(Char($65F6)) +
+                SameText(text_value_local, variant_char($65F6, $6642) +
+                variant_char($95F4, $9593)) or
+                SameText(text_value_local, variant_char($65F6, $6642) +
                 string(Char($5019))) or
                 SameText(text_value_local, string(Char($671F)) +
-                string(Char($95F4))) or
-                SameText(text_value_local, string(Char($8FC7)) +
+                variant_char($95F4, $9593)) or
+                SameText(text_value_local, variant_char($8FC7, $904E) +
                 string(Char($7A0B))) or
-                SameText(text_value_local, string(Char($9636)) +
+                SameText(text_value_local, variant_char($9636, $968E) +
                 string(Char($6BB5))) or
-                SameText(text_value_local, string(Char($65F6)) +
+                SameText(text_value_local, variant_char($65F6, $6642) +
                 string(Char($523B))) or
                 SameText(text_value_local, string(Char($77AC)) +
-                string(Char($95F4))) or
+                variant_char($95F4, $9593)) or
                 SameText(text_value_local, string(Char($65E9)) +
                 string(Char($6668))) or
                 SameText(text_value_local, string(Char($591C)) +
@@ -108133,7 +108357,7 @@ var
                 string(Char($5348))) or
                 SameText(text_value_local, string(Char($5E74)) +
                 string(Char($4EE3))) or
-                SameText(text_value_local, string(Char($65F6)) +
+                SameText(text_value_local, variant_char($65F6, $6642) +
                 string(Char($4EE3)));
         end;
 
@@ -108995,7 +109219,7 @@ var
                 if (not Result) or (candidate_weight_local > out_weight) then
                 begin
                     Result := True;
-                    out_text := candidate_text_local + string(Char($91CC));
+                    out_text := candidate_text_local + variant_char($91CC, $88E1);
                     out_weight := candidate_weight_local;
                 end;
             end;
@@ -111618,7 +111842,7 @@ var
             begin
                 Result := is_pronoun_fixed_single_text_local(local_fixed_text) or
                     is_bridge_fixed_single_text_local(local_fixed_text) or
-                    (local_fixed_text = string(Char($6CA1))) or
+                    (local_fixed_text = variant_char($6CA1, $6C92)) or
                     (local_fixed_text = string(Char($4E00))) or
 
                     (local_fixed_text = string(Char($4E5F))) or
@@ -113423,34 +113647,6 @@ var
             best_token_local: string;
             out_idx_local: Integer;
 
-            function is_initial_final_compatible_local(
-                const initial_value: string; const final_value: string): Boolean;
-            begin
-                if not nc_is_pinyin_spelling_helper_compatible(initial_value,
-                    final_value) then
-                begin
-                    Exit(False);
-                end;
-
-                if (initial_value = 'zh') or (initial_value = 'ch') or
-                    (initial_value = 'sh') or (initial_value = 'r') or
-                    (initial_value = 'z') or (initial_value = 'c') or
-                    (initial_value = 's') then
-                begin
-                    if (final_value = 'ia') or (final_value = 'in') or
-                        (final_value = 'ing') or (final_value = 'iu') or
-                        (final_value = 'ie') or (final_value = 'ian') or
-                        (final_value = 'iang') or (final_value = 'iao') or
-                        (final_value = 'iong') or (final_value = 'ue') or
-                        (final_value = 've') or (final_value = 'van') or
-                        (final_value = 'vn') then
-                    begin
-                        Exit(False);
-                    end
-                end;
-                Result := True;
-            end;
-
             function is_valid_single_syllable_local(
                 const value: string): Boolean;
             var
@@ -113492,7 +113688,7 @@ var
                         High(c_finals_local) do
                     begin
                         if (final_value_local = c_finals_local[final_idx_local]) and
-                            is_initial_final_compatible_local(
+                            nc_is_pinyin_initial_final_compatible(
                             c_initials_local[initial_idx_local],
                             final_value_local) then
                         begin
@@ -115440,6 +115636,31 @@ var
         end;
     end;
 
+    // A phrase the short-phrase stage wrote for the previous input is a guess
+    // at that input as a whole, not the head of a longer one. Kept in front
+    // with the next letters as its comment, it went above the word being
+    // typed (有人有 + "y" above 游刃有余, 或破开 + "l" above 活泼开朗: 22 of
+    // the 3,797 keys before the last one, typing 400 words of three and four
+    // characters), so the previous key's candidates are reused without it.
+    function is_previous_short_phrase_local(const text: string): Boolean;
+    var
+        phrase_idx_local: Integer;
+    begin
+        Result := False;
+        if (previous_lookup_key = '') or
+            (Pos(#0 + previous_lookup_key + #0, m_short_phrase_key) <= 0) then
+        begin
+            Exit;
+        end;
+        for phrase_idx_local := 0 to High(m_short_phrase_texts) do
+        begin
+            if m_short_phrase_texts[phrase_idx_local] = text then
+            begin
+                Exit(True);
+            end;
+        end;
+    end;
+
     function try_reuse_incremental_partial_tail_candidates_local(
         out out_candidates: TncCandidateList;
         const allow_complete_exact_tail: Boolean;
@@ -115501,7 +115722,8 @@ var
                 previous_text_local);
             if (previous_text_local = '') or
                 (text_unit_count_local < min_text_unit_count) or
-                (text_unit_count_local >= Length(current_syllables_local)) then
+                (text_unit_count_local >= Length(current_syllables_local)) or
+                is_previous_short_phrase_local(previous_text_local) then
             begin
                 Continue;
             end;
@@ -115601,7 +115823,8 @@ var
             normalized_comment_local := normalize_pinyin_text(Trim(
                 candidate_local.comment));
             if (candidate_local.display_kind <> cdk_lm_compound) or
-                (get_candidate_text_unit_count(Trim(candidate_local.text)) <> 4)
+                (get_candidate_text_unit_count(Trim(candidate_local.text)) <> 4) or
+                is_previous_short_phrase_local(Trim(candidate_local.text))
             then
             begin
                 Exit;
@@ -115634,7 +115857,8 @@ var
             normalized_comment_local := normalize_pinyin_text(Trim(
                 candidate_local.comment));
             if (candidate_local.display_kind <> cdk_lm_compound) or
-                (get_candidate_text_unit_count(Trim(candidate_local.text)) <> 3)
+                (get_candidate_text_unit_count(Trim(candidate_local.text)) <> 3) or
+                is_previous_short_phrase_local(Trim(candidate_local.text))
             then
             begin
                 Exit;
@@ -118919,21 +119143,21 @@ var
                 function is_extended_function_prefix_text_local(
                     const text_value_local: string): Boolean;
                 begin
-                    Result := (text_value_local = string(Char($5BF9))) or
-                        (text_value_local = string(Char($4ECE))) or
+                    Result := (text_value_local = variant_char($5BF9, $5C0D)) or
+                        (text_value_local = variant_char($4ECE, $5F9E)) or
                         (text_value_local = string(Char($5411))) or
-                        (text_value_local = string(Char($4E0E))) or
+                        (text_value_local = variant_char($4E0E, $8207)) or
                         (text_value_local = string(Char($90FD))) or
-                        (text_value_local = string(Char($8FD8))) or
+                        (text_value_local = variant_char($8FD8, $9084)) or
                         (text_value_local = string(Char($624D))) or
                         (text_value_local = string(Char($5C31))) or
                         (text_value_local = string(Char($53EA))) or
-                        (text_value_local = string(Char($522B))) or
+                        (text_value_local = variant_char($522B, $5225)) or
                         (text_value_local = string(Char($5DF2))) or
-                        (text_value_local = string(Char($5C06))) or
+                        (text_value_local = variant_char($5C06, $5C07)) or
                         (text_value_local = string(Char($53EF))) or
                         (text_value_local = string(Char($60F3))) or
-                        (text_value_local = string(Char($65E0))) or
+                        (text_value_local = variant_char($65E0, $7121)) or
                         (text_value_local = string(Char($975E))) or
                         (text_value_local = string(Char($672A))) or
                         (text_value_local = string(Char($4ECD))) or
@@ -118949,8 +119173,8 @@ var
                         (text_value_local = string(Char($597D))) or
                         (text_value_local = string(Char($5982))) or
                         (text_value_local = string(Char($633A))) or
-                        (text_value_local = string(Char($8F83))) or
-                        (text_value_local = string(Char($6781)));
+                        (text_value_local = variant_char($8F83, $8F03)) or
+                        (text_value_local = variant_char($6781, $6975));
                 end;
 
                 function is_function_prefix_text_local(
@@ -118960,7 +119184,7 @@ var
                         (text_value_local = string(Char($7684))) or
                         (text_value_local = string(Char($4E86))) or
                         (text_value_local = string(Char($5728))) or
-                        (text_value_local = string(Char($4E8E))) or
+                        (text_value_local = variant_char($4E8E, $65BC)) or
                         (text_value_local = string(Char($4E5F))) or
                         (text_value_local = string(Char($548C))) or
                         (text_value_local = string(Char($4E0D))) or
@@ -118971,14 +119195,14 @@ var
                         (text_value_local = string(Char($6700))) or
 
                         (text_value_local = string(Char($66F4))) or
-                        (text_value_local = string(Char($6CA1))) or
+                        (text_value_local = variant_char($6CA1, $6C92)) or
                         (text_value_local = string(Char($8981))) or
-                        (text_value_local = string(Char($4F1A))) or
+                        (text_value_local = variant_char($4F1A, $6703)) or
                         (text_value_local = string(Char($80FD))) or
                         (text_value_local = string(Char($628A))) or
                         (text_value_local = string(Char($88AB))) or
-                        (text_value_local = string(Char($8BA9))) or
-                        (text_value_local = string(Char($7ED9)));
+                        (text_value_local = variant_char($8BA9, $8B93)) or
+                        (text_value_local = variant_char($7ED9, $7D66));
                 end;
             begin
                 Result := False;
@@ -120455,7 +120679,7 @@ var
                     (text_value_local = string(Char($7684))) or
                     (text_value_local = string(Char($4E86))) or
                     (text_value_local = string(Char($5427))) or
-                    (text_value_local = string(Char($5417)));
+                    (text_value_local = variant_char($5417, $55CE));
             end;
 
             function expand_function_tail_path_local(
@@ -137107,11 +137331,271 @@ begin
         (m_visible_candidates_cache_page_size = page_size);
 end;
 
-procedure TncEngine.cache_visible_candidate_page(const candidates: TncCandidateList;
-    const source_indices: TArray<Integer>; const page_size: Integer);
+// A word the keys only begin (电脑系统 or 电脑包 for "diannao", 先生 for
+// "xian"): its first characters already read every key, and the rest is a
+// guess at what comes next, which is the Tab area's. Each character reads a
+// group of keys: a syllable, an initial standing for one ("dn" for 电脑), or
+// at the end the beginning of a syllable still being typed (体重秤 for
+// "tizhongchen"). A text that reads the keys to its last character stays,
+// and so does anything the check cannot read (fuzzy or corrected spellings,
+// letters, a partial with the rest of the keys as its comment).
+function TncEngine.is_predictive_longer_candidate(const candidate: TncCandidate;
+    const query: string): Boolean;
+const
+    c_longest_group = 6;
+var
+    text, group, reading: string;
+    units, letters, idx, start, stop, width: Integer;
+    reach: TArray<TArray<Boolean>>;
+    readings: TArray<string>;
+    reachable, may_begin: Boolean;
+
+    function is_group(const group: string; const last: Boolean): Boolean;
+    begin
+        Result := ((group <> 'r') and nc_is_canonical_pinyin_syllable(group)) or
+            nc_is_pinyin_initial(group) or
+            (last and nc_canonical_pinyin_syllable_begins_with(group));
+    end;
+
+    function min_groups: Integer;
+    var
+        best: TArray<Integer>;
+        from_idx, to_idx: Integer;
+    begin
+        SetLength(best, letters + 1);
+        for to_idx := 1 to letters do best[to_idx] := MaxInt;
+        best[0] := 0;
+        for from_idx := 0 to letters - 1 do
+        begin
+            if best[from_idx] = MaxInt then Continue;
+            for to_idx := from_idx + 1 to Min(letters, from_idx + c_longest_group) do
+                if (best[from_idx] + 1 < best[to_idx]) and
+                    is_group(Copy(query, from_idx + 1, to_idx - from_idx), to_idx = letters) then
+                    best[to_idx] := best[from_idx] + 1;
+        end;
+        Result := best[letters];
+    end;
+begin
+    Result := False;
+    if (m_dictionary = nil) or (candidate.source = cs_quick_input) or
+        (Trim(candidate.comment) <> '') then
+        Exit;
+    text := Trim(candidate.text);
+    units := Length(text);
+    letters := Length(query);
+    if (units < 2) or (letters = 0) then
+        Exit;
+    for idx := 1 to letters do
+        if not CharInSet(query[idx], ['a'..'z']) then
+            Exit;
+    for idx := 1 to units do
+        if not (((text[idx] >= #$4E00) and (text[idx] <= #$9FFF)) or
+            ((text[idx] >= #$3400) and (text[idx] <= #$4DBF))) then
+            Exit;
+    if query <> m_longer_check_query then
+    begin
+        m_longer_check_query := query;
+        m_longer_check_min_groups := min_groups;
+        SetLength(m_longer_check_groups, letters);
+        SetLength(m_longer_check_initials, letters);
+        for start := 0 to letters - 1 do
+        begin
+            width := Min(c_longest_group, letters - start);
+            SetLength(m_longer_check_groups[start], width);
+            SetLength(m_longer_check_initials[start], width);
+            for stop := 1 to width do
+            begin
+                m_longer_check_groups[start][stop - 1] := Copy(query, start + 1, stop);
+                m_longer_check_initials[start][stop - 1] :=
+                    nc_is_pinyin_initial(m_longer_check_groups[start][stop - 1]);
+            end;
+        end;
+        if m_longer_check_verdicts = nil then
+            m_longer_check_verdicts := TDictionary<string, Boolean>.Create
+        else
+            m_longer_check_verdicts.Clear;
+    end;
+    // Its first units - 1 characters must be able to read the keys at all.
+    if (m_longer_check_min_groups = MaxInt) or (units - 1 < m_longer_check_min_groups) then
+        Exit;
+    if m_longer_check_verdicts.TryGetValue(text, Result) then
+        Exit;
+
+    // reach[idx][stop]: the first idx characters read the first stop keys,
+    // each character a group (as typed, or at the end or as an initial the
+    // beginning of a longer syllable it reads).
+    SetLength(reach, units + 1, letters + 1);
+    reach[0][0] := True;
+    for idx := 0 to units - 1 do
+    begin
+        reachable := False;
+        for start := 0 to letters - 1 do
+            if reach[idx][start] then
+            begin
+                reachable := True;
+                Break;
+            end;
+        if not reachable then
+            Break;
+        readings := m_dictionary.get_single_char_readings(text[idx + 1]);
+        for start := 0 to letters - 1 do
+        begin
+            if not reach[idx][start] then Continue;
+            for stop := start + 1 to Min(letters, start + c_longest_group) do
+            begin
+                if reach[idx + 1][stop] then Continue;
+                group := m_longer_check_groups[start][stop - start - 1];
+                may_begin := (stop = letters) or m_longer_check_initials[start][stop - start - 1];
+                for reading in readings do
+                    if ((reading = group) and (group <> 'r')) or
+                        (may_begin and (reading <> group) and reading.StartsWith(group)) then
+                    begin
+                        reach[idx + 1][stop] := True;
+                        Break;
+                    end;
+            end;
+        end;
+    end;
+    if not reach[units][letters] then
+        for idx := 1 to units - 1 do
+            if reach[idx][letters] then
+            begin
+                Result := True;
+                Break;
+            end;
+    m_longer_check_verdicts.Add(text, Result);
+end;
+
+// A completion whose reading takes the keys only by taking a complete
+// syllable as the beginning of a longer one: 螺线管 (luo xian guan) for
+// "luoxia", where 落霞与孤鹜齐飞 reads luo xia. Its own pinyin is cut into one
+// syllable a character (every way it can be); it misreads the keys when it
+// can be cut and no cut has a syllable boundary where the keys end. The
+// characters' readings in the dictionary are not enough: 识 has no zhi there,
+// 标识符 has. Anything that cannot be cut so (letters, erhua) misreads
+// nothing.
+function TncEngine.misreads_typed_keys(const text, pinyin, query: string): Boolean;
+const
+    c_longest_syllable = 6;
+var
+    units, letters, keys, count, start, stop, idx: Integer;
+    ahead, behind: TArray<TArray<Boolean>>;
+    // 0 not asked yet, 1 a syllable, 2 none; by start and length.
+    known: TArray<Byte>;
+
+    function is_syllable(const from_idx, to_idx: Integer): Boolean;
+    var
+        slot: Integer;
+        syllable: string;
+    begin
+        slot := from_idx * c_longest_syllable + (to_idx - from_idx - 1);
+        if known[slot] = 0 then
+        begin
+            syllable := Copy(pinyin, from_idx + 1, to_idx - from_idx);
+            if (syllable <> 'r') and nc_is_canonical_pinyin_syllable(syllable) then
+                known[slot] := 1
+            else
+                known[slot] := 2;
+        end;
+        Result := known[slot] = 1;
+    end;
+begin
+    Result := False;
+    units := Length(text);
+    letters := Length(pinyin);
+    keys := Length(query);
+    if (units = 0) or (keys = 0) or (keys >= letters) or (letters < units) or
+        (letters > units * c_longest_syllable) or (Copy(pinyin, 1, keys) <> query) then
+        Exit;
+    for idx := 1 to units do
+        if not (((text[idx] >= #$4E00) and (text[idx] <= #$9FFF)) or
+            ((text[idx] >= #$3400) and (text[idx] <= #$4DBF))) then
+            Exit;
+    for idx := 1 to letters do
+        if not CharInSet(pinyin[idx], ['a'..'z']) then
+            Exit;
+    // ahead[count][stop]: the first stop letters are count syllables;
+    // behind[count][start]: the letters from start on are count syllables.
+    SetLength(known, letters * c_longest_syllable);
+    SetLength(ahead, units + 1, letters + 1);
+    SetLength(behind, units + 1, letters + 1);
+    ahead[0][0] := True;
+    for count := 0 to units - 1 do
+        for start := 0 to letters - 1 do
+            if ahead[count][start] then
+                for stop := start + 1 to Min(letters, start + c_longest_syllable) do
+                    if is_syllable(start, stop) then
+                        ahead[count + 1][stop] := True;
+    if not ahead[units][letters] then
+        Exit;
+    behind[0][letters] := True;
+    for count := 0 to units - 1 do
+        for stop := letters downto 1 do
+            if behind[count][stop] then
+                for start := Max(0, stop - c_longest_syllable) to stop - 1 do
+                    if is_syllable(start, stop) then
+                        behind[count + 1][start] := True;
+    for count := 1 to units - 1 do
+        if ahead[count][keys] and behind[units - count][keys] then
+            Exit;
+    Result := True;
+end;
+
+// The engine's own tables write simplified characters (对, 从, 让 for "dui",
+// "cong", "rang"; nc_char_lm_traditional). In the traditional variant every
+// character traditional text never writes takes its traditional form before
+// a page is shown, in the candidate behind the entry as well (its text and
+// segment path), so that selecting, committing and learning see what was
+// shown. An entry that then repeats one before it goes.
+procedure TncEngine.convert_page_to_traditional(var candidates: TncCandidateList;
+    var source_indices: TArray<Integer>);
+var
+    idx, other, count, source: Integer;
+    text: string;
+    repeated: Boolean;
+begin
+    count := 0;
+    for idx := 0 to High(candidates) do
+    begin
+        text := nc_simplified_to_traditional(candidates[idx].text);
+        repeated := False;
+        if text <> candidates[idx].text then
+        begin
+            source := source_indices[idx];
+            if (source >= 0) and (source < Length(m_candidates)) and
+                (m_candidates[source].text = candidates[idx].text) then
+            begin
+                m_candidates[source].text := text;
+                if source < Length(m_candidate_segment_paths) then
+                    m_candidate_segment_paths[source] :=
+                        nc_simplified_to_traditional(m_candidate_segment_paths[source]);
+            end;
+            candidates[idx].text := text;
+        end;
+        for other := 0 to count - 1 do
+            if (candidates[other].text = text) and
+                (candidates[other].comment = candidates[idx].comment) then
+            begin
+                repeated := True;
+                Break;
+            end;
+        if repeated then
+            Continue;
+        candidates[count] := candidates[idx];
+        source_indices[count] := source_indices[idx];
+        Inc(count);
+    end;
+    SetLength(candidates, count);
+    SetLength(source_indices, count);
+end;
+
+procedure TncEngine.cache_visible_candidate_page(var candidates: TncCandidateList;
+    var source_indices: TArray<Integer>; const page_size: Integer);
 begin
     if Length(candidates) <> Length(source_indices) then
         raise EArgumentException.Create('Visible candidate/source count mismatch');
+    if m_config.dictionary_variant = dv_traditional then
+        convert_page_to_traditional(candidates, source_indices);
     m_visible_candidates_cache := Copy(candidates);
     m_visible_candidate_source_indices_cache := Copy(source_indices);
     m_visible_candidates_cache_composition_text := m_composition_text;
@@ -137672,7 +138156,21 @@ begin
         request.candidates[idx].prefix_anchored := pool[idx].prefix_anchored;
         request.candidates[idx].feedback_count := pool[idx].feedback_count;
         request.candidates[idx].feedback_reject_count := pool[idx].feedback_reject_count;
+        request.candidates[idx].vertical_layer_kind := pool[idx].vertical_layer_kind;
     end;
+    // Only a challenger that misreads the keys against an incumbent that reads
+    // them is held back, and a challenger whose first characters are a word of
+    // the typed syllables (anchored) reads them.
+    if (m_config.pinyin_input_scheme = pis_full_pinyin) and (not is_fuzzy_pinyin_active) and
+        not misreads_typed_keys(request.candidates[incumbent].text,
+        StringReplace(LowerCase(pool[incumbent].full_pinyin), '''', '', [rfReplaceAll]),
+        m_one_key_completion_query_prefix) then
+        for idx := 0 to High(pool) do
+            if (idx <> incumbent) and not pool[idx].prefix_anchored then
+                request.candidates[idx].misreads_typed_keys := misreads_typed_keys(
+                    request.candidates[idx].text,
+                    StringReplace(LowerCase(pool[idx].full_pinyin), '''', '', [rfReplaceAll]),
+                    m_one_key_completion_query_prefix);
     // The user's accept and reject records protect the incumbent as in the
     // established ranker; without an eligible challenger nothing can change.
     idx := 0;
@@ -138002,9 +138500,31 @@ const
     // one a further phrase may lie in the two models' judgement (nats). On the
     // development set the further phrases shown without a limit were the
     // wanted one in 3 to 8% of the cases; within 2 nats in 14 to 20%, and of
-    // those between 2 and 3 nats 4 in 107.
+    // those between 2 and 3 nats 4 in 107. Within 1 nat (the user's choice
+    // of 2026-10-22: pieced phrases "不要出现", not only not first) about half
+    // of the further phrases that were not the clause go (given whole: 743 ->
+    // 377 on the validation clauses, 1,021 -> 503 on the chat clauses,
+    // without a context), and a third of those that were (249 -> 158, 215 ->
+    // 129).
     c_shown_phrases = 3;
-    c_shown_margin = 2.0;
+    c_shown_margin = 1.0;
+    // A further phrase that is a phrase shown before it with one character
+    // swapped for another of its syllable, where that character is a word of
+    // its own more than c_swap_deficit below the syllable's best character
+    // (基础涩 behind 基础色: 涩 2.9 nats below 色), is shown only this close
+    // behind it: without a context the LM tells such homophones apart poorly.
+    // A swap alone says nothing: on the development clauses one in four of
+    // the swaps beyond 1 nat was the clause (哪里的话 behind 那里的话, 品牌内裤
+    // behind 品牌内库), and with them the first three lost 1 clause in 100;
+    // of those with a deficit above 2 none was.
+    c_swap_margin = 1.0;
+    c_swap_deficit = 2.0;
+    // A further phrase whose word of one character lies this far below the
+    // syllable's best character after the words before it (候选例: after
+    // 这个词没有出现在候选 the LM puts 例 3.6 nats below 理) is not shown.
+    c_max_char_deficit = 3.0;
+    // The texts of one call.
+    c_max_texts = 256;
     // With nothing before the input (no context, or one that ended with the
     // sentence before it) the shared LM reads a draft as the beginning of a
     // text, where it likes literary readings: "she zhi zhong" as 射之中
@@ -138018,6 +138538,23 @@ const
     // and cost from 1.0 on. With a context it cost more than it gave.
     c_strong_word_weight = 1000;
     c_strong_word_bonus = 0.8;
+    // Scored so, a further draft can stand only as a clause of its own: the
+    // comma behind it lifts it this much more than it lifts the first draft
+    // (射之中 behind 设置中: 0.26 nats behind with the comma, 4.44 without;
+    // the bonus is in both), and it is not shown. Typed key by key it took
+    // 14 further phrases off the pages of the validation clauses, none of
+    // them the clause, and 31 off those of 5,000 chat clauses, 5 of them the
+    // clause; at 3 nats 4 more chat clauses lost theirs.
+    c_max_comma_lift = 4.0;
+    // The first draft too, where it lies this far behind the best draft
+    // without the comma: it reads as no beginning of anything, only as a
+    // clause of its own (经征集 for "jingzhengji", 6.5 nats behind 竞争激; 征集
+    // carries the bonus). It gives its place to the next draft by the comma
+    // that lies within this of the best one. Of the context-free stage runs
+    // on the validation and chat clauses, 22 had such a first draft and 1
+    // of them was the clause. A limit of 4 nats would have taken as many
+    // clauses as it gave (13 first drafts were the clause, 13 next ones).
+    c_max_plain_gap = 6.0;
     // The parser keeps one reading of the letters; where they also read as
     // the same number of syllables another way ("henganjing": heng an jing,
     // and hen gan jing for 很干净), the drafts of that reading join the
@@ -138029,6 +138566,21 @@ var
     words: TArray<TArray<TArray<string>>>;
     word_weights: TArray<TArray<TArray<Integer>>>;
     strong_chars, draft_readings: TArray<Integer>;
+    draft_parts: TArray<TArray<Integer>>;
+    deficits: TArray<Single>;
+    // For the debug text: the character the LM preferred at a draft's weakest boundary.
+    deficit_chars: TArray<string>;
+    vouched: TArray<Boolean>;
+    part_texts: TArray<string>;
+    part_index: TDictionary<string, Integer>;
+    prefix: string;
+    evidence: TncPairPathEvidenceList;
+    query_model: IncCharLmQuery;
+    query_chars, asked: TArray<string>;
+    query_logp: TArray<Single>;
+    next_indices: TArray<Integer>;
+    next_base, slot, saved_reading: Integer;
+    boundary_key: string;
     looked_up: TArray<TArray<Boolean>>;
     readings: TArray<TArray<string>>;
     reading_words: TArray<TArray<TArray<TArray<string>>>>;
@@ -138036,9 +138588,13 @@ var
     reading_looked_up: TArray<TArray<TArray<Boolean>>>;
     reading_cuts: TArray<TArray<TArray<Integer>>>;
     items: TncCandidateList;
-    scores: TArray<Single>;
+    scores, plain_scores, corrected_scores: TArray<Single>;
+    judged: Boolean;
+    best_plain: Single;
     order: TArray<Integer>;
     context, lm_context, key, draft, corrected, aligned, spelled, top_text: string;
+    longer_text, longer_reading: string;
+    longer_weight: Integer;
     validated: TncValidatedRepairPath;
     gain, lead, corrected_gap, behind: Single;
     alternatives: string;
@@ -138092,24 +138648,44 @@ var
     end;
 
     // A draft with the characters of its words of the highest weight (the
-    // most such words when cuts give the same text).
-    procedure add_draft(const text: string; const strong_count: Integer);
-    var k: Integer;
+    // most such words when cuts give the same text), and the cut it came from.
+    procedure add_draft(const text: string; const strong_count: Integer;
+        const parts: TArray<Integer> = nil);
+    var k, part, position: Integer;
+        trusted: TArray<Boolean>;
     begin
         if (Length(text) <> units) or (Length(drafts) >= c_max_drafts) then Exit;
         for k := 0 to High(drafts) do
             if drafts[k] = text then
             begin
                 strong_chars[k] := Max(strong_chars[k], strong_count);
+                if (Length(draft_parts[k]) = 0) and (Length(parts) > 1) then
+                    draft_parts[k] := parts;
                 Exit;
             end;
         // A word stored under a flattened key can read differently from the
-        // syllables typed ("jia" "nan" against a word spelled "jian" "an").
+        // syllables typed ("jia" "nan" against a word spelled "jian" "an"),
+        // so a character must read its syllable by the dictionary's rows of
+        // single characters, unless it lies in a word of the cut whose key
+        // splits into its syllables one way only: 弄 has only nong there,
+        // and 弄堂里 was no draft for "longtangli".
+        SetLength(trusted, units);
+        position := 0;
+        for part := 0 to High(parts) do
+        begin
+            if (parts[part] > 1) and
+                nc_pinyin_splits_one_way(span_key(position, parts[part]), parts[part]) then
+                for k := position to position + parts[part] - 1 do trusted[k] := True;
+            Inc(position, parts[part]);
+        end;
         for k := 0 to units - 1 do
-            if not m_dictionary.single_char_matches_pinyin(keys[k], text[k + 1]) then Exit;
+            if not trusted[k] and
+                not m_dictionary.single_char_matches_pinyin(keys[k], text[k + 1]) then Exit;
         drafts := drafts + [text];
         strong_chars := strong_chars + [strong_count];
         draft_readings := draft_readings + [reading];
+        if Length(parts) > 1 then draft_parts := draft_parts + [parts]
+        else draft_parts := draft_parts + [nil];
     end;
 
     // The other ways of reading the input as the same number of syllables, in
@@ -138136,6 +138712,71 @@ var
             if (syllable <> 'r') and nc_is_canonical_pinyin_syllable(syllable) then
                 collect_readings(position + size, parts + [syllable]);
         end;
+    end;
+
+    // Whether a text of the input's length reads as the syllables typed in one
+    // of the readings; with still_typing, whether instead its last character
+    // reads a longer syllable that begins with the last one typed (秤 cheng
+    // for "chen", 觉 jue for "ju"): the input completed to a word.
+    function reads_as_typed(const text: string; const still_typing: Boolean): Boolean;
+    const
+        // What a syllable can grow by into another one, as the keys go on.
+        c_tails: array[0..31] of string = ('a', 'e', 'g', 'i', 'n', 'o', 'r', 'u',
+            'v', 'ai', 'an', 'ao', 'ei', 'en', 'ie', 'in', 'iu', 'ng', 'ou', 'ua',
+            'ui', 'un', 'uo', 've', 'ang', 'eng', 'ian', 'iao', 'ing', 'ong', 'uan',
+            'iang');
+    var r, k, t: Integer;
+        longer: string;
+    begin
+        for r := 0 to High(readings) do
+        begin
+            Result := True;
+            for k := 0 to units - 2 do
+                if not m_dictionary.single_char_matches_pinyin(readings[r][k], text[k + 1]) then
+                begin
+                    Result := False;
+                    Break;
+                end;
+            if not Result then Continue;
+            if not still_typing then
+            begin
+                if m_dictionary.single_char_matches_pinyin(readings[r][units - 1], text[units]) then
+                    Exit;
+                Continue;
+            end;
+            for t := 0 to High(c_tails) do
+            begin
+                longer := readings[r][units - 1] + c_tails[t];
+                if nc_is_canonical_pinyin_syllable(longer) and
+                    m_dictionary.single_char_matches_pinyin(longer, text[units]) then Exit;
+            end;
+        end;
+        Result := False;
+    end;
+
+    // Whether the characters of a text from char_index on read as the input
+    // from position on, one syllable each (in reading, joined by #3).
+    function read_longer(const text: string; const position, char_index: Integer;
+        out reading_text: string): Boolean;
+    var
+        size: Integer;
+        syllable, rest: string;
+    begin
+        reading_text := '';
+        if char_index > Length(text) then Exit(position = Length(query));
+        for size := Min(6, Length(query) - position) downto 1 do
+        begin
+            syllable := Copy(query, position + 1, size);
+            if (syllable <> 'r') and nc_is_canonical_pinyin_syllable(syllable) and
+                m_dictionary.single_char_matches_pinyin(syllable, text[char_index]) and
+                read_longer(text, position + size, char_index + 1, rest) then
+            begin
+                reading_text := syllable;
+                if rest <> '' then reading_text := reading_text + #3 + rest;
+                Exit(True);
+            end;
+        end;
+        Result := False;
     end;
 
     // Makes a reading the one the words, cuts and drafts are taken from.
@@ -138209,6 +138850,141 @@ var
                 Inc(strong_count, parts[k]);
             Inc(position, parts[k]);
         end;
+    end;
+
+    // The characters of a text that are words of the highest weight by the
+    // cut of a draft of its length, as cut_text counts them.
+    function strong_count(const index: Integer; const text: string): Integer;
+    var k, i, position, size, r: Integer;
+        span: string;
+    begin
+        Result := 0;
+        position := 0;
+        r := draft_readings[index];
+        for k := 0 to High(draft_parts[index]) do
+        begin
+            size := draft_parts[index][k];
+            span := Copy(text, position + 1, size);
+            if size > 1 then
+                for i := 0 to High(reading_words[r][position][size]) do
+                    if reading_words[r][position][size][i] = span then
+                    begin
+                        if reading_weights[r][position][size][i] >= c_strong_word_weight then
+                            Inc(Result, size);
+                        Break;
+                    end;
+            Inc(position, size);
+        end;
+    end;
+
+    // A draft's words by its cut (none when the cut is not known).
+    function draft_words(const index: Integer): TArray<string>;
+    var k, position: Integer;
+    begin
+        Result := nil;
+        position := 1;
+        for k := 0 to High(draft_parts[index]) do
+        begin
+            Result := Result + [Copy(drafts[index], position, draft_parts[index][k])];
+            Inc(position, draft_parts[index][k]);
+        end;
+    end;
+
+    // How far a draft's words of one character lie below what the LM would
+    // write for their syllables: at each boundary before such a word, the
+    // LM's best character of the syllable's words of one character after the
+    // words before, less the word's own; the largest such gap (0 for a draft
+    // without a known cut). 基础涩: after 基础, 色 is 2.9 nats before 涩.
+    function boundary_deficit(const index: Integer): Single;
+    var
+        words_local: TArray<string>;
+        k, r, at: Integer;
+        prefix_local, best_char: string;
+        own, best: Single;
+    begin
+        Result := 0;
+        if Length(query_logp) = 0 then Exit;
+        words_local := draft_words(index);
+        prefix_local := '';
+        for k := 0 to High(words_local) - 1 do
+        begin
+            prefix_local := prefix_local + words_local[k];
+            if (Length(words_local[k + 1]) <> 1) or
+                not part_index.TryGetValue(IntToStr(draft_readings[index]) + #1 + prefix_local, at) then
+                Continue;
+            own := c_char_lm_no_logp;
+            best := c_char_lm_no_logp;
+            for r := at * c_single_words to (at + 1) * c_single_words - 1 do
+            begin
+                if query_logp[r] <= c_char_lm_no_logp / 2 then Continue;
+                if query_chars[r] = words_local[k + 1] then own := query_logp[r];
+                if query_logp[r] > best then
+                begin
+                    best := query_logp[r];
+                    best_char := query_chars[r];
+                end;
+            end;
+            if (own > c_char_lm_no_logp / 2) and (best - own > Result) then
+            begin
+                Result := best - own;
+                deficit_chars[index] := best_char;
+            end;
+        end;
+    end;
+
+    // Whether a text is a phrase already shown with one character swapped.
+    function swaps_one_shown(const text: string): Boolean;
+    var k, i, differ: Integer;
+    begin
+        for k := 0 to High(shown) do
+            if Length(shown[k]) = Length(text) then
+            begin
+                differ := 0;
+                for i := 1 to Length(text) do
+                    if shown[k][i] <> text[i] then Inc(differ);
+                if differ = 1 then Exit(True);
+            end;
+        Result := False;
+    end;
+
+    // A draft one of whose words does not go with the words before it is no
+    // further phrase to show, unless the lexicon's corpus transitions hold
+    // its path for this input.
+    function implausible(const index: Integer): Boolean;
+    begin
+        Result := (scored > 0) and (index < Length(deficits)) and (not vouched[index]) and
+            (deficits[index] > c_max_char_deficit);
+    end;
+
+    // A draft scored without a context that the comma lifts more than
+    // c_max_comma_lift above the first draft is no further phrase to show.
+    function comma_lifted(const index: Integer): Boolean;
+    begin
+        Result := (scored > 0) and context_free and (index < Length(plain_scores)) and
+            ((real_value(plain_scores[order[0]]) - real_value(plain_scores[index])) -
+            (real_value(scores[order[0]]) - real_value(scores[index])) > c_max_comma_lift);
+    end;
+
+    // The deficit of a draft's text as implausible reads it (0 for a text
+    // that is no draft or whose path the transitions hold).
+    function text_deficit(const text: string): Single;
+    var k: Integer;
+    begin
+        Result := 0;
+        if scored > 0 then
+            for k := 0 to Min(High(drafts), High(deficits)) do
+                if (drafts[k] = text) and not vouched[k] then
+                    Exit(deficits[k]);
+    end;
+
+    // A further phrase within margin of the first: one that swaps a single
+    // character of a phrase shown before it for a doubtful word only within
+    // c_swap_margin.
+    function may_follow(const text: string; const margin: Single): Boolean;
+    begin
+        Result := (margin <= c_shown_margin) and
+            ((margin <= c_swap_margin) or (text_deficit(text) <= c_swap_deficit) or
+            not swaps_one_shown(text));
     end;
 
     procedure show(const text, pinyin: string);
@@ -138289,13 +139065,26 @@ begin
         if m_config.debug_mode then m_short_phrase_debug := '[sphrase skip=pinyin]';
         Exit;
     end;
+    longer_text := '';
+    longer_weight := 0;
     if m_dictionary.lookup_isolated_exact_component(query, items) then
         for index := 0 to High(items) do
-            if (Trim(items[index].comment) = '') and
-                (get_candidate_text_unit_count(Trim(items[index].text)) = units) then
+            if Trim(items[index].comment) <> '' then
+                Continue
+            else if get_candidate_text_unit_count(Trim(items[index].text)) = units then
             begin
                 if m_config.debug_mode then m_short_phrase_debug := '[sphrase skip=entry]';
                 Exit;
+            end
+            else if (Length(Trim(items[index].text)) = units + 1) and
+                (get_candidate_text_unit_count(Trim(items[index].text)) = units + 1) and
+                (units + 1 < c_char_lm_long_min_units) and
+                ((longer_text = '') or (items[index].score > longer_weight)) and
+                read_longer(Trim(items[index].text), 0, 1, spelled) then
+            begin
+                longer_text := Trim(items[index].text);
+                longer_reading := spelled;
+                longer_weight := items[index].score;
             end;
     // The text before the input, as the long repair reads it, and the part
     // of the input the user has already chosen.
@@ -138321,6 +139110,41 @@ begin
         if m_config.debug_mode then m_short_phrase_debug := '[sphrase skip=top]';
         Exit;
     end;
+    // The keys spell a dictionary word of one syllable more, read another
+    // way: "shujuanquan" as shu ju an quan (数据安全) where the parser reads
+    // shu juan quan. The word goes first, as an entry of the input's length
+    // keeps the page; a phrase pieced from the parser's syllables (书卷权)
+    // stood there and the word was not on the page at all. 119 keys of the
+    // dictionary spell such a word and one of them a word of its own length.
+    if longer_text <> '' then
+    begin
+        show(longer_text, longer_reading);
+        if Length(shown) = 0 then Exit;
+        if m_config.debug_mode then m_short_phrase_debug := '[sphrase entry=longer]';
+        complete_limit := 0;
+        place(shown[0], shown_paths[0]);
+        Exit;
+    end;
+    // The parser's reading first, then the others of full pinyin (double
+    // pinyin spells every syllable with its own two keys).
+    readings := [keys];
+    if m_config.pinyin_input_scheme = pis_full_pinyin then collect_readings(0, nil);
+    // A word of the input's length that reads the last syllable as a longer
+    // one stays as well: the word the dictionary completes while the user is
+    // still typing it (体重秤 at "ti zhong chen", on the way to "cheng"; 我感觉 at
+    // "wo gan ju"). It cannot be a draft, and phrases pieced together from
+    // the syllables typed took its place: on 147 of the 3,797 keys before
+    // the last one, typing 400 words of three and four characters (the LM
+    // itself rates 体忠臣 3.5 nats above 体重秤, a rare character). Any other
+    // first candidate whose characters do not read as typed is still
+    // rewritten: leaving all of them in place cost four clauses of five
+    // characters in 5,000.
+    if top_complete and not reads_as_typed(top_text, False) and
+        reads_as_typed(top_text, True) then
+    begin
+        if m_config.debug_mode then m_short_phrase_debug := '[sphrase skip=completion]';
+        Exit;
+    end;
     key := m_composition_text + #0 + m_last_lookup_key + #0 + context;
     if (key = m_short_phrase_key) and (Length(m_short_phrase_texts) > 0) then
     begin
@@ -138333,10 +139157,7 @@ begin
         // dictionary's heaviest words for every way of cutting the input. A
         // word in front of the page follows the keys typed before and is left
         // out, so that typing an input and giving it at once come to the same.
-        // The parser's reading first, then the others of full pinyin (double
-        // pinyin spells every syllable with its own two keys).
-        readings := [keys];
-        if m_config.pinyin_input_scheme = pis_full_pinyin then collect_readings(0, nil);
+        // Every reading of the input gives drafts.
         SetLength(reading_words, Length(readings));
         SetLength(reading_weights, Length(readings));
         SetLength(reading_looked_up, Length(readings));
@@ -138351,7 +139172,7 @@ begin
             for cut_index := 0 to High(cuts) do
             begin
                 draft := cut_text(cuts[cut_index], strong);
-                add_draft(draft, strong);
+                add_draft(draft, strong, cuts[cut_index]);
             end;
         end;
         // A two-word cut also with the next entries of its words, the
@@ -138365,7 +139186,7 @@ begin
                         for other := 0 to swap do
                         begin
                             draft := cut_text(cuts[cut_index], strong, other, swap - other);
-                            add_draft(draft, strong);
+                            add_draft(draft, strong, cuts[cut_index]);
                         end;
             end;
         if Length(drafts) = 0 then
@@ -138395,19 +139216,95 @@ begin
             else lm_context := m_left_context;
             context_free := lm_context = '';
             if context_free then lm_context := c_clause_end;
-            SetLength(ended, Length(drafts));
-            for index := 0 to High(drafts) do ended[index] := drafts[index] + c_clause_end;
-            try
-                scored := m_char_lm.score_texts(lm_context, ended, Length(ended),
-                    128, scores);
-            except
-                scored := 0;
-            end;
-            if (scored = Length(drafts)) and (Length(scores) = Length(drafts)) then
+            // The drafts without the comma join the call: their tokens are
+            // those of the drafts with it, so they cost nothing more.
+            SetLength(ended, 2 * Length(drafts));
+            for index := 0 to High(drafts) do
             begin
+                ended[index] := drafts[index] + c_clause_end;
+                ended[Length(drafts) + index] := drafts[index];
+            end;
+            // And, where the model reads the next characters' scores, the
+            // words before each word of one character in a cut, with the
+            // syllable's characters: whether the word is what the LM would
+            // write for that syllable there.
+            if not Supports(m_char_lm, IncCharLmQuery, query_model) then query_model := nil;
+            part_index := TDictionary<string, Integer>.Create;
+            try
+                saved_reading := reading;
+                next_base := Length(ended);
+                if query_model <> nil then
+                for index := 0 to High(drafts) do
+                begin
+                    part_texts := draft_words(index);
+                    if Length(part_texts) < 2 then Continue;
+                    use_reading(draft_readings[index]);
+                    prefix := '';
+                    for other := 0 to High(part_texts) - 1 do
+                    begin
+                        prefix := prefix + part_texts[other];
+                        boundary_key := IntToStr(reading) + #1 + prefix;
+                        if (Length(part_texts[other + 1]) <> 1) or
+                            part_index.ContainsKey(boundary_key) then Continue;
+                        slot := next_base;
+                        while (slot < Length(ended)) and (ended[slot] <> prefix) do Inc(slot);
+                        if slot = Length(ended) then
+                        begin
+                            if Length(ended) >= c_max_texts then Continue;
+                            ended := ended + [prefix];
+                        end;
+                        part_index.Add(boundary_key, Length(next_indices));
+                        next_indices := next_indices + [slot];
+                        asked := nil;
+                        for swap := 0 to c_single_words - 1 do
+                            asked := asked + [nth_word(Length(prefix), 1, swap)];
+                        query_chars := query_chars + asked;
+                    end;
+                end;
+                use_reading(saved_reading);
+                try
+                    if (Length(next_indices) > 0) and (query_model <> nil) then
+                        scored := query_model.score_texts_query(lm_context, ended, Length(ended), 128,
+                            next_indices, query_chars, c_single_words, scores, query_logp)
+                    else
+                    begin
+                        query_logp := nil;
+                        scored := m_char_lm.score_texts(lm_context, ended, Length(ended), 128, scores);
+                    end;
+                except
+                    scored := 0;
+                end;
+                SetLength(deficits, Length(drafts));
+                SetLength(deficit_chars, Length(drafts));
+                SetLength(vouched, Length(drafts));
+                if (scored = Length(ended)) and (Length(scores) = Length(ended)) then
+                begin
+                    for index := 0 to High(drafts) do
+                        deficits[index] := boundary_deficit(index);
+                    if m_dictionary.get_exact_pair_path_evidence(query, evidence) then
+                        for other := 0 to High(evidence) do
+                        begin
+                            prefix := StringReplace(StringReplace(evidence[other].encoded_path, #3, '',
+                                [rfReplaceAll]), '|', '', [rfReplaceAll]);
+                            for index := 0 to High(drafts) do
+                                if drafts[index] = prefix then vouched[index] := True;
+                        end;
+                end;
+            finally
+                FreeAndNil(part_index);
+            end;
+            if (scored = Length(ended)) and (Length(scores) = Length(ended)) then
+            begin
+                plain_scores := Copy(scores, Length(drafts), Length(drafts));
+                SetLength(scores, Length(drafts));
+                scored := Length(drafts);
                 if context_free then
                     for index := 0 to High(drafts) do
+                    begin
                         scores[index] := real_value(scores[index]) + c_strong_word_bonus * strong_chars[index];
+                        plain_scores[index] := real_value(plain_scores[index]) +
+                            c_strong_word_bonus * strong_chars[index];
+                    end;
                 for index := 0 to High(order) - 1 do
                     for other := index + 1 to High(order) do
                         if scores[order[other]] > scores[order[index]] then
@@ -138416,6 +139313,23 @@ begin
                             order[index] := order[other];
                             order[other] := swap;
                         end;
+                // A first draft that stands only as a clause of its own
+                // gives its place (c_max_plain_gap).
+                if context_free then
+                begin
+                    best_plain := plain_scores[0];
+                    for index := 1 to High(drafts) do
+                        best_plain := Max(best_plain, plain_scores[index]);
+                    if best_plain - plain_scores[order[0]] > c_max_plain_gap then
+                        for index := 1 to High(order) do
+                            if best_plain - plain_scores[order[index]] <= c_max_plain_gap then
+                            begin
+                                swap := order[index];
+                                for other := index downto 1 do order[other] := order[other - 1];
+                                order[0] := swap;
+                                Break;
+                            end;
+                end;
             end
             else
                 scored := 0;
@@ -138443,6 +139357,33 @@ begin
             for index := 0 to High(drafts) do
                 if drafts[index] = corrected then
                     corrected_gap := scores[order[0]] - scores[index];
+        // A text of the correction that was no draft is weighed as a draft:
+        // the shared LM scores it in a call of its own. At first only a text
+        // that turned a word of the draft into what is no word there was
+        // (弄堂里 into 龙堂里: the correction rated it 3.5 nats above the
+        // draft, the shared LM 9.6 below; never putting such a text first lost
+        // two clauses for each one it gained). A character the correction
+        // writes for a word of one character needs the same: 降低嘛 into
+        // 降低码 for "jiangdima", 3.28 nats above the draft by the correction
+        // and 3.62 below by the LM. The call comes on 13 to 15% of the stage
+        // runs.
+        judged := (scored > 0) and (corrected_gap < 0) and (rc = 1) and
+            (Length(corrected) = units) and (corrected <> draft);
+        if judged then
+        begin
+            try
+                if m_char_lm.score_texts(lm_context, [corrected + c_clause_end], 1, 128,
+                    corrected_scores) = 1 then
+                begin
+                    if context_free then
+                        corrected_scores[0] := real_value(corrected_scores[0]) +
+                            c_strong_word_bonus * strong_count(order[0], corrected);
+                    corrected_gap := scores[order[0]] - corrected_scores[0];
+                end;
+            except
+                corrected_gap := -1;
+            end;
+        end;
         if m_config.debug_mode then
         begin
             // The LM's lead of the chosen draft over the page's own phrase,
@@ -138450,46 +139391,89 @@ begin
             lead := 0;
             if top_complete and (scored > 0) and (drafts[0] = top_text) then
                 lead := scores[order[0]] - scores[0];
+            // Each with its gap without the comma after the tilde.
             alternatives := '';
             if scored > 0 then
                 for index := 1 to Min(5, High(order)) do
-                    alternatives := alternatives + Format('%s:%.2f,',
-                        [drafts[order[index]], scores[order[0]] - scores[order[index]]]);
+                    alternatives := alternatives + Format('%s:%.2f/%.2f%s~%.2f,',
+                        [drafts[order[index]], scores[order[0]] - scores[order[index]],
+                        deficits[order[index]], deficit_chars[order[index]],
+                        plain_scores[order[0]] - plain_scores[order[index]]]);
+            if scored > 0 then
+                alternatives := Format('%s/%.2f%s;', [drafts[order[0]], deficits[order[0]],
+                    deficit_chars[order[0]]]) + alternatives;
+            // The chosen draft's cut, with the syllables it was asked with.
+            prefix := '';
+            for index := 0 to High(draft_parts[order[0]]) do
+                prefix := prefix + IntToStr(draft_parts[order[0]][index]);
             m_short_phrase_debug := Format(
-                '[sphrase rc=%d gain=%.2f n=%d lm=%d top=%d lead=%.2f cgap=%.2f alts=%s draft=%s text=%s reading=%d/%d]',
+                '[sphrase rc=%d gain=%.2f n=%d lm=%d top=%d lead=%.2f cgap=%.2f alts=%s draft=%s text=%s reading=%d/%d cut=%s syl=%s judged=%d]',
                 [rc, gain, Length(drafts), scored, Ord(top_complete), lead, corrected_gap,
-                alternatives, draft, corrected, chosen_reading, Length(readings)]);
+                alternatives, draft, corrected, chosen_reading, Length(readings), prefix, spelled,
+                Ord(judged)]);
         end;
         // Without the model's answer nothing is written into the page.
         if rc < 0 then Exit;
         // The correction's text goes first when the model rates it above the
-        // draft. A text that was itself a draft the shared LM rated lower has
-        // both models' judgements: it goes first only when the correction's
-        // gain is larger than the LM's gap (the correction reads "jiu" at the
-        // start of a clause as the adverb whatever follows; the LM, which saw
-        // the whole phrase and its end, held the other reading 5 nats above).
-        // Behind the first phrase come the other one of the two and the LM's
-        // next drafts, each only while it lies within c_shown_margin of the
-        // first by the same sum of margins.
+        // draft. A text the shared LM rated lower (a draft, or one it scored
+        // above) has both models' judgements: it goes first only when the
+        // correction's gain is larger than the LM's gap (the correction reads
+        // "jiu" at the start of a clause as the adverb whatever follows; the
+        // LM, which saw the whole phrase and its end, held the other reading
+        // 5 nats above). Behind the first phrase come the other one of the two
+        // and the LM's next drafts, each only while it lies within
+        // c_shown_margin of the first by the same sum of margins; a text that
+        // was no draft and lost the judgement, only within the LM's own gap
+        // (降低码 lay 0.34 behind 降低嘛 by the sum).
         if (rc = 1) and (Length(corrected) = units) and (gain >= c_min_gain) and
             ((corrected_gap < 0) or (gain > corrected_gap)) then
         begin
             show(corrected, aligned);
-            behind := gain - Max(0, corrected_gap);
-            if behind <= c_shown_margin then show(draft, aligned);
+            // A correction that cannot spell the input did not displace the draft.
+            if Length(shown) > 0 then
+                behind := real_value(gain) - real_value(Max(0, corrected_gap))
+            else
+                behind := 0;
+            if may_follow(draft, behind) then show(draft, aligned);
         end
         else
         begin
             show(draft, aligned);
             behind := 0;
+            if judged then gain := 0;
             if (rc = 1) and (Length(corrected) = units) and
-                (real_value(Max(0, corrected_gap)) - real_value(gain) <= c_shown_margin) then show(corrected, aligned);
+                may_follow(corrected, real_value(Max(0, corrected_gap)) - real_value(gain)) then show(corrected, aligned);
         end;
         if scored > 0 then
             for index := 1 to High(order) do
-                if real_value(behind) + real_value(scores[order[0]]) - real_value(scores[order[index]]) <= c_shown_margin then
+                if may_follow(drafts[order[index]], real_value(behind) + real_value(scores[order[0]]) - real_value(scores[order[index]])) and
+                    not implausible(order[index]) and not comma_lifted(order[index]) then
                     show(drafts[order[index]], reading_pinyin(draft_readings[order[index]]));
         if Length(shown) = 0 then Exit;
+        // A Tab continuation goes on from the input as the beginning of a
+        // sentence, where the comma is wrong: without it the Tab benchmark
+        // had 3887 hits instead of 3754 (with it at half weight about 3830),
+        // and three-character clauses lost 6.7 first choices in a hundred.
+        // So the page keeps the draft scored with the comma, and Tab starts
+        // from the draft the LM prefers without it.
+        m_short_phrase_tab_text := '';
+        m_short_phrase_tab_path := '';
+        if scored > 0 then
+        begin
+            other := 0;
+            for index := 1 to High(drafts) do
+                if plain_scores[index] > plain_scores[other] then other := index;
+            if (other <> order[0]) and (drafts[other] <> shown[0]) then
+            begin
+                validated := build_repair_path(m_dictionary, drafts[other],
+                    reading_pinyin(draft_readings[other]));
+                if validated.exact_path then
+                begin
+                    m_short_phrase_tab_text := drafts[other];
+                    m_short_phrase_tab_path := validated.segment_path;
+                end;
+            end;
+        end;
         m_short_phrase_key := key;
         m_short_phrase_texts := shown;
         m_short_phrase_paths := shown_paths;
@@ -140390,12 +141374,12 @@ begin
         Exit;
     end;
 
-    Result := try_tail_local('zhe', string(Char($7740))) or
+    Result := try_tail_local('zhe', variant_char($7740, $8457)) or
         try_tail_local('de', string(Char($7684))) or
         try_tail_local('le', string(Char($4E86))) or
         try_tail_local('la', string(Char($5566))) or
         try_tail_local('ba', string(Char($5427))) or
-        try_tail_local('ma', string(Char($5417))) or
+        try_tail_local('ma', variant_char($5417, $55CE)) or
         try_tail_local('a', string(Char($554A)));
 end;
 
@@ -143206,10 +144190,10 @@ const
     function is_sentence_particle_unit_for_sort(const unit_value: string): Boolean;
     begin
         Result := (unit_value = string(Char($4E86))) or
-            (unit_value = string(Char($7740))) or
+            (unit_value = variant_char($7740, $8457)) or
 
-            (unit_value = string(Char($8FC7))) or
-            (unit_value = string(Char($5417))) or
+            (unit_value = variant_char($8FC7, $904E)) or
+            (unit_value = variant_char($5417, $55CE)) or
             (unit_value = string(Char($561B))) or
             (unit_value = string(Char($5427))) or
             (unit_value = string(Char($5462))) or
@@ -143270,7 +144254,7 @@ const
         end
         else if normalized_tail_key_local = 'zhe' then
         begin
-            Result := string(Char($7740));
+            Result := variant_char($7740, $8457);
         end
         else if normalized_tail_key_local = 'la' then
         begin
@@ -143282,7 +144266,7 @@ const
         end
         else if normalized_tail_key_local = 'ma' then
         begin
-            Result := string(Char($5417));
+            Result := variant_char($5417, $55CE);
         end
         else if normalized_tail_key_local = 'a' then
         begin
@@ -143684,11 +144668,11 @@ const
         end
         else if normalized_syllable = 'yu' then
         begin
-            Result := string(Char($4E0E));
+            Result := variant_char($4E0E, $8207);
         end
         else if normalized_syllable = 'hui' then
         begin
-            Result := string(Char($4F1A));
+            Result := variant_char($4F1A, $6703);
         end
         else if normalized_syllable = 'de' then
         begin
@@ -143696,11 +144680,11 @@ const
         end
         else if normalized_syllable = 'zhe' then
         begin
-            Result := string(Char($8FD9));
+            Result := variant_char($8FD9, $9019);
         end
         else if normalized_syllable = 'qing' then
         begin
-            Result := string(Char($8BF7));
+            Result := variant_char($8BF7, $8ACB);
         end;
     end;
     procedure prepare_weak_chain_query_cache;
@@ -144419,7 +145403,7 @@ const
         expected_head_text := '';
         if SameText(weak_chain_query_syllables[0].text, 'zhe') then
         begin
-            expected_head_text := string(Char($8FD9));
+            expected_head_text := variant_char($8FD9, $9019);
         end
         else if SameText(weak_chain_query_syllables[0].text, 'na') or
             SameText(weak_chain_query_syllables[0].text, 'nei') then
@@ -145847,32 +146831,6 @@ var
     current_composition_query: Boolean;
     tail_lengths: TArray<Integer>;
 
-    function is_initial_final_compatible_local(const initial_value: string;
-        const final_value: string): Boolean;
-    begin
-        if not nc_is_pinyin_spelling_helper_compatible(initial_value,
-            final_value) then
-        begin
-            Exit(False);
-        end;
-
-        if (initial_value = 'zh') or (initial_value = 'ch') or (initial_value = 'sh') or
-            (initial_value = 'r') or (initial_value = 'z') or (initial_value = 'c') or
-            (initial_value = 's') then
-        begin
-            if (final_value = 'ia') or (final_value = 'in') or (final_value = 'ing') or (final_value = 'iu') or
-                (final_value = 'ie') or (final_value = 'ian') or (final_value = 'iang') or
-                (final_value = 'iao') or (final_value = 'iong') or
-                (final_value = 'ue') or (final_value = 've') or (final_value = 'van') or
-                (final_value = 'vn') then
-            begin
-                Exit(False);
-            end;
-        end;
-
-        Result := True;
-    end;
-
     procedure ensure_single_syllable_prefix_set;
     var
         initial_idx: Integer;
@@ -145904,7 +146862,7 @@ var
         begin
             for final_idx := Low(c_finals_local) to High(c_finals_local) do
             begin
-                if is_initial_final_compatible_local(c_initials_local[initial_idx],
+                if nc_is_pinyin_initial_final_compatible(c_initials_local[initial_idx],
                     c_finals_local[final_idx]) then
                 begin
                     add_syllable_prefixes(c_initials_local[initial_idx] +
@@ -145923,8 +146881,10 @@ var
     var
         lower_value: string;
     begin
-        // True when the text is a prefix of an initial+final syllable accepted
-        // by is_initial_final_compatible_local, or of a no-initial final.
+        // True when the text is a prefix of an initial+final syllable some
+        // character reads, or of a no-initial final: keys still being typed.
+        // With the spellings no character reads, "zuolibuan" ended in one
+        // syllable "buan" being typed and 坐立不安 was not on the page.
         lower_value := LowerCase(Trim(value));
         Result := (lower_value <> '') and
             m_single_syllable_prefix_set.ContainsKey(lower_value);
@@ -146962,23 +147922,23 @@ var
         end;
 
         Result :=
-            (normalized_text_value = string(Char($4E2A))) or
+            (normalized_text_value = variant_char($4E2A, $500B)) or
             (normalized_text_value = string(Char($4F4D))) or
             (normalized_text_value = string(Char($6B21))) or
-            (normalized_text_value = string(Char($70B9))) or
+            (normalized_text_value = variant_char($70B9, $9EDE)) or
             (normalized_text_value = string(Char($4E9B))) or
-            (normalized_text_value = string(Char($79CD))) or
+            (normalized_text_value = variant_char($79CD, $7A2E)) or
             (normalized_text_value = string(Char($5929))) or
             (normalized_text_value = string(Char($5E74))) or
             (normalized_text_value = string(Char($6708))) or
-            (normalized_text_value = string(Char($91CC))) or
+            (normalized_text_value = variant_char($91CC, $88E1)) or
             (normalized_text_value = string(Char($4E0B))) or
             (normalized_text_value = string(Char($56DE))) or
             (normalized_text_value = string(Char($904D))) or
-            (normalized_text_value = string(Char($58F0))) or
+            (normalized_text_value = variant_char($58F0, $8072)) or
             (normalized_text_value = string(Char($9762))) or
             (normalized_text_value = string(Char($773C))) or
-            (normalized_text_value = string(Char($8FB9)));
+            (normalized_text_value = variant_char($8FB9, $908A));
     end;
 
     function try_get_best_boundary_unit_single_char_for_pinyin_key_local(const pinyin_key: string;
@@ -147101,10 +148061,10 @@ var
             (normalized_text_value = string(Char($5341))) or
             (normalized_text_value = string(Char($767E))) or
             (normalized_text_value = string(Char($5343))) or
-            (normalized_text_value = string(Char($4E07))) or
-            (normalized_text_value = string(Char($4E24))) or
-            (normalized_text_value = string(Char($51E0))) or
-            (normalized_text_value = string(Char($8FD9))) or
+            (normalized_text_value = variant_char($4E07, $842C)) or
+            (normalized_text_value = variant_char($4E24, $5169)) or
+            (normalized_text_value = variant_char($51E0, $5E7E)) or
+            (normalized_text_value = variant_char($8FD9, $9019)) or
             (normalized_text_value = string(Char($90A3))) or
             (normalized_text_value = string(Char($54EA))) or
             (normalized_text_value = string(Char($6BCF))) or
@@ -147112,9 +148072,9 @@ var
             (normalized_text_value = string(Char($534A))) or
             (normalized_text_value = string(Char($591A))) or
             (normalized_text_value = string(Char($6574))) or
-            (normalized_text_value = string(Char($5355))) or
-            (normalized_text_value = string(Char($53CC))) or
-            (normalized_text_value = string(Char($4FE9))) or
+            (normalized_text_value = variant_char($5355, $55AE)) or
+            (normalized_text_value = variant_char($53CC, $96D9)) or
+            (normalized_text_value = variant_char($4FE9, $5006)) or
             (normalized_text_value = string(Char($4EE8)));
     end;
 
@@ -147351,20 +148311,20 @@ var
 
         if normalized_pinyin_key = 'zhe' then
         begin
-            Result := (normalized_text_value = string(Char($7740))) or
+            Result := (normalized_text_value = variant_char($7740, $8457)) or
                 (normalized_text_value = string(Char($8457)));
             Exit;
         end;
 
         if normalized_pinyin_key = 'guo' then
         begin
-            Result := normalized_text_value = string(Char($8FC7));
+            Result := normalized_text_value = variant_char($8FC7, $904E);
             Exit;
         end;
 
         if normalized_pinyin_key = 'ma' then
         begin
-            Result := (normalized_text_value = string(Char($5417))) or
+            Result := (normalized_text_value = variant_char($5417, $55CE)) or
                 (normalized_text_value = string(Char($561B)));
             Exit;
         end;
@@ -147378,7 +148338,7 @@ var
         if normalized_pinyin_key = 'ba' then
         begin
             Result := (normalized_text_value = string(Char($5427))) or
-                (normalized_text_value = string(Char($7F62)));
+                (normalized_text_value = variant_char($7F62, $7F77));
             Exit;
         end;
 
@@ -147477,20 +148437,20 @@ var
 
         if SameText(Trim(pinyin_key), 'zhe') then
         begin
-            consider_expected_text_local(string(Char($7740)));
+            consider_expected_text_local(variant_char($7740, $8457));
             consider_expected_text_local(string(Char($8457)));
             Exit;
         end;
 
         if SameText(Trim(pinyin_key), 'guo') then
         begin
-            consider_expected_text_local(string(Char($8FC7)));
+            consider_expected_text_local(variant_char($8FC7, $904E));
             Exit;
         end;
 
         if SameText(Trim(pinyin_key), 'ma') then
         begin
-            consider_expected_text_local(string(Char($5417)));
+            consider_expected_text_local(variant_char($5417, $55CE));
             consider_expected_text_local(string(Char($561B)));
             Exit;
         end;
@@ -147504,7 +148464,7 @@ var
         if SameText(Trim(pinyin_key), 'ba') then
         begin
             consider_expected_text_local(string(Char($5427)));
-            consider_expected_text_local(string(Char($7F62)));
+            consider_expected_text_local(variant_char($7F62, $7F77));
             Exit;
         end;
 
@@ -147774,23 +148734,23 @@ var
                 Exit;
             end;
             Result :=
-                (normalized_text_value = string(Char($4E2A))) or
+                (normalized_text_value = variant_char($4E2A, $500B)) or
                 (normalized_text_value = string(Char($4F4D))) or
                 (normalized_text_value = string(Char($6B21))) or
-                (normalized_text_value = string(Char($70B9))) or
+                (normalized_text_value = variant_char($70B9, $9EDE)) or
                 (normalized_text_value = string(Char($4E9B))) or
-                (normalized_text_value = string(Char($79CD))) or
+                (normalized_text_value = variant_char($79CD, $7A2E)) or
                 (normalized_text_value = string(Char($5929))) or
                 (normalized_text_value = string(Char($5E74))) or
                 (normalized_text_value = string(Char($6708))) or
-                (normalized_text_value = string(Char($91CC))) or
+                (normalized_text_value = variant_char($91CC, $88E1)) or
                 (normalized_text_value = string(Char($4E0B))) or
                 (normalized_text_value = string(Char($56DE))) or
                 (normalized_text_value = string(Char($904D))) or
-                (normalized_text_value = string(Char($58F0))) or
+                (normalized_text_value = variant_char($58F0, $8072)) or
                 (normalized_text_value = string(Char($9762))) or
                 (normalized_text_value = string(Char($773C))) or
-                (normalized_text_value = string(Char($8FB9)));
+                (normalized_text_value = variant_char($8FB9, $908A));
         end;
         function get_query_path_support_adjustment_local(const left_text: string;
             const right_text: string): Integer;
@@ -149966,32 +150926,32 @@ var
                     (value = string(Char($5B83))) or
                     (value = string(Char($548C))) or
                     (value = string(Char($53BB))) or
-                    (value = string(Char($6765))) or
+                    (value = variant_char($6765, $4F86)) or
                     (value = string(Char($5728))) or
                     (value = string(Char($662F))) or
                     (value = string(Char($6709))) or
                     (value = string(Char($8981))) or
                     (value = string(Char($60F3))) or
-                    (value = string(Char($4F1A))) or
+                    (value = variant_char($4F1A, $6703)) or
                     (value = string(Char($80FD))) or
                     (value = string(Char($53EA))) or
                     (value = string(Char($628A))) or
                     (value = string(Char($88AB))) or
-                    (value = string(Char($8BA9))) or
-                    (value = string(Char($7ED9))) or
+                    (value = variant_char($8BA9, $8B93)) or
+                    (value = variant_char($7ED9, $7D66)) or
                     (value = string(Char($5411))) or
-                    (value = string(Char($5BF9))) or
-                    (value = string(Char($4E8E))) or
+                    (value = variant_char($5BF9, $5C0D)) or
+                    (value = variant_char($4E8E, $65BC)) or
                     (value = string(Char($8DDF))) or
                     (value = string(Char($540C))) or
-                    (value = string(Char($4ECE))) or
-                    (value = string(Char($4E0E))) or
+                    (value = variant_char($4ECE, $5F9E)) or
+                    (value = variant_char($4E0E, $8207)) or
                     (value = string(Char($800C))) or
-                    (value = string(Char($5E76))) or
+                    (value = variant_char($5E76, $4E26)) or
                     (value = string(Char($5C31))) or
                     (value = string(Char($4E5F))) or
                     (value = string(Char($90FD))) or
-                    (value = string(Char($8FD8))) or
+                    (value = variant_char($8FD8, $9084)) or
                     (value = string(Char($53C8))) or
                     (value = string(Char($518D))) or
                     (value = string(Char($4E0D))) or
@@ -149999,13 +150959,13 @@ var
                     (value = string(Char($592A))) or
                     (value = string(Char($7684))) or
                     (value = string(Char($4EBA))) or
-                    (value = string(Char($4EEC))) or
+                    (value = variant_char($4EEC, $5011)) or
                     (value = string(Char($822C))) or
                     (value = string(Char($529B))) or
-                    (value = string(Char($65F6))) or
+                    (value = variant_char($65F6, $6642)) or
                     (value = string(Char($4F4D))) or
-                    (value = string(Char($7740))) or
-                    (value = string(Char($8FD9)));
+                    (value = variant_char($7740, $8457)) or
+                    (value = variant_char($8FD9, $9019));
             end;
             procedure append_exact_state(const position: Integer; const value: TncSegmentPathState);
             begin
@@ -150338,32 +151298,32 @@ var
                     (value = string(Char($5B83))) or
                     (value = string(Char($548C))) or
                     (value = string(Char($53BB))) or
-                    (value = string(Char($6765))) or
+                    (value = variant_char($6765, $4F86)) or
                     (value = string(Char($5728))) or
                     (value = string(Char($662F))) or
                     (value = string(Char($6709))) or
                     (value = string(Char($8981))) or
                     (value = string(Char($60F3))) or
-                    (value = string(Char($4F1A))) or
+                    (value = variant_char($4F1A, $6703)) or
                     (value = string(Char($80FD))) or
                     (value = string(Char($53EA))) or
                     (value = string(Char($628A))) or
                     (value = string(Char($88AB))) or
-                    (value = string(Char($8BA9))) or
-                    (value = string(Char($7ED9))) or
+                    (value = variant_char($8BA9, $8B93)) or
+                    (value = variant_char($7ED9, $7D66)) or
                     (value = string(Char($5411))) or
-                    (value = string(Char($5BF9))) or
-                    (value = string(Char($4E8E))) or
+                    (value = variant_char($5BF9, $5C0D)) or
+                    (value = variant_char($4E8E, $65BC)) or
                     (value = string(Char($8DDF))) or
                     (value = string(Char($540C))) or
-                    (value = string(Char($4ECE))) or
-                    (value = string(Char($4E0E))) or
+                    (value = variant_char($4ECE, $5F9E)) or
+                    (value = variant_char($4E0E, $8207)) or
                     (value = string(Char($800C))) or
-                    (value = string(Char($5E76))) or
+                    (value = variant_char($5E76, $4E26)) or
                     (value = string(Char($5C31))) or
                     (value = string(Char($4E5F))) or
                     (value = string(Char($90FD))) or
-                    (value = string(Char($8FD8))) or
+                    (value = variant_char($8FD8, $9084)) or
                     (value = string(Char($53C8))) or
                     (value = string(Char($518D))) or
                     (value = string(Char($4E0D))) or
@@ -150371,13 +151331,13 @@ var
                     (value = string(Char($592A))) or
                     (value = string(Char($7684))) or
                     (value = string(Char($4EBA))) or
-                    (value = string(Char($4EEC))) or
+                    (value = variant_char($4EEC, $5011)) or
                     (value = string(Char($822C))) or
                     (value = string(Char($529B))) or
-                    (value = string(Char($65F6))) or
+                    (value = variant_char($65F6, $6642)) or
                     (value = string(Char($4F4D))) or
-                    (value = string(Char($7740))) or
-                    (value = string(Char($8FD9)));
+                    (value = variant_char($7740, $8457)) or
+                    (value = variant_char($8FD9, $9019));
             end;
             function is_better_long_sentence_option(const left: TLongSentenceOption;
                 const right: TLongSentenceOption): Boolean;
@@ -156130,15 +157090,15 @@ var
             Exit;
         end;
 
-        Result := SameText(text_value, string(Char($6709)) + string(Char($70B9))) or
-            SameText(text_value, string(Char($4E00)) + string(Char($70B9))) or
+        Result := SameText(text_value, string(Char($6709)) + variant_char($70B9, $9EDE)) or
+            SameText(text_value, string(Char($4E00)) + variant_char($70B9, $9EDE)) or
             SameText(text_value, string(Char($4E0D)) + string(Char($662F))) or
-            SameText(text_value, string(Char($4E0D)) + string(Char($4F1A))) or
+            SameText(text_value, string(Char($4E0D)) + variant_char($4F1A, $6703)) or
             SameText(text_value, string(Char($4E0D)) + string(Char($80FD))) or
             SameText(text_value, string(Char($4E0D)) + string(Char($8981))) or
-            SameText(text_value, string(Char($6CA1)) + string(Char($6709))) or
+            SameText(text_value, variant_char($6CA1, $6C92) + string(Char($6709))) or
             SameText(text_value, string(Char($53EF)) + string(Char($4EE5))) or
-            SameText(text_value, string(Char($5E94)) + string(Char($8BE5))) or
+            SameText(text_value, variant_char($5E94, $61C9) + variant_char($8BE5, $8A72)) or
             SameText(text_value, string(Char($9700)) + string(Char($8981)));
     end;
 
@@ -156245,13 +157205,13 @@ var
                 ((pinyin_key_value = 'le') and
                 SameText(text_value, string(Char($4E86)))) or
                 ((pinyin_key_value = 'zhe') and
-                SameText(text_value, string(Char($7740)))) or
+                SameText(text_value, variant_char($7740, $8457))) or
                 ((pinyin_key_value = 'la') and
                 SameText(text_value, string(Char($5566)))) or
                 ((pinyin_key_value = 'ba') and
                 SameText(text_value, string(Char($5427)))) or
                 ((pinyin_key_value = 'ma') and
-                SameText(text_value, string(Char($5417)))) or
+                SameText(text_value, variant_char($5417, $55CE))) or
                 ((pinyin_key_value = 'a') and
                 SameText(text_value, string(Char($554A))));
         end;
@@ -158064,7 +159024,7 @@ var
             end
             else
             begin
-                ma_text := string(Char($5417));
+                ma_text := variant_char($5417, $55CE);
             end;
 
             candidate_text_local := '';
@@ -160011,7 +160971,7 @@ var
             end
             else if tail_key_local = 'ma' then
             begin
-                expected_tail_text_local := string(Char($5417));
+                expected_tail_text_local := variant_char($5417, $55CE);
             end
             else if tail_key_local = 'le' then
             begin
@@ -160019,7 +160979,7 @@ var
             end
             else if tail_key_local = 'zhe' then
             begin
-                expected_tail_text_local := string(Char($7740));
+                expected_tail_text_local := variant_char($7740, $8457);
             end
             else if tail_key_local = 'de' then
             begin
@@ -161264,7 +162224,7 @@ var
         end
         else if SameText(tail_key, 'zhe') then
         begin
-            tail_text := string(Char($7740));
+            tail_text := variant_char($7740, $8457);
         end
         else if SameText(tail_key, 'la') then
         begin
@@ -161276,7 +162236,7 @@ var
         end
         else if SameText(tail_key, 'ma') then
         begin
-            tail_text := string(Char($5417));
+            tail_text := variant_char($5417, $55CE);
         end
         else if SameText(tail_key, 'a') then
         begin
@@ -161666,27 +162626,27 @@ var
             const unit_text: string): Boolean;
         begin
             Result := SameText(unit_text, string(Char($4E0D))) or
-                SameText(unit_text, string(Char($5E76))) or
-                SameText(unit_text, string(Char($4F1A))) or
+                SameText(unit_text, variant_char($5E76, $4E26)) or
+                SameText(unit_text, variant_char($4F1A, $6703)) or
                 SameText(unit_text, string(Char($80FD))) or
                 SameText(unit_text, string(Char($60F3))) or
                 SameText(unit_text, string(Char($8981))) or
                 SameText(unit_text, string(Char($77E5))) or
-                SameText(unit_text, string(Char($89C9))) or
+                SameText(unit_text, variant_char($89C9, $89BA)) or
                 SameText(unit_text, string(Char($53EF))) or
-                SameText(unit_text, string(Char($5E94))) or
+                SameText(unit_text, variant_char($5E94, $61C9)) or
                 SameText(unit_text, string(Char($9700))) or
                 SameText(unit_text, string(Char($5DF2))) or
                 SameText(unit_text, string(Char($6B63))) or
                 SameText(unit_text, string(Char($518D))) or
-                SameText(unit_text, string(Char($8FD8))) or
+                SameText(unit_text, variant_char($8FD8, $9084)) or
                 SameText(unit_text, string(Char($90FD))) or
                 SameText(unit_text, string(Char($5C31))) or
                 SameText(unit_text, string(Char($53EA))) or
                 SameText(unit_text, string(Char($628A))) or
                 SameText(unit_text, string(Char($88AB))) or
-                SameText(unit_text, string(Char($7ED9))) or
-                SameText(unit_text, string(Char($8BA9))) or
+                SameText(unit_text, variant_char($7ED9, $7D66)) or
+                SameText(unit_text, variant_char($8BA9, $8B93)) or
                 SameText(unit_text, string(Char($5411))) or
                 is_likely_verbal_unit_local(unit_text);
         end;
@@ -161757,12 +162717,12 @@ var
 
                 if (segment_units_local = 1) and (next_units_local >= 2) then
                 begin
-                    if SameText(segment_last_unit_local, string(Char($5BF9))) or
+                    if SameText(segment_last_unit_local, variant_char($5BF9, $5C0D)) or
                         (is_path_pronoun_unit_local(segment_last_unit_local) and
                         is_path_predicate_or_modifier_head_local(
                         next_first_unit_local)) or
                         (SameText(segment_last_unit_local, string(Char($66F4))) and
-                        SameText(next_first_unit_local, string(Char($4E3A)))) then
+                        SameText(next_first_unit_local, variant_char($4E3A, $70BA))) then
                     begin
                         Exit(True);
                     end;
@@ -161776,7 +162736,7 @@ var
                     next_next_units_local := get_candidate_text_unit_count(
                         next_next_segment_text_local);
                     if (next_next_units_local >= 2) and
-                        SameText(segment_last_unit_local, string(Char($5E76))) and
+                        SameText(segment_last_unit_local, variant_char($5E76, $4E26)) and
                         SameText(next_first_unit_local, string(Char($4E0D))) then
                     begin
                         Exit(True);
@@ -161819,43 +162779,43 @@ var
             begin
                 Result := SameText(unit_text, string(Char($5317))) or
                     SameText(unit_text, string(Char($5357))) or
-                    SameText(unit_text, string(Char($4E1C))) or
+                    SameText(unit_text, variant_char($4E1C, $6771)) or
                     SameText(unit_text, string(Char($897F))) or
                     SameText(unit_text, string(Char($4E0A))) or
                     SameText(unit_text, string(Char($4E0B))) or
                     SameText(unit_text, string(Char($524D))) or
-                    SameText(unit_text, string(Char($540E))) or
+                    SameText(unit_text, variant_char($540E, $5F8C)) or
                     SameText(unit_text, string(Char($5DE6))) or
                     SameText(unit_text, string(Char($53F3))) or
-                    SameText(unit_text, string(Char($91CC))) or
+                    SameText(unit_text, variant_char($91CC, $88E1)) or
                     SameText(unit_text, string(Char($5916)));
             end;
 
             function is_place_like_tail_unit_local(const unit_text: string): Boolean;
             begin
-                Result := SameText(unit_text, string(Char($56ED))) or
-                    SameText(unit_text, string(Char($9986))) or
-                    SameText(unit_text, string(Char($573A))) or
+                Result := SameText(unit_text, variant_char($56ED, $5712)) or
+                    SameText(unit_text, variant_char($9986, $9928)) or
+                    SameText(unit_text, variant_char($573A, $5834)) or
                     SameText(unit_text, string(Char($5E97))) or
                     SameText(unit_text, string(Char($6821))) or
                     SameText(unit_text, string(Char($9662))) or
-                    SameText(unit_text, string(Char($697C))) or
+                    SameText(unit_text, variant_char($697C, $6A13)) or
                     SameText(unit_text, string(Char($7AD9))) or
                     SameText(unit_text, string(Char($57CE))) or
-                    SameText(unit_text, string(Char($533A))) or
+                    SameText(unit_text, variant_char($533A, $5340)) or
                     SameText(unit_text, string(Char($5E02))) or
                     SameText(unit_text, string(Char($6751))) or
-                    SameText(unit_text, string(Char($9547))) or
-                    SameText(unit_text, string(Char($53BF))) or
+                    SameText(unit_text, variant_char($9547, $93AE)) or
+                    SameText(unit_text, variant_char($53BF, $7E23)) or
                     SameText(unit_text, string(Char($8DEF))) or
                     SameText(unit_text, string(Char($8857))) or
-                    SameText(unit_text, string(Char($6865))) or
+                    SameText(unit_text, variant_char($6865, $6A4B)) or
                     SameText(unit_text, string(Char($6CB3))) or
                     SameText(unit_text, string(Char($6D77))) or
                     SameText(unit_text, string(Char($5C71))) or
-                    SameText(unit_text, string(Char($5C9B))) or
-                    SameText(unit_text, string(Char($95E8))) or
-                    SameText(unit_text, string(Char($5385))) or
+                    SameText(unit_text, variant_char($5C9B, $5CF6)) or
+                    SameText(unit_text, variant_char($95E8, $9580)) or
+                    SameText(unit_text, variant_char($5385, $5EF3)) or
                     SameText(unit_text, string(Char($5BA4))) or
                     SameText(unit_text, string(Char($623F))) or
                     SameText(unit_text, string(Char($5BB6))) or
@@ -162025,7 +162985,7 @@ var
                 begin
                     if (next_segment_text_local <> '') and (next_units_local >= 2) then
                     begin
-                        if SameText(segment_last_unit_local, string(Char($5BF9))) then
+                        if SameText(segment_last_unit_local, variant_char($5BF9, $5C0D)) then
                         begin
                             Inc(Result, 14000);
                         end
@@ -162035,7 +162995,7 @@ var
                             Inc(Result, 9000);
                         end
                         else if SameText(segment_last_unit_local, string(Char($66F4))) and
-                            SameText(next_first_unit_local, string(Char($4E3A))) then
+                            SameText(next_first_unit_local, variant_char($4E3A, $70BA)) then
                         begin
                             Inc(Result, 12000);
                         end
@@ -162048,7 +163008,7 @@ var
                     else if (next_units_local = 1) and
                         (next_next_segment_text_local <> '') and (next_next_units_local >= 2) then
                     begin
-                        if SameText(segment_last_unit_local, string(Char($5E76))) and
+                        if SameText(segment_last_unit_local, variant_char($5E76, $4E26)) and
                             SameText(next_first_unit_local, string(Char($4E0D))) then
                         begin
                             Inc(Result, 16000);
@@ -163175,9 +164135,9 @@ var
                 ((right_value = string(Char($5728))) or
                 (right_value = string(Char($518D))))) or
                 (((left_value = string(Char($662F))) or
-                (left_value = string(Char($65F6)))) and
+                (left_value = variant_char($65F6, $6642))) and
                 ((right_value = string(Char($662F))) or
-                (right_value = string(Char($65F6)))));
+                (right_value = variant_char($65F6, $6642))));
         end;
 
         function differs_only_in_common_function_units_local(
@@ -163731,7 +164691,7 @@ var
         end
         else if normalized_syllable_value = 'ma' then
         begin
-            Result := string(Char($5417));
+            Result := variant_char($5417, $55CE);
         end
         else if normalized_syllable_value = 'le' then
         begin
@@ -163764,15 +164724,15 @@ var
         end
         else if normalized_syllable_value = 'ge' then
         begin
-            Result := string(Char($4E2A));
+            Result := variant_char($4E2A, $500B);
         end
         else if normalized_syllable_value = 'tiao' then
         begin
-            Result := string(Char($6761));
+            Result := variant_char($6761, $689D);
         end
         else if normalized_syllable_value = 'zhang' then
         begin
-            Result := string(Char($5F20));
+            Result := variant_char($5F20, $5F35);
         end
         else if normalized_syllable_value = 'ben' then
         begin
@@ -163788,7 +164748,7 @@ var
         end
         else if normalized_syllable_value = 'lun' then
         begin
-            Result := string(Char($8F6E));
+            Result := variant_char($8F6E, $8F2A);
         end
         else if normalized_syllable_value = 'hui' then
         begin
@@ -163816,7 +164776,7 @@ var
         end
         else if normalized_syllable_value = 'liang' then
         begin
-            Result := string(Char($4E24));
+            Result := variant_char($4E24, $5169);
         end
         else if normalized_syllable_value = 'san' then
         begin
@@ -163865,7 +164825,7 @@ var
         end
         else if normalized_syllable_value = 'xiang' then
         begin
-            Result := string(Char($9879));
+            Result := variant_char($9879, $9805);
         end
         else if normalized_syllable_value = 'ci' then
         begin
@@ -163873,15 +164833,15 @@ var
         end
         else if normalized_syllable_value = 'ge' then
         begin
-            Result := string(Char($4E2A));
+            Result := variant_char($4E2A, $500B);
         end
         else if normalized_syllable_value = 'tiao' then
         begin
-            Result := string(Char($6761));
+            Result := variant_char($6761, $689D);
         end
         else if normalized_syllable_value = 'zhang' then
         begin
-            Result := string(Char($5F20));
+            Result := variant_char($5F20, $5F35);
         end
         else if normalized_syllable_value = 'ben' then
         begin
@@ -163893,7 +164853,7 @@ var
         end
         else if normalized_syllable_value = 'dian' then
         begin
-            Result := string(Char($70B9));
+            Result := variant_char($70B9, $9EDE);
         end
         else if normalized_syllable_value = 'bu' then
         begin
@@ -163901,15 +164861,15 @@ var
         end
         else if normalized_syllable_value = 'lun' then
         begin
-            Result := string(Char($8F6E));
+            Result := variant_char($8F6E, $8F2A);
         end
         else if normalized_syllable_value = 'jie' then
         begin
-            Result := string(Char($8282));
+            Result := variant_char($8282, $7BC0);
         end
         else if normalized_syllable_value = 'ye' then
         begin
-            Result := string(Char($9875));
+            Result := variant_char($9875, $9801);
         end
         else if normalized_syllable_value = 'duan' then
         begin
@@ -165521,15 +166481,15 @@ var
                 Exit;
             end;
 
-            if SameText(text_value, string(Char($6709)) + string(Char($70B9))) or
-                SameText(text_value, string(Char($4E00)) + string(Char($70B9))) or
+            if SameText(text_value, string(Char($6709)) + variant_char($70B9, $9EDE)) or
+                SameText(text_value, string(Char($4E00)) + variant_char($70B9, $9EDE)) or
                 SameText(text_value, string(Char($4E0D)) + string(Char($662F))) or
-                SameText(text_value, string(Char($4E0D)) + string(Char($4F1A))) or
+                SameText(text_value, string(Char($4E0D)) + variant_char($4F1A, $6703)) or
                 SameText(text_value, string(Char($4E0D)) + string(Char($80FD))) or
                 SameText(text_value, string(Char($4E0D)) + string(Char($8981))) or
-                SameText(text_value, string(Char($6CA1)) + string(Char($6709))) or
+                SameText(text_value, variant_char($6CA1, $6C92) + string(Char($6709))) or
                 SameText(text_value, string(Char($53EF)) + string(Char($4EE5))) or
-                SameText(text_value, string(Char($5E94)) + string(Char($8BE5))) or
+                SameText(text_value, variant_char($5E94, $61C9) + variant_char($8BE5, $8A72)) or
                 SameText(text_value, string(Char($9700)) + string(Char($8981))) then
             begin
                 Exit(True);
@@ -166313,7 +167273,7 @@ var
             Exit;
         end;
 
-        desired_head := string(Char($8FD9));
+        desired_head := variant_char($8FD9, $9019);
         tail_key := build_display_query_key(1, expected_units - 1);
         if tail_key = '' then
         begin
@@ -166375,27 +167335,27 @@ var
         begin
             expected_syllables_local := TArray<string>.Create('na', 'er');
             expected_units_local := TArray<string>.Create(
-                string(Char($54EA)), string(Char($513F)));
+                string(Char($54EA)), variant_char($513F, $5152));
         end
         else if SameText(normalized_pinyin, 'ner') then
         begin
             expected_syllables_local := TArray<string>.Create('na', 'er');
             expected_units_local := TArray<string>.Create(
-                string(Char($54EA)), string(Char($513F)));
+                string(Char($54EA)), variant_char($513F, $5152));
         end
         else if SameText(normalized_pinyin, 'qunaer') then
         begin
             expected_syllables_local := TArray<string>.Create('qu', 'na', 'er');
             expected_units_local := TArray<string>.Create(
                 string(Char($53BB)), string(Char($54EA)),
-                string(Char($513F)));
+                variant_char($513F, $5152));
         end
         else if SameText(normalized_pinyin, 'qner') then
         begin
             expected_syllables_local := TArray<string>.Create('qu', 'na', 'er');
             expected_units_local := TArray<string>.Create(
                 string(Char($53BB)), string(Char($54EA)),
-                string(Char($513F)));
+                variant_char($513F, $5152));
         end
         else
         begin
@@ -167423,15 +168383,15 @@ var
             end
             else if normalized_syllable_value = 'ge' then
             begin
-                Result := string(Char($4E2A));
+                Result := variant_char($4E2A, $500B);
             end
             else if normalized_syllable_value = 'tiao' then
             begin
-                Result := string(Char($6761));
+                Result := variant_char($6761, $689D);
             end
             else if normalized_syllable_value = 'zhang' then
             begin
-                Result := string(Char($5F20));
+                Result := variant_char($5F20, $5F35);
             end
             else if normalized_syllable_value = 'ben' then
             begin
@@ -167447,7 +168407,7 @@ var
             end
             else if normalized_syllable_value = 'lun' then
             begin
-                Result := string(Char($8F6E));
+                Result := variant_char($8F6E, $8F2A);
             end
             else if normalized_syllable_value = 'hui' then
             begin
@@ -170040,7 +171000,7 @@ var
             (not SameText(Trim(top_units_local[expected_units - 2]),
             string(Char($4E00)))) or
             (not SameText(Trim(top_units_local[expected_units - 1]),
-            string(Char($6837)))) then
+            variant_char($6837, $6A23))) then
         begin
             Exit;
         end;
@@ -170058,7 +171018,7 @@ var
                 (not SameText(Trim(candidate_units_local[expected_units - 2]),
                 string(Char($4E00)))) or
                 (not SameText(Trim(candidate_units_local[expected_units - 1]),
-                string(Char($6837)))) then
+                variant_char($6837, $6A23))) then
             begin
                 Continue;
             end;
@@ -170298,7 +171258,7 @@ var
                 ranked_weight_local := candidate_weight_local +
                     ((c_probe_limit - candidate_idx) * 32);
                 if between_phrases_local and
-                    ((candidate_text_local = string(Char($4E0E))) or
+                    ((candidate_text_local = variant_char($4E0E, $8207)) or
                     (candidate_text_local = string(Char($548C)))) then
                 begin
                     Inc(ranked_weight_local, 260);
@@ -170539,33 +171499,33 @@ var
                     (text_local = string(Char($592A))) or
                     (text_local = string(Char($8981))) or
                     (text_local = string(Char($80FD))) or
-                    (text_local = string(Char($6CA1))) or
-                    (text_local = string(Char($65E0))) or
+                    (text_local = variant_char($6CA1, $6C92)) or
+                    (text_local = variant_char($65E0, $7121)) or
                     (text_local = string(Char($975E))) or
                     (text_local = string(Char($53EF))) or
-                    (text_local = string(Char($4F1A))) or
-                    (text_local = string(Char($5E94))) or
-                    (text_local = string(Char($5C06))) or
+                    (text_local = variant_char($4F1A, $6703)) or
+                    (text_local = variant_char($5E94, $61C9)) or
+                    (text_local = variant_char($5C06, $5C07)) or
                     (text_local = string(Char($672A))) or
                     (text_local = string(Char($5DF2))) or
                     (text_local = string(Char($6B63))) or
                     (text_local = string(Char($53C8))) or
                     (text_local = string(Char($4E5F))) or
-                    (text_local = string(Char($8FD8))) or
+                    (text_local = variant_char($8FD8, $9084)) or
                     (text_local = string(Char($90FD))) or
                     (text_local = string(Char($5C31))) or
-                    (text_local = string(Char($522B))) or
+                    (text_local = variant_char($522B, $5225)) or
                     (text_local = string(Char($6709))) or
-                    (text_local = string(Char($5BF9))) or
+                    (text_local = variant_char($5BF9, $5C0D)) or
                     (text_local = string(Char($5230))) or
-                    (text_local = string(Char($4ECE))) or
+                    (text_local = variant_char($4ECE, $5F9E)) or
                     (text_local = string(Char($548C))) or
-                    (text_local = string(Char($4E0E))) or
-                    (text_local = string(Char($4E8E))) or
+                    (text_local = variant_char($4E0E, $8207)) or
+                    (text_local = variant_char($4E8E, $65BC)) or
                     (text_local = string(Char($628A))) or
                     (text_local = string(Char($88AB))) or
-                    (text_local = string(Char($7ED9))) or
-                    (text_local = string(Char($8BA9))) or
+                    (text_local = variant_char($7ED9, $7D66)) or
+                    (text_local = variant_char($8BA9, $8B93)) or
                     (text_local = string(Char($5728))) or
                     (text_local = string(Char($7684))) or
                     (text_local = string(Char($5730))) or
@@ -170574,9 +171534,9 @@ var
                     (text_local = string(Char($662F))) or
                     (text_local = string(Char($53EA))) or
                     (text_local = string(Char($624D))) or
-                    (text_local = string(Char($5E76))) or
+                    (text_local = variant_char($5E76, $4E26)) or
                     (text_local = string(Char($4E14))) or
-                    (text_local = string(Char($4E3A)));
+                    (text_local = variant_char($4E3A, $70BA));
             end;
         begin
             Result := Low(Integer) div 2;
@@ -171295,7 +172255,7 @@ var
 
             Result := (yu_idx >= 2) and
                 SameText(units_value[yu_idx - 2], string(Char($901A))) and
-                SameText(units_value[yu_idx - 1], string(Char($8FC7)));
+                SameText(units_value[yu_idx - 1], variant_char($8FC7, $904E));
         end;
 
         function build_replaced_text_local(const units_value: TArray<string>;
@@ -171343,12 +172303,12 @@ var
             for unit_idx := 1 to High(candidate_units_local) do
             begin
                 if (normalize_pinyin_text(syllables[unit_idx].text) = 'yu') and
-                    SameText(candidate_units_local[unit_idx], string(Char($4E8E))) and
+                    SameText(candidate_units_local[unit_idx], variant_char($4E8E, $65BC)) and
                     should_replace_display_yu_with_conjunction_local(
                     candidate_units_local, unit_idx) then
                 begin
                     replacement_text_local := build_replaced_text_local(
-                        candidate_units_local, unit_idx, string(Char($4E0E)));
+                        candidate_units_local, unit_idx, variant_char($4E0E, $8207));
                     candidate_rank_local := m_candidates[idx].score;
                     if (idx < Length(m_candidate_segment_paths)) and
                         (Trim(m_candidate_segment_paths[idx]) <> '') then
@@ -178600,18 +179560,18 @@ var
             display_short_complete_matches_particle_suffix_rule('le',
             string(Char($4E86)), text_value) or
             display_short_complete_matches_particle_suffix_rule('zhe',
-            string(Char($7740)), text_value) or
+            variant_char($7740, $8457), text_value) or
             display_short_complete_matches_particle_suffix_rule('la',
             string(Char($5566)), text_value) or
             display_short_complete_matches_particle_suffix_rule('ma',
-            string(Char($5417)), text_value) or
+            variant_char($5417, $55CE), text_value) or
             display_short_complete_matches_particle_suffix_rule('ba',
             string(Char($5427)), text_value) or
             display_short_complete_matches_particle_suffix_rule('a',
             string(Char($554A)), text_value) or
             display_short_complete_matches_dehao_rule_text(text_value) or
             ((normalized_pinyin = 'dema') and SameText(text_value,
-            string(Char($7684)) + string(Char($5417)))) or
+            string(Char($7684)) + variant_char($5417, $55CE))) or
             ((normalized_pinyin = 'deba') and SameText(text_value,
             string(Char($7684)) + string(Char($5427)))) or
             ((normalized_pinyin = 'dele') and SameText(text_value,
@@ -178621,19 +179581,19 @@ var
             ((normalized_pinyin = 'leba') and SameText(text_value,
             string(Char($4E86)) + string(Char($5427)))) or
             ((normalized_pinyin = 'lema') and SameText(text_value,
-            string(Char($4E86)) + string(Char($5417)))) or
+            string(Char($4E86)) + variant_char($5417, $55CE))) or
             (((normalized_pinyin = 'naer') or
             (normalized_pinyin = 'ner')) and SameText(text_value,
-            string(Char($54EA)) + string(Char($513F)))) or
+            string(Char($54EA)) + variant_char($513F, $5152))) or
             (((normalized_pinyin = 'qunaer') or
             (normalized_pinyin = 'qner')) and SameText(text_value,
             string(Char($53BB)) + string(Char($54EA)) +
-            string(Char($513F)))) or
+            variant_char($513F, $5152))) or
             ((normalized_pinyin = 'nli') and SameText(text_value,
-            string(Char($54EA)) + string(Char($91CC)))) or
+            string(Char($54EA)) + variant_char($91CC, $88E1))) or
             ((normalized_pinyin = 'qnli') and SameText(text_value,
             string(Char($53BB)) + string(Char($54EA)) +
-            string(Char($91CC))));
+            variant_char($91CC, $88E1)));
     end;
 
     function display_short_complete_matches_tail_phrase_rule(
@@ -178726,7 +179686,7 @@ var
         end;
 
         if display_short_complete_matches_tail_phrase_rule('dema',
-            string(Char($7684)) + string(Char($5417)), text_value) or
+            string(Char($7684)) + variant_char($5417, $55CE), text_value) or
             display_short_complete_matches_tail_phrase_rule('deba',
             string(Char($7684)) + string(Char($5427)), text_value) or
             display_short_complete_matches_tail_phrase_rule('dele',
@@ -178736,7 +179696,7 @@ var
             display_short_complete_matches_tail_phrase_rule('leba',
             string(Char($4E86)) + string(Char($5427)), text_value) or
             display_short_complete_matches_tail_phrase_rule('lema',
-            string(Char($4E86)) + string(Char($5417)), text_value) then
+            string(Char($4E86)) + variant_char($5417, $55CE), text_value) then
         begin
             Exit;
         end;
@@ -179854,7 +180814,7 @@ var
                 end
                 else if SameText(local_tail_key, 'zhe') then
                 begin
-                    local_tail_text := string(Char($7740));
+                    local_tail_text := variant_char($7740, $8457);
                 end
                 else
                 begin
@@ -181249,7 +182209,7 @@ var
                 end
                 else if tail_key_value = 'zhe' then
                 begin
-                    Result := string(Char($7740));
+                    Result := variant_char($7740, $8457);
                 end
                 else if tail_key_value = 'la' then
                 begin
@@ -181261,7 +182221,7 @@ var
                 end
                 else if tail_key_value = 'ma' then
                 begin
-                    Result := string(Char($5417));
+                    Result := variant_char($5417, $55CE);
                 end
                 else if tail_key_value = 'a' then
                 begin
@@ -184159,7 +185119,8 @@ var
                 not (display_candidate_should_drop_short_invalid_partial(value) or
                 display_candidate_should_drop_short_nonlexicon_complete(value, source_index) or
                 candidate_is_repeated_particle_tail_complete_local(value) or
-                candidate_is_non_strict_one_plus_two_complete(value, source_index));
+                candidate_is_non_strict_one_plus_two_complete(value, source_index) or
+                is_predictive_longer_candidate(value, normalized_pinyin));
         end;
 
         procedure freeze_remaining_pages;
@@ -184208,6 +185169,91 @@ var
                 get_long_visible_candidate_pool_cache_key(visible_page_size);
             m_long_visible_candidate_pool_source_signature := get_candidate_state_signature;
             m_long_visible_candidate_pool_cache_valid := True;
+        end;
+
+        // A longer word the keys only begin goes to the Tab area, whatever put
+        // it on the page (is_predictive_longer_candidate; paging already skips
+        // them), and the first page is filled again from the candidates.
+        procedure drop_visible_predictive_longer_candidates;
+        var idx, count, filled: Integer; value: TncCandidate; key: string;
+            pooled, pool_has_longer: Boolean;
+            pool: TncCandidateList; sources: TArray<Integer>;
+        begin
+            count := 0;
+            for idx := 0 to High(Result) do
+                if not is_predictive_longer_candidate(Result[idx], normalized_pinyin) then
+                begin
+                    Result[count] := Result[idx];
+                    visible_source_indices[count] := visible_source_indices[idx];
+                    Inc(count);
+                end;
+            // The frozen pages, which later pages and paging back read.
+            pooled := long_visible_candidate_pool_cache_is_current(visible_page_size);
+            pool_has_longer := False;
+            if pooled then
+                for idx := 0 to High(m_long_visible_candidate_pool_cache) do
+                    if is_predictive_longer_candidate(
+                        m_long_visible_candidate_pool_cache[idx], normalized_pinyin) then
+                    begin
+                        pool_has_longer := True;
+                        Break;
+                    end;
+            if (count = Length(Result)) and not pool_has_longer then Exit;
+            SetLength(Result, count);
+            SetLength(visible_source_indices, count);
+            emitted_visible_texts.Clear;
+            if pooled then
+            begin
+                // This page as it stands, then the rest of the pool.
+                pool := nil;
+                sources := nil;
+                if m_page_index = 0 then
+                begin
+                    pool := Copy(Result);
+                    sources := Copy(visible_source_indices);
+                    for idx := 0 to High(pool) do
+                        emitted_visible_texts.AddOrSetValue(
+                            nc_visible_candidate_key(pool[idx], pool[idx].comment), True);
+                end;
+                filled := Length(pool);
+                SetLength(pool, filled + Length(m_long_visible_candidate_pool_cache));
+                SetLength(sources, Length(pool));
+                for idx := 0 to High(m_long_visible_candidate_pool_cache) do
+                begin
+                    value := m_long_visible_candidate_pool_cache[idx];
+                    if is_predictive_longer_candidate(value, normalized_pinyin) then Continue;
+                    key := nc_visible_candidate_key(value, value.comment);
+                    if emitted_visible_texts.ContainsKey(key) then Continue;
+                    emitted_visible_texts.Add(key, True);
+                    pool[filled] := value;
+                    sources[filled] := m_long_visible_candidate_pool_source_indices_cache[idx];
+                    Inc(filled);
+                end;
+                SetLength(pool, filled);
+                SetLength(sources, filled);
+                m_long_visible_candidate_pool_cache := pool;
+                m_long_visible_candidate_pool_source_indices_cache := sources;
+                nc_copy_candidate_page(pool, sources, m_page_index * visible_page_size,
+                    visible_page_size, Result, visible_source_indices);
+                Exit;
+            end;
+            if m_page_index <> 0 then Exit;
+            for idx := 0 to count - 1 do
+                emitted_visible_texts.AddOrSetValue(
+                    nc_visible_candidate_key(Result[idx], Result[idx].comment), True);
+            for idx := 0 to High(m_candidates) do
+            begin
+                if Length(Result) >= visible_page_size then Break;
+                if not prepare_paging_candidate(idx, False, value) then Continue;
+                if Trim(value.text) = '' then Continue;
+                if (Trim(value.comment) <> '') and
+                    complete_visible_texts.ContainsKey(LowerCase(Trim(value.text))) then Continue;
+                key := nc_visible_candidate_key(value, value.comment);
+                if emitted_visible_texts.ContainsKey(key) then Continue;
+                emitted_visible_texts.Add(key, True);
+                Result := Result + [value];
+                visible_source_indices := visible_source_indices + [idx];
+            end;
         end;
 
         procedure enforce_visible_fixed_top_candidate;
@@ -184453,6 +185499,7 @@ var
                     m_long_visible_candidate_pool_cache[page_idx] := Result[page_idx];
                     m_long_visible_candidate_pool_source_indices_cache[page_idx] := visible_source_indices[page_idx];
                 end;
+            drop_visible_predictive_longer_candidates;
             freeze_remaining_pages;
             if (m_quick_input.kind = qik_date_alias) and (m_page_index = 0) then
             begin
@@ -185278,7 +186325,40 @@ begin
     build_current_page_result;
 end;
 
+// What the Tab area, the page, the composition and a commit show leaves the
+// engine in traditional characters in the traditional variant
+// (nc_simplified_to_traditional; the page in cache_visible_candidate_page).
 function TncEngine.get_one_key_completion: TncOneKeyCompletion;
+begin
+    Result := get_one_key_completion_raw;
+    if m_config.dictionary_variant = dv_traditional then
+        Result.text := nc_simplified_to_traditional(Result.text);
+end;
+
+function TncEngine.get_candidate_page_snapshot(const page_index: Integer): TncCandidateList;
+var idx: Integer;
+begin
+    Result := get_candidate_page_snapshot_raw(page_index);
+    if m_config.dictionary_variant = dv_traditional then
+        for idx := 0 to High(Result) do
+            Result[idx].text := nc_simplified_to_traditional(Result[idx].text);
+end;
+
+function TncEngine.get_display_text: string;
+begin
+    Result := get_display_text_raw;
+    if m_config.dictionary_variant = dv_traditional then
+        Result := nc_simplified_to_traditional(Result);
+end;
+
+function TncEngine.commit_text(out out_text: string): Boolean;
+begin
+    Result := commit_text_raw(out_text);
+    if m_config.dictionary_variant = dv_traditional then
+        out_text := nc_simplified_to_traditional(out_text);
+end;
+
+function TncEngine.get_one_key_completion_raw: TncOneKeyCompletion;
 begin
     if try_refresh_custom_phrase then Exit(m_one_key_completion);
     if m_one_key_completion.source = okcs_custom_phrase then
@@ -185736,7 +186816,7 @@ begin
     Result := True;
 end;
 
-function TncEngine.get_candidate_page_snapshot(const page_index: Integer): TncCandidateList;
+function TncEngine.get_candidate_page_snapshot_raw(const page_index: Integer): TncCandidateList;
 var sources: TArray<Integer>; page_size: Integer;
 begin
     Result := nil;
@@ -185887,7 +186967,7 @@ begin
     Result := m_last_lookup_key;
 end;
 
-function TncEngine.get_display_text: string;
+function TncEngine.get_display_text_raw: string;
 var
     page_size: Integer;
     visible_index: Integer;
@@ -186458,7 +187538,7 @@ begin
     end;
 end;
 
-function TncEngine.commit_text(out out_text: string): Boolean;
+function TncEngine.commit_text_raw(out out_text: string): Boolean;
 var
     normalized_pinyin: string;
     remaining_pinyin: string;

@@ -16,6 +16,7 @@ uses
     nc_lm_repair_host,
     nc_local_completion_host,
     nc_char_lm,
+    nc_char_lm_traditional,
     nc_char_lm_host,
     nc_one_key_rerank_host;
 
@@ -37,6 +38,7 @@ type
         FLocalRepair: IncLongLocalRepair;
         FLocalCompletionHost: TncLocalCompletionHost;
         FCharLm: IncCharLm;
+        FBackgroundCharLm: IncCharLm;
         FOneKeyRerankHost: TncOneKeyRerankHost;
         FLoadedContextId: QWord;
         FDictionaryError: string;
@@ -51,6 +53,7 @@ type
             const new_state: TncEngineState): Boolean;
         function SavePersistentState(const state: TncEngineState): Boolean;
         procedure SyncStateFromEngine;
+        procedure RefreshBackgroundCharLm;
         procedure SetEngineLeftContext(const context: TncEngineContext);
         function ActivateContext(const context: TncEngineContext): Boolean;
         function KeyEventToVirtualKey(const key_event: TncKeyEvent;
@@ -214,9 +217,19 @@ begin
     char_lm_host := TncCharLmHost.Create(runtime_directory, True);
     FCharLm := char_lm_host;
     FEngine.set_char_lm(FCharLm, True, True);
-    FLocalCompletionHost.set_char_lm(char_lm_host.background_view);
+    FBackgroundCharLm := char_lm_host.background_view;
     FOneKeyRerankHost := TncOneKeyRerankHost.Create;
-    FOneKeyRerankHost.set_char_lm(char_lm_host.background_view);
+    RefreshBackgroundCharLm;
+end;
+
+procedure TncEngineService.RefreshBackgroundCharLm;
+var view: IncCharLm;
+begin
+    view := FBackgroundCharLm;
+    if FConfig.dictionary_variant = dv_traditional then
+        view := nc_traditional_char_lm(view);
+    if FLocalCompletionHost <> nil then FLocalCompletionHost.set_char_lm(view);
+    if FOneKeyRerankHost <> nil then FOneKeyRerankHost.set_char_lm(view);
 end;
 
 destructor TncEngineService.Destroy;
@@ -224,6 +237,7 @@ begin
     FOneKeyRerankHost.Free;
     FLocalCompletionHost.Free;
     FEngine.Free;
+    FBackgroundCharLm := nil;
     FCharLm := nil;
     FLocalRepair := nil;
     FStateStore.Free;
@@ -333,6 +347,11 @@ begin
     next_state.shortcuts := engine_config.shortcuts;
     if PersistentStateChanged(FState, next_state) then
         SavePersistentState(next_state);
+    if FConfig.dictionary_variant <> engine_config.dictionary_variant then
+    begin
+        FConfig := engine_config;
+        RefreshBackgroundCharLm;
+    end;
     FState := next_state;
     FConfig := engine_config;
 end;
@@ -769,6 +788,7 @@ begin
         Exit(False);
     end;
     FConfig := FEngine.Config;
+    if dictionary_changed then RefreshBackgroundCharLm;
     FState := state;
     FState.custom_phrases := Copy(state.custom_phrases);
     if clear_compositions then

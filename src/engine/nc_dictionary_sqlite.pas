@@ -182,6 +182,7 @@ type
         m_literal_user_words_available: Integer;
         m_exact_base_entry_cache: TDictionary<string, Boolean>;
         m_normalized_base_entry_cache: TDictionary<string, Boolean>;
+        m_single_char_readings_cache: TDictionary<string, TArray<string>>;
         m_explicit_user_entry_cache: TDictionary<string, Boolean>;
         m_literal_user_entry_cache: TDictionary<string, Boolean>;
         m_admin_place_longer_prefix_cache: TDictionary<string, TArray<string>>;
@@ -202,6 +203,7 @@ type
         m_contains_popularity_index_ready: Boolean;
         function user_text_for_script(const pinyin, text: string): string;
         function user_storage_text(const table_name, pinyin, text: string): string;
+        function variant_char(const simplified, traditional: Word): string; inline;
         function ensure_open: Boolean;
         function open_internal(const defer_optional_model_loads: Boolean): Boolean;
         procedure open_user_connection;
@@ -390,6 +392,7 @@ type
         function record_literal_user_word(const full_pinyin: string;
             const text: string): Boolean; override;
         function single_char_matches_pinyin(const pinyin: string; const text_unit: string): Boolean; override;
+        function get_single_char_readings(const text_unit: string): TArray<string>; override;
         function is_low_evidence_admin_place_alias_user_entry(const pinyin: string;
             const text: string; const latest_choice_text: string = '';
             const user_weight: Integer = -1; const commit_count: Integer = -1): Boolean; override;
@@ -2755,6 +2758,7 @@ begin
     m_literal_user_words_available := -1;
     m_exact_base_entry_cache := TDictionary<string, Boolean>.Create;
     m_normalized_base_entry_cache := TDictionary<string, Boolean>.Create;
+    m_single_char_readings_cache := TDictionary<string, TArray<string>>.Create;
     m_explicit_user_entry_cache := TDictionary<string, Boolean>.Create;
     m_literal_user_entry_cache := TDictionary<string, Boolean>.Create;
     m_admin_place_longer_prefix_cache :=
@@ -3046,6 +3050,11 @@ begin
     begin
         m_normalized_base_entry_cache.Free;
         m_normalized_base_entry_cache := nil;
+    end;
+    if m_single_char_readings_cache <> nil then
+    begin
+        m_single_char_readings_cache.Free;
+        m_single_char_readings_cache := nil;
     end;
     if m_explicit_user_entry_cache <> nil then
     begin
@@ -4333,6 +4342,26 @@ var
         trial_compact: string;
         trial_syllables: TArray<string>;
         trial_length: Integer;
+        parser: TncPinyinParser;
+        typed_syllables: TncPinyinParseResult;
+
+        // The trial prefix ends where a syllable of the whole input ends:
+        // "pia" reads pi + a, but "pian" is one syllable and no completion.
+        function ends_at_typed_boundary: Boolean;
+        var
+            syllable_idx: Integer;
+        begin
+            Result := Length(trial_syllables) <= Length(typed_syllables);
+            for syllable_idx := 0 to High(trial_syllables) do
+            begin
+                if not Result then
+                begin
+                    Break;
+                end;
+                Result := SameText(trial_syllables[syllable_idx],
+                    typed_syllables[syllable_idx].text);
+            end;
+        end;
     begin
         Result := False;
         prefix_syllables := split_full_pinyin_syllables(canonical_prefix);
@@ -4342,6 +4371,12 @@ var
             Exit(True);
         end;
 
+        parser := TncPinyinParser.create;
+        try
+            typed_syllables := parser.parse(LowerCase(Trim(canonical_prefix)));
+        finally
+            parser.Free;
+        end;
         // The offline lookup is indexed at completed syllable boundaries.
         // While the user types the next syllable, reuse the nearest completed
         // prefix and filter every returned row by the full raw key below.
@@ -4358,7 +4393,7 @@ var
                 Continue;
             end;
             trial_syllables := split_full_pinyin_syllables(trial_prefix);
-            if Length(trial_syllables) < 2 then
+            if (Length(trial_syllables) < 2) or (not ends_at_typed_boundary) then
             begin
                 Continue;
             end;
@@ -8062,6 +8097,16 @@ begin
     end;
 end;
 
+// A character of the lookup tables in the script of the engine's variant
+// (TncEngine.variant_char): 县 or 縣 for a place suffix.
+function TncSqliteDictionary.variant_char(const simplified, traditional: Word): string;
+begin
+    if m_user_script_enabled and (m_user_script_variant = dv_traditional) then
+        Result := string(Char(traditional))
+    else
+        Result := string(Char(simplified));
+end;
+
 procedure TncSqliteDictionary.set_user_dictionary_variant(
     const variant: TncDictionaryVariant);
 begin
@@ -9090,33 +9135,33 @@ begin
         Exit;
     end;
 
-    if matches_expected_phrase('zhege', string(Char($8FD9)) + string(Char($4E2A))) or
-        matches_expected_phrase('nage', string(Char($90A3)) + string(Char($4E2A))) or
-        matches_expected_phrase('neige', string(Char($90A3)) + string(Char($4E2A))) or
-        matches_expected_phrase('yige', string(Char($4E00)) + string(Char($4E2A))) or
-        matches_expected_phrase('liangge', string(Char($4E24)) + string(Char($4E2A))) or
-        matches_expected_phrase('jige', string(Char($51E0)) + string(Char($4E2A))) or
-        matches_expected_phrase('meige', string(Char($6BCF)) + string(Char($4E2A))) or
-        matches_expected_phrase('sange', string(Char($4E09)) + string(Char($4E2A))) or
-        matches_expected_phrase('sige', string(Char($56DB)) + string(Char($4E2A))) or
-        matches_expected_phrase('wuge', string(Char($4E94)) + string(Char($4E2A))) or
-        matches_expected_phrase('liuge', string(Char($516D)) + string(Char($4E2A))) or
-        matches_expected_phrase('qige', string(Char($4E03)) + string(Char($4E2A))) or
-        matches_expected_phrase('bage', string(Char($516B)) + string(Char($4E2A))) or
-        matches_expected_phrase('jiuge', string(Char($4E5D)) + string(Char($4E2A))) or
-        matches_expected_phrase('shige', string(Char($5341)) + string(Char($4E2A))) or
-        matches_expected_phrase('zhexie', string(Char($8FD9)) + string(Char($4E9B))) or
+    if matches_expected_phrase('zhege', variant_char($8FD9, $9019) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('nage', string(Char($90A3)) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('neige', string(Char($90A3)) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('yige', string(Char($4E00)) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('liangge', variant_char($4E24, $5169) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('jige', variant_char($51E0, $5E7E) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('meige', string(Char($6BCF)) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('sange', string(Char($4E09)) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('sige', string(Char($56DB)) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('wuge', string(Char($4E94)) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('liuge', string(Char($516D)) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('qige', string(Char($4E03)) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('bage', string(Char($516B)) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('jiuge', string(Char($4E5D)) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('shige', string(Char($5341)) + variant_char($4E2A, $500B)) or
+        matches_expected_phrase('zhexie', variant_char($8FD9, $9019) + string(Char($4E9B))) or
         matches_expected_phrase('naxie', string(Char($90A3)) + string(Char($4E9B))) or
         matches_expected_phrase('neixie', string(Char($90A3)) + string(Char($4E9B))) or
         matches_expected_phrase('yixie', string(Char($4E00)) + string(Char($4E9B))) or
-        matches_expected_phrase('zheyang', string(Char($8FD9)) + string(Char($6837))) or
-        matches_expected_phrase('nayang', string(Char($90A3)) + string(Char($6837))) or
-        matches_expected_phrase('neiyang', string(Char($90A3)) + string(Char($6837))) or
-        matches_expected_phrase('zheme', string(Char($8FD9)) + string(Char($4E48))) or
-        matches_expected_phrase('name', string(Char($90A3)) + string(Char($4E48))) or
-        matches_expected_phrase('neime', string(Char($90A3)) + string(Char($4E48))) or
-        matches_expected_phrase('zenme', string(Char($600E)) + string(Char($4E48))) or
-        matches_expected_phrase('youdian', string(Char($6709)) + string(Char($70B9))) then
+        matches_expected_phrase('zheyang', variant_char($8FD9, $9019) + variant_char($6837, $6A23)) or
+        matches_expected_phrase('nayang', string(Char($90A3)) + variant_char($6837, $6A23)) or
+        matches_expected_phrase('neiyang', string(Char($90A3)) + variant_char($6837, $6A23)) or
+        matches_expected_phrase('zheme', variant_char($8FD9, $9019) + variant_char($4E48, $9EBC)) or
+        matches_expected_phrase('name', string(Char($90A3)) + variant_char($4E48, $9EBC)) or
+        matches_expected_phrase('neime', string(Char($90A3)) + variant_char($4E48, $9EBC)) or
+        matches_expected_phrase('zenme', string(Char($600E)) + variant_char($4E48, $9EBC)) or
+        matches_expected_phrase('youdian', string(Char($6709)) + variant_char($70B9, $9EDE)) then
     begin
         Result := True;
         Exit;
@@ -9480,11 +9525,11 @@ var
             ((SameText(suffix_pinyin, 'le')) and
             (suffix_text = string(Char($4E86)))) or
             ((SameText(suffix_pinyin, 'zhe')) and
-            (suffix_text = string(Char($7740)))) or
+            (suffix_text = variant_char($7740, $8457))) or
             ((SameText(suffix_pinyin, 'ba')) and
             (suffix_text = string(Char($5427)))) or
             ((SameText(suffix_pinyin, 'ma')) and
-            ((suffix_text = string(Char($5417))) or
+            ((suffix_text = variant_char($5417, $55CE)) or
             (suffix_text = string(Char($55CE))))) or
             ((SameText(suffix_pinyin, 'la')) and
             (suffix_text = string(Char($5566))));
@@ -9501,7 +9546,7 @@ var
         de_text := string(Char($7684));
         le_text := string(Char($4E86));
         ba_text := string(Char($5427));
-        ma_sc_text := string(Char($5417));
+        ma_sc_text := variant_char($5417, $55CE);
         ma_tc_text := string(Char($55CE));
 
         Result := ((SameText(pinyin_key, 'dema')) and
@@ -9772,37 +9817,37 @@ const
 
     function is_administrative_place_suffix(const suffix_text: string): Boolean;
     begin
-        Result := SameText(suffix_text, string(Char($533A))) or
+        Result := SameText(suffix_text, variant_char($533A, $5340)) or
             SameText(suffix_text, string(Char($5340))) or
-            SameText(suffix_text, string(Char($53BF))) or
+            SameText(suffix_text, variant_char($53BF, $7E23)) or
             SameText(suffix_text, string(Char($7E23))) or
             SameText(suffix_text, string(Char($5E02))) or
-            SameText(suffix_text, string(Char($9547))) or
+            SameText(suffix_text, variant_char($9547, $93AE)) or
             SameText(suffix_text, string(Char($93AE))) or
-            SameText(suffix_text, string(Char($4E61))) or
+            SameText(suffix_text, variant_char($4E61, $9109)) or
             SameText(suffix_text, string(Char($9109))) or
             SameText(suffix_text, string(Char($6751))) or
             SameText(suffix_text, string(Char($5DDE))) or
             SameText(suffix_text, string(Char($7701))) or
             SameText(suffix_text, string(Char($65D7))) or
             SameText(suffix_text, string(Char($76DF))) or
-            SameText(suffix_text, string(Char($65B0)) + string(Char($533A))) or
+            SameText(suffix_text, string(Char($65B0)) + variant_char($533A, $5340)) or
             SameText(suffix_text, string(Char($65B0)) + string(Char($5340))) or
-            SameText(suffix_text, string(Char($5730)) + string(Char($533A))) or
+            SameText(suffix_text, string(Char($5730)) + variant_char($533A, $5340)) or
             SameText(suffix_text, string(Char($5730)) + string(Char($5340))) or
             SameText(suffix_text, string(Char($8857)) + string(Char($9053))) or
             SameText(suffix_text, string(Char($81EA)) + string(Char($6CBB)) +
-            string(Char($533A))) or
+            variant_char($533A, $5340)) or
             SameText(suffix_text, string(Char($81EA)) + string(Char($6CBB)) +
             string(Char($5340))) or
             SameText(suffix_text, string(Char($81EA)) + string(Char($6CBB)) +
             string(Char($5DDE))) or
             SameText(suffix_text, string(Char($81EA)) + string(Char($6CBB)) +
-            string(Char($53BF))) or
+            variant_char($53BF, $7E23)) or
             SameText(suffix_text, string(Char($81EA)) + string(Char($6CBB)) +
             string(Char($7E23))) or
-            SameText(suffix_text, string(Char($7279)) + string(Char($522B)) +
-            string(Char($884C)) + string(Char($653F)) + string(Char($533A))) or
+            SameText(suffix_text, string(Char($7279)) + variant_char($522B, $5225) +
+            string(Char($884C)) + string(Char($653F)) + variant_char($533A, $5340)) or
             SameText(suffix_text, string(Char($7279)) + string(Char($5225)) +
             string(Char($884C)) + string(Char($653F)) + string(Char($5340)));
     end;
@@ -11897,6 +11942,10 @@ begin
     begin
         m_normalized_base_entry_cache.Clear;
     end;
+    if m_single_char_readings_cache <> nil then
+    begin
+        m_single_char_readings_cache.Clear;
+    end;
     if m_explicit_user_entry_cache <> nil then
     begin
         m_explicit_user_entry_cache.Clear;
@@ -12377,29 +12426,29 @@ var
 
     function is_administrative_place_suffix_local(const suffix_text: string): Boolean;
     begin
-        Result := SameText(suffix_text, string(Char($533A))) or       // 区
+        Result := SameText(suffix_text, variant_char($533A, $5340)) or       // 区
             SameText(suffix_text, string(Char($5340))) or             // 區
-            SameText(suffix_text, string(Char($53BF))) or             // 县
+            SameText(suffix_text, variant_char($53BF, $7E23)) or             // 县
             SameText(suffix_text, string(Char($7E23))) or             // 縣
             SameText(suffix_text, string(Char($5E02))) or             // 市
-            SameText(suffix_text, string(Char($9547))) or             // 镇
+            SameText(suffix_text, variant_char($9547, $93AE)) or             // 镇
             SameText(suffix_text, string(Char($93AE))) or             // 鎮
-            SameText(suffix_text, string(Char($4E61))) or             // 乡
+            SameText(suffix_text, variant_char($4E61, $9109)) or             // 乡
             SameText(suffix_text, string(Char($9109))) or             // 鄉
             SameText(suffix_text, string(Char($6751))) or             // 村
             SameText(suffix_text, string(Char($5DDE))) or             // 州
             SameText(suffix_text, string(Char($7701))) or             // 省
             SameText(suffix_text, string(Char($65D7))) or             // 旗
-            SameText(suffix_text, string(Char($65B0)) + string(Char($533A))) or // 新区
+            SameText(suffix_text, string(Char($65B0)) + variant_char($533A, $5340)) or // 新区
             SameText(suffix_text, string(Char($65B0)) + string(Char($5340))) or // 新區
             SameText(suffix_text, string(Char($81EA)) + string(Char($6CBB)) +
-            string(Char($533A))) or                                  // 自治区
+            variant_char($533A, $5340)) or                                  // 自治区
             SameText(suffix_text, string(Char($81EA)) + string(Char($6CBB)) +
             string(Char($5340))) or                                  // 自治區
             SameText(suffix_text, string(Char($81EA)) + string(Char($6CBB)) +
             string(Char($5DDE))) or                                  // 自治州
             SameText(suffix_text, string(Char($81EA)) + string(Char($6CBB)) +
-            string(Char($53BF))) or                                  // 自治县
+            variant_char($53BF, $7E23)) or                                  // 自治县
             SameText(suffix_text, string(Char($81EA)) + string(Char($6CBB)) +
             string(Char($7E23)));                                    // 自治縣
     end;
@@ -14362,7 +14411,7 @@ var
                     begin
                         Result := 240;
                     end
-                    else if text_value_local = string(Char($8BE6)) then // 诶
+                    else if text_value_local = variant_char($8BE6, $8A73) then // 诶
                     begin
                         Result := 180;
                     end
@@ -14370,7 +14419,7 @@ var
                     begin
                         Result := 160;
                     end
-                    else if text_value_local = string(Char($997F)) then // 饿
+                    else if text_value_local = variant_char($997F, $9913) then // 饿
                     begin
                         Result := 80;
                     end
@@ -15894,6 +15943,68 @@ begin
     // probe is too narrow and can wrongly purge valid learned selections such
     // as "ci -> 词" across host restarts.
     Result := normalized_base_entry_exists(pinyin_key, text_key);
+end;
+
+// The pinyin of the base rows of the character, as normalized_base_entry_exists
+// reads them (one query a character).
+function TncSqliteDictionary.get_single_char_readings(const text_unit: string): TArray<string>;
+const
+    select_sql = 'SELECT pinyin FROM dict_base WHERE text = ?1 LIMIT 64';
+var
+    stmt: Psqlite3_stmt;
+    step_result: Integer;
+    text_key: string;
+    reading: string;
+    known: string;
+    seen: Boolean;
+begin
+    Result := nil;
+    text_key := Trim(text_unit);
+    if (text_key = '') or (get_valid_cjk_codepoint_count(text_key) <> 1) or
+        (not m_base_ready) or (m_base_connection = nil) then
+    begin
+        Exit;
+    end;
+    if (m_single_char_readings_cache <> nil) and
+        m_single_char_readings_cache.TryGetValue(text_key, Result) then
+    begin
+        Exit;
+    end;
+
+    stmt := nil;
+    try
+        if m_base_connection.prepare(select_sql, stmt) and
+            m_base_connection.BindText(stmt, 1, text_key) then
+        begin
+            step_result := m_base_connection.step(stmt);
+            while step_result = SQLITE_ROW do
+            begin
+                reading := normalize_compact_pinyin_key(m_base_connection.ColumnText(stmt, 0));
+                if (reading <> '') and is_full_pinyin_key(reading) then
+                begin
+                    seen := False;
+                    for known in Result do
+                        if known = reading then
+                        begin
+                            seen := True;
+                            Break;
+                        end;
+                    if not seen then
+                        Result := Result + [reading];
+                end;
+                step_result := m_base_connection.step(stmt);
+            end;
+        end;
+    finally
+        if stmt <> nil then
+        begin
+            m_base_connection.finalize(stmt);
+        end;
+    end;
+    if m_single_char_readings_cache <> nil then
+    begin
+        m_single_char_readings_cache.AddOrSetValue(text_key, Result);
+    end;
 end;
 
 procedure TncSqliteDictionary.prune_suspicious_user_entries;

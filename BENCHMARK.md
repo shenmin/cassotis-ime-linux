@@ -17,32 +17,32 @@ Both benchmarks are derived from the developer's own novel,
 (Chinese title: **永恒的舞动**). Benchmark cases are kept separate from the
 corresponding model-training data.
 
-## Frozen v2.2.0 Baseline
+## Frozen v2.3.0 Baseline
 
-Linux v2.0.0 uses the final v2.2.0 engine and lexicon tags. The 2026-10-17
-validation uses newly built dictionaries and the corrected benchmark readings
-(38 long and five short cases). Earlier measurements remain dated historical
-records, not substitutes for the current gate. The corpus sizes are unchanged,
-but the inputs are not byte-identical to the earlier runs.
+Linux v2.1.0 targets the final v2.3.0 engine and lexicon tags. The current
+validation uses newly built dictionaries and the revised benchmark readings.
+Corpus sizes remain unchanged, but the revised short-case classifications have
+11,685 contested cases instead of 11,728. Historical measurements retain their
+original inputs and dates; they are not paired results on the revised cases.
 
-- [Cassotis IME v2.2.0](https://github.com/shenmin/cassotis-ime/tree/v2.2.0),
-  including custom phrases, revised short-phrase scoring and whole-line poetry
-  continuation, alongside the previously ported input and punctuation features.
-- [Cassotis Lexicon v2.2.0](https://github.com/shenmin/cassotis-lexicon/tree/v2.2.0)
+- [Cassotis IME v2.3.0](https://github.com/shenmin/cassotis-ime/tree/v2.3.0),
+  including incremental prefix retention, canonical reading checks, traditional
+  model views and short-phrase correction/selection improvements.
+- [Cassotis Lexicon v2.3.0](https://github.com/shenmin/cassotis-lexicon/tree/v2.3.0)
 - Simplified dictionary schema 24, SHA-256
-  `02ee7f4b31b9ad1ed1f1e3e592269e98878f31e751f4956885a209182c3e8d61`
+  `fea63432c7950e3c3a721bc98201598daf1e6ad796ee6572a59e4458605c5fdf`
 - Traditional dictionary schema 24, SHA-256
-  `68cb63fc54525cb3dd428cef15fc1dc6cd24652423a51319dc3caa76021b6ae9`
-- Simplified dictionary: 257,528 text-reading records, including 23,918
-  single-character and 233,610 multi-character records
-- Traditional dictionary: 260,730 text-reading records, including 24,177
-  single-character and 236,553 multi-character records
-- Simplified/traditional short-word promotion rows: 1,487 / 2,020
+  `1639d53bb922a74db992f3e5538a3bb76e1ccded154bc1c375fdd41f91a6fbb7`
+- Simplified dictionary: 258,694 text-reading records, including 23,918
+  single-character and 234,776 multi-character records
+- Traditional dictionary: 259,571 text-reading records, including 24,181
+  single-character and 235,390 multi-character records
+- Simplified/traditional short-word promotion rows: 1,488 / 1,668
 - Simplified/traditional completion competition rows: 42,453 / 42,448
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379
-- Simplified long-completion tables: 41,244 visible paths and 103,410 total
+- Simplified long-completion tables: 41,244 visible paths and 103,407 total
   text-recall rows
-- Traditional long-completion tables: 38,302 visible paths and 98,278 total
+- Traditional long-completion tables: 38,302 visible paths and 98,276 total
   text-recall rows
 
 Both databases include all 5,821 reviewed poetry next-line records. Counts and
@@ -51,6 +51,13 @@ compatibility are detailed in [Dictionary Compatibility](docs/DICTIONARY.md#dict
 Source and data consistency checks cover the engine, parsers, input schemes,
 models, and dictionaries, distinguishing platform adaptations from candidate
 behavior differences.
+
+Traditional input is scored through a simplified-text model view while preserving
+traditional candidates and commits. Both foreground decisions and background
+completion use this view. Next-character queries share the text-scoring graph
+run; unknown, omitted and unscored query slots cannot introduce a false penalty.
+The model graph, vocabulary, reading map and seven compact ranking units are
+unchanged from v2.0.0.
 
 The v2.0.0 port uses one approximately 150-million-parameter character language
 model for long sentences, short words, phrase correction and both forms of Tab
@@ -180,10 +187,60 @@ the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
 
+## v2.1.0 Native Measurements
+
+Measured on 2026-10-23 (UTC+8), with the frozen v2.3.0 engine, dictionaries
+and revised cases above. The x86_64 host is Ubuntu 26.04.1 in an eight-vCPU,
+16 GiB virtual machine on an Intel Core i5-12600K. Runners execute sequentially
+with eight model threads and no search, inference or completion wall-clock
+deadline; deterministic work bounds and ranking rules are unchanged.
+
+ARM64 qualification is pending. Results below are x86_64 measurements, not
+estimates for ARM64 or results borrowed from the previous release. The revised
+inputs also mean that the historical tables are not paired comparisons.
+
+### Candidate Selection
+
+Accuracy and latency are measured on the same complete queries. Times are in ms.
+
+| Track | Top1 | Top2 | Mean | Median | P95 | Maximum |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Long sentences | 13,429/16,300 | 14,310/16,300 | 158.108 | 160 | 234 | 515 |
+| Short, no context | 61,189/65,000 | 63,752/65,000 | 4.560 | 3 | 12 | 75 |
+| Short, context | 63,421/65,000 | 64,427/65,000 | 8.133 | 5 | 24 | 92 |
+
+Among 11,685 contested short cases, Top1/Top2 are 8,889/10,701 without context
+and 10,504/11,228 with context. The process high-water mark is 432,388 KiB
+(422.3 MiB); this is a measured peak, not a universal memory limit. Production
+foreground/background model safeguards remain 100/120 ms, so these deadline-free
+results do not imply that every production request returns the same candidates.
+
+### Completion
+
+All 65,000 short cases and 16,300 long cases completed. The short suite yields
+12,831 completion opportunities; average saved keys are per successful hit.
+
+| Track | Hits | Saved keys | Stability / coverage | Mean | Median | P95 | Maximum |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| Short completion | 10,512/12,831 | 27,702; 2.635 per hit | 2,151/2,214 stable adjacent keys | 19.349 | 18.384 | 58.821 | 273.871 |
+| Long continuation | 3,870/16,300 | 9,548 | 16,148/16,300 predictive prompts | 167.970 | 163 | 264 | 805 |
+
+Short-completion key P95 is 2.003 ms; its remaining latency columns include
+the completed background evaluation, even when the displayed hint does not
+change. Long continuation includes final candidate selection and the displayed
+completion; its mean decomposes into 7.301 ms of decoding, 87.925 ms of final
+candidate work and 72.744 ms of completion. There are 205 complete-sentence
+hits. Prompt coverage is not precision.
+
+All x86_64 corpus validators pass without relaxing their accuracy requirements.
+The x86_64 installed-package and SteamOS user-installation checks also pass;
+see [Compatibility](COMPATIBILITY.md). ARM64 qualification remains pending; this is not yet a
+completed dual-architecture release qualification.
+
 ## v2.0.0 Deadline-Free Measurements
 
 Both architectures completed all four corpus groups on 2026-10-17 (UTC+8),
-against the frozen v2.2.0 inputs above. Both use eight model threads, deterministic
+against its frozen v2.2.0 inputs. Both use eight model threads, deterministic
 search bounds and no inference or completion-acceptance deadline. The same query
 supplies each accuracy result and its latency; timing is not borrowed from a
 different, faster run. Long accuracy and latency traces were checked row for row.
@@ -241,7 +298,7 @@ settled timings reflect the expanded measurement scope, not changed candidates.
 The aarch64 maximum is retained, not trimmed as an outlier. Earlier timings only
 included background work when it changed the hint and are not directly comparable.
 
-### Current Corpus Gate Status
+### v2.0.0 Corpus Gate Status
 
 All full-corpus accuracy, coverage and memory checks pass on both architectures.
 The existing count floors were not lowered. Latency is published without a
@@ -258,7 +315,7 @@ This section preserves the earlier timed runs and separate deadline-free
 diagnostics. Their timing scope predates `all_finished_requests_v1`; they are
 not the replacement measurements above.
 
-These runs started on 2026-10-17 (UTC+8), using the final tagged inputs above.
+These runs started on 2026-10-17 (UTC+8), using the final v2.2.0 tagged inputs.
 Both machines run Ubuntu 26.04.1 with eight vCPUs: x86_64 has 16 GiB RAM on an
 Intel Core i5-12600K host; aarch64 has 8 GiB RAM on Apple silicon. These are
 independent VM measurements, not a controlled hardware comparison. Only one
@@ -480,8 +537,8 @@ key latency is 11.517/96.403 ms, without unloading the model.
 
 ## Historical v2.0.0 Pre-Alignment Measurements
 
-The following measurements use the earlier v2.0.0 source/data inputs, not the
-current v2.1.0 baseline. Their failures and original results remain recorded.
+The following measurements use the earlier v2.0.0 source/data inputs and predate
+the Windows v2.1.0 alignment. Their failures and original results remain recorded.
 
 Follow-up measurements were completed on 2026-10-13 and 2026-10-14 (UTC+8).
 All four full benchmark groups passed on aarch64. On x86_64, short-word and

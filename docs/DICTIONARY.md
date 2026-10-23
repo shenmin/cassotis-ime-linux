@@ -1,9 +1,11 @@
 # Dictionary And Ranking Boundary
 
-Cassotis IME for Linux v2.0.0 uses the v2.2.0 releases of
+Cassotis IME for Linux v2.1.0 uses the v2.3.0 releases of
 [Cassotis IME](https://github.com/shenmin/cassotis-ime) and
 [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon).
-The frozen tagged revisions are `5e13c37c` (engine) and `de053c83` (lexicon).
+The tagged revisions are [`a1838831`](https://github.com/shenmin/cassotis-ime/commit/a183883175a059cc2ededf29bed2844f9d0b3c65)
+(engine) and [`74b99381`](https://github.com/shenmin/cassotis-lexicon/commit/74b99381da3776fde97dc41fb133abbdae159a80)
+(lexicon).
 Base dictionaries are read-only. Learning, preferences, and completion feedback
 are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
 
@@ -11,25 +13,25 @@ are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
 
 - Current schema: `24`; minimum readable schema: `18`.
 - Simplified database SHA-256:
-  `02ee7f4b31b9ad1ed1f1e3e592269e98878f31e751f4956885a209182c3e8d61`.
+  `fea63432c7950e3c3a721bc98201598daf1e6ad796ee6572a59e4458605c5fdf`.
 - Traditional database SHA-256:
-  `68cb63fc54525cb3dd428cef15fc1dc6cd24652423a51319dc3caa76021b6ae9`.
-- Simplified base: 257,528 rows, including 23,918 single-character rows and
-  233,610 multi-character rows.
-- Traditional base: 260,730 rows, including 24,177 single-character rows and
-  236,553 multi-character rows.
-- Simplified/traditional short-query promotion rows: 1,487 / 2,020.
+  `1639d53bb922a74db992f3e5538a3bb76e1ccded154bc1c375fdd41f91a6fbb7`.
+- Simplified base: 258,694 rows, including 23,918 single-character rows and
+  234,776 multi-character rows.
+- Traditional base: 259,571 rows, including 24,181 single-character rows and
+  235,390 multi-character rows.
+- Simplified/traditional short-query promotion rows: 1,488 / 1,668.
 - Simplified/traditional completion-competition rows: 42,453 / 42,448.
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379.
-- Simplified long-completion recall: 103,410 rows, including 41,244 visible paths.
-- Traditional long-completion recall: 98,278 rows, including 38,302 visible paths.
+- Simplified long-completion recall: 103,407 rows, including 41,244 visible paths.
+- Traditional long-completion recall: 98,276 rows, including 38,302 visible paths.
 
 These are database row counts, including distinct readings of the same text,
 not counts of unique words. The schema version is stored in
 `meta(key = 'schema_version')`. SQLite text is UTF-8.
 
 Older supported schemas remain readable with their available optional signals;
-they do not provide the complete v2.0.0 behavior. Release dictionaries must
+they do not provide the complete v2.1.0 behavior. Release dictionaries must
 include the short-query promotion data as well as all other required tables.
 Promotion entries are checked against the corresponding words and base weights
 so a stale promotion file cannot silently change ranking.

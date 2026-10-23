@@ -16,6 +16,12 @@ The program links to platform libraries supplied by the target Linux
 distribution, including Free Pascal runtime components, SQLite, OpenCC, GLib, IBus,
 Fcitx 5, GTK, and PyGObject. Their respective licenses remain unchanged.
 
+The engine's traditional-to-simplified scoring table is derived from OpenCC
+(Apache-2.0). The source attribution is retained in
+`src/engine/nc_traditional_chars.inc`; the license is supplied in
+`third_party/opencc/LICENSE` and in the installed documentation under
+`third-party/opencc/LICENSE`.
+
 Portable binary bundles additionally include OpenCC and its conversion data
 (Apache-2.0), together with MARISA (BSD-2-Clause), as a fallback when a
 compatible system converter is unavailable. These files remain private to

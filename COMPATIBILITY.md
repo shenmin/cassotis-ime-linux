@@ -1,5 +1,49 @@
 # Compatibility
 
+## v2.1.0 Validation In Progress
+
+The 2026-10-23 (UTC+8) development build uses the released Windows engine and
+Cassotis Lexicon v2.3.0 inputs, including the revised benchmark readings and
+Taiwan-form traditional dictionary. The model files are unchanged.
+
+On Ubuntu 26.04.1 x86_64, 907 core tests, 69 final-Tab projection checks,
+SC/TC static and ready-neural candidate checks, isolated IBus/Fcitx 5 checks,
+and native next-character query, cache and cancellation checks pass. The new
+query interface is available to both foreground and background model views.
+
+The x86_64 process-cold trial returned the first key in 3.816 ms (maximum
+30.271 ms across 41 keys). With model initialization deliberately blocked,
+the first key took 3.881 ms and the maximum was 25.792 ms. These tests use
+fresh processes without dropping OS file caches. The text/next-character/query
+ABI checks also verify independent 100 ms foreground, 120 ms background and
+deadline-free test views, including supplementary-plane characters and the
+traditional-to-simplified query mapping.
+
+The deadline-free long/short corpus runs are complete: long Top1/Top2 are
+13,429/14,310 of 16,300; context-enabled short-word Top1/Top2 are
+63,421/64,427 of 65,000. Short completion hits 10,512/12,831, and long
+continuation hits 3,870/16,300 with 9,548 saved keys. All corpus validators pass.
+Full measurements are in [BENCHMARK.md](BENCHMARK.md) /
+[Chinese](BENCHMARK.CN.md).
+
+The x86_64 Debian and portable validation packages contain the frozen SC/TC
+databases and one verified model. Staged artifact checks, native inference,
+settings and third-party notice checks pass. Installed-package validation passed:
+
+| Platform | Verified checks |
+| --- | --- |
+| Ubuntu 26.04.1 x86_64, GNOME Wayland | Upgrade from 2.0.0, removal/reinstallation and unchanged personal dictionary/preferences; 30 input checks in each IBus/Fcitx 5, GTK 3/4, Wayland/XWayland combination (240 checks) |
+| SteamOS 3.8.14 x86_64, KDE X11, IBus 1.5.32 | User-directory upgrade, uninstall/reinstall, discovery, settings launcher and 31 GTK input checks; personal dictionary/preferences and mount options unchanged, with no system installation |
+
+The new installed-input checks cover Taiwan-form candidates, traditional Tab
+completion and switching back to simplified input, alongside punctuation,
+shuangpin, U/I/V input, English recognition and custom phrases. The SteamOS
+check uses the existing desktop mount configuration; it is not a new read-only
+mount test or a SteamOS Fcitx 5/game-mode claim.
+
+ARM64 validation is pending. Earlier architecture or desktop results below are
+historical, not acceptance of this build. No v2.1.0 release is qualified yet.
+
 ## v2.0.0 Validation
 
 The 2026-10-17 (UTC+8) alignment uses the released Cassotis IME and Cassotis

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.1.0 - Unreleased
+
+- Align the engine and dictionaries with Cassotis IME and Cassotis Lexicon
+  v2.3.0, keeping the existing single language model and seven compact ranking units.
+- Preserve a complete dictionary word while its last syllable is still being
+  typed; do not carry a generated phrase from the previous keystroke into its place.
+- Keep longer predictive words in the completion area instead of mixing them
+  into the numbered candidates, and validate matches against canonical syllables.
+- Score traditional candidates and context through a simplified model view while
+  preserving Taiwan-form output in candidates, correction and background completion.
+- Reduce implausible extra short phrases using next-character evidence from the
+  same model run, and weigh novel corrections against the shared language model.
+- Respect an unambiguous dictionary word's reading even when its characters have
+  more common individual readings. Retain valid drafts when a correction cannot
+  be aligned with the input.
+- Refresh dictionary readings, traditional forms and completion/promotion tables.
+
 ## 2.0.0 - 2026-10-18
 
 - Align the engine and dictionaries with Cassotis IME and Cassotis Lexicon

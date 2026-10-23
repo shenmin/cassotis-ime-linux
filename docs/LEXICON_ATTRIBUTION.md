@@ -25,7 +25,7 @@ THUOCL provides broad word-list and document-frequency signals. Filtered IT,
 idiom/allusion, medical and other specialist subsets are used as isolated
 vertical-layer sources. Catalogue-only specialist entries have low weights and
 are excluded from predictive completion; reviewed general-use terms remain
-eligible. See the admission and familiarity records in Cassotis Lexicon v2.2.0.
+eligible. See the admission and familiarity records in Cassotis Lexicon v2.3.0.
 
 ## jieba Dictionary
 

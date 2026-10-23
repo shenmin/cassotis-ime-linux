@@ -239,6 +239,8 @@ for document in DICTIONARY.md IPC.md LEXICON_ATTRIBUTION.md; do
 done
 install -m 0644 "$cassotis_root/third_party/onnxruntime/LICENSE" \
     "$(stage_path "$doc_path/third-party/onnxruntime/LICENSE")"
+install -D -m 0644 "$cassotis_root/third_party/opencc/LICENSE" \
+    "$(stage_path "$doc_path/third-party/opencc/LICENSE")"
 install -m 0644 \
     "$cassotis_root/third_party/onnxruntime/ThirdPartyNotices.txt" \
     "$(stage_path "$doc_path/third-party/onnxruntime/ThirdPartyNotices.txt")"
