@@ -189,53 +189,65 @@ not ignored failures, and are not included in binary release assets.
 
 ## v2.1.0 Native Measurements
 
-Measured on 2026-10-23 (UTC+8), with the frozen v2.3.0 engine, dictionaries
+Measured on 2026-10-23/24 (UTC+8), with the frozen v2.3.0 engine, dictionaries
 and revised cases above. The x86_64 host is Ubuntu 26.04.1 in an eight-vCPU,
-16 GiB virtual machine on an Intel Core i5-12600K. Runners execute sequentially
+16 GiB virtual machine on an Intel Core i5-12600K. The aarch64 VM uses eight
+vCPUs and 8 GiB on Apple silicon. Runners execute sequentially
 with eight model threads and no search, inference or completion wall-clock
 deadline; deterministic work bounds and ranking rules are unchanged.
 
-ARM64 qualification is pending. Results below are x86_64 measurements, not
-estimates for ARM64 or results borrowed from the previous release. The revised
-inputs also mean that the historical tables are not paired comparisons.
+Both architectures have passed all four corpus suites and installed-package checks.
+Results below are native measurements, not estimates or results borrowed from the
+previous release. The revised inputs also mean that the
+historical tables are not paired comparisons.
 
 ### Candidate Selection
 
 Accuracy and latency are measured on the same complete queries. Times are in ms.
 
-| Track | Top1 | Top2 | Mean | Median | P95 | Maximum |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Long sentences | 13,429/16,300 | 14,310/16,300 | 158.108 | 160 | 234 | 515 |
-| Short, no context | 61,189/65,000 | 63,752/65,000 | 4.560 | 3 | 12 | 75 |
-| Short, context | 63,421/65,000 | 64,427/65,000 | 8.133 | 5 | 24 | 92 |
+| Architecture | Track | Top1 | Top2 | Mean | Median | P95 | Maximum |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | Long sentences | 13,429/16,300 | 14,310/16,300 | 158.108 | 160 | 234 | 515 |
+| aarch64 | Long sentences | 13,429/16,300 | 14,309/16,300 | 115.434 | 112 | 185 | 606 |
+| x86_64 | Short, no context | 61,189/65,000 | 63,752/65,000 | 4.560 | 3 | 12 | 75 |
+| aarch64 | Short, no context | 61,189/65,000 | 63,752/65,000 | 5.199 | 3 | 14 | 88 |
+| x86_64 | Short, context | 63,421/65,000 | 64,427/65,000 | 8.133 | 5 | 24 | 92 |
+| aarch64 | Short, context | 63,420/65,000 | 64,427/65,000 | 8.713 | 5 | 25 | 199 |
 
 Among 11,685 contested short cases, Top1/Top2 are 8,889/10,701 without context
-and 10,504/11,228 with context. The process high-water mark is 432,388 KiB
-(422.3 MiB); this is a measured peak, not a universal memory limit. Production
-foreground/background model safeguards remain 100/120 ms, so these deadline-free
+on both architectures. With context they are 10,504/11,228 on x86_64 and
+10,503/11,228 on aarch64. Process high-water marks are 432,388 KiB (422.3 MiB)
+and 435,228 KiB (425.0 MiB), respectively; these are measured peaks, not universal
+memory limits. Production foreground/background model safeguards remain
+100/120 ms, so these deadline-free
 results do not imply that every production request returns the same candidates.
 
 ### Completion
 
-All 65,000 short cases and 16,300 long cases completed. The short suite yields
-12,831 completion opportunities; average saved keys are per successful hit.
+On both architectures, all 65,000 short cases and 16,300 long cases completed.
+The short suite yields 12,831 completion opportunities; average saved keys are
+per successful hit.
 
-| Track | Hits | Saved keys | Stability / coverage | Mean | Median | P95 | Maximum |
-| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
-| Short completion | 10,512/12,831 | 27,702; 2.635 per hit | 2,151/2,214 stable adjacent keys | 19.349 | 18.384 | 58.821 | 273.871 |
-| Long continuation | 3,870/16,300 | 9,548 | 16,148/16,300 predictive prompts | 167.970 | 163 | 264 | 805 |
+| Architecture | Track | Hits | Saved keys | Stability / coverage | Mean | Median | P95 | Maximum |
+| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| x86_64 | Short completion | 10,512/12,831 | 27,702; 2.635 per hit | 2,151/2,214 stable adjacent keys | 19.349 | 18.384 | 58.821 | 273.871 |
+| aarch64 | Short completion | 10,513/12,831 | 27,704; 2.635 per hit | 2,152/2,215 stable adjacent keys | 13.065 | 12.442 | 37.786 | 101.316 |
+| x86_64 | Long continuation | 3,870/16,300 | 9,548 | 16,148/16,300 predictive prompts | 167.970 | 163 | 264 | 805 |
+| aarch64 | Long continuation | 3,879/16,300 | 9,567 | 16,143/16,300 predictive prompts | 127.978 | 122 | 210 | 609 |
 
-Short-completion key P95 is 2.003 ms; its remaining latency columns include
-the completed background evaluation, even when the displayed hint does not
+Short-completion key P95 is 2.003 ms on x86_64 and 2.023 ms on aarch64. The
+remaining latency columns include the completed background evaluation, even when the displayed hint does not
 change. Long continuation includes final candidate selection and the displayed
 completion; its mean decomposes into 7.301 ms of decoding, 87.925 ms of final
-candidate work and 72.744 ms of completion. There are 205 complete-sentence
-hits. Prompt coverage is not precision.
+candidate work and 72.744 ms of completion on x86_64. The aarch64 means are
+7.209, 66.605 and 54.165 ms, respectively. Complete-sentence hits are 205 on
+x86_64 and 206 on aarch64. Prompt coverage is not precision.
 
-All x86_64 corpus validators pass without relaxing their accuracy requirements.
-The x86_64 installed-package and SteamOS user-installation checks also pass;
-see [Compatibility](COMPATIBILITY.md). ARM64 qualification remains pending; this is not yet a
-completed dual-architecture release qualification.
+All corpus validators pass on both architectures without relaxing their accuracy
+requirements. Both installed-package desktop matrices and the SteamOS
+user-installation checks also pass; see [Compatibility](COMPATIBILITY.md) for
+their scope. These measurements apply to the development build; historical
+release results below retain their original inputs and dates.
 
 ## v2.0.0 Deadline-Free Measurements
 

@@ -177,7 +177,7 @@ Up to 1.0.1 the Linux engine carried the separate models of Windows v1.31.0: ran
 - **One model.** A character-level autoregressive language model of about 150 million parameters (11 layers, 1,024 dimensions, a 12,017-character vocabulary, 8-bit quantized), trained by the project on independent Chinese corpora both as a plain language model and conditioned on Pinyin. It scores complete long-sentence candidates, corrects the chosen sentence against the typed syllables, chooses among short words, reranks one-key completions, and proposes and selects long-sentence Tab continuations. Model files of earlier releases are removed during upgrades.
 - **Seven compact units.** Three structural rankers remain for long-sentence search and the pool of complete candidates. Four small gradient-boosted policies turn language-model scores into decisions: the long-sentence choice, the short-word choice, one-key completion and Tab continuation. They are compiled in with the same parameters as on Windows. The no-context short-word choice is a table precomputed in the dictionary.
 - **Scores that do not depend on the call.** The model is quantized with fixed activation ranges and computes attention with an operator of its own, so a text gets the same scores however it is batched and whatever was computed before. A long sentence typed key by key gets the same candidates as the same Pinyin entered at once.
-- **Less memory.** In the v2.0.0 tests, the engine service settled at about 311 MiB on x86_64 and 320 MiB on aarch64 after loading and five idle seconds, against about 437 MiB in 1.0.0. These are historical measurements, not a new ARM64 test of v2.1.0.
+- **Less memory.** In the v2.0.0 tests, the engine service settled at about 311 MiB on x86_64 and 320 MiB on aarch64 after loading and five idle seconds, against about 437 MiB in 1.0.0. These are historical idle-memory measurements, separate from the current benchmark peaks.
 
 ### How candidates are ranked
 - **Long sentences.** Lexicon-constrained search builds complete candidates; two rankers decide which paths survive pruning and a third orders the pool of complete candidates. The language model scores the leading candidates and the long-sentence policy picks the first and the second. For full-Pinyin input in the simplified variant, the model then rewrites the chosen sentence against the typed syllables and up to 48 characters before the input, which repairs small homophone errors; user words and exact full-query dictionary matches are left alone.
@@ -196,10 +196,10 @@ Up to 1.0.1 the Linux engine carried the separate models of Windows v1.31.0: ran
 
 ## Benchmarks
 
-The `v2.1.0-dev` rows are complete native x86_64 measurements of the current development build; ARM64 qualification is pending. The `v2.0.0` rows retain the previous release's measurements. Since v2.0.0, these corpus benchmarks have no wall-clock search, model or completion deadline: accuracy and latency come from the same completed query, with eight model threads. Deterministic search bounds and ranking rules are unchanged.
+The `v2.1.0-dev` rows are native measurements of the current development build. Both architectures have passed all four corpus suites and installed-package checks; see [Compatibility](COMPATIBILITY.md) for their scope. The `v2.0.0` rows retain the previous release's measurements. Since v2.0.0, these corpus benchmarks have no wall-clock search, model or completion deadline: accuracy and latency come from the same completed query, with eight model threads. Deterministic search bounds and ranking rules are unchanged.
 Test methods, the corpus and the scoring rules are in [BENCHMARK.md](BENCHMARK.md) ([Chinese](BENCHMARK.CN.md)). The cases are those of Cassotis IME for Windows, taken from the developer's own novel [**Elegance in Timelessness** (永恒的舞动)](https://www.qidian.com/book/1037259117/) and kept separate from all training data.
 
-The 2.1.0 development results were measured on 2026-10-23 (UTC+8), on Ubuntu 26.04.1 x86_64 with eight vCPUs and 16 GiB on an Intel Core i5-12600K host. The 2.0.0 results were measured on 2026-10-17 on that x86_64 machine and an eight-vCPU, 8 GiB aarch64 VM on Apple silicon. These are not controlled hardware comparisons. The current cases include further reading corrections and have 11,685 contested short-word cases, rather than 11,728; comparisons with historical releases are not paired case-for-case. Latencies are in ms.
+The 2.1.0 development results were measured on 2026-10-23/24 (UTC+8), on Ubuntu 26.04.1 VMs with eight vCPUs: x86_64 has 16 GiB on an Intel Core i5-12600K host, and aarch64 has 8 GiB on Apple silicon. The 2.0.0 results were measured on 2026-10-17 on the same machines. These are not controlled hardware comparisons. The current cases include further reading corrections and have 11,685 contested short-word cases, rather than 11,728; comparisons with historical releases are not paired case-for-case. Latencies are in ms.
 
 The installed input method still uses foreground 100 ms and background 120 ms safeguards. These deadline-free scores do not claim identical results under production deadlines: the earlier timed x86_64 long run scored 37 fewer Top1 and 36 fewer Top2. That result has not been erased or fixed by changing the benchmark protocol. Full results, timing scopes and historical measurements are retained in [BENCHMARK.md](BENCHMARK.md).
 
@@ -208,6 +208,7 @@ The installed input method still uses foreground 100 ms and background 120 ms sa
 | Version | Architecture | Top1 | Top2 | Mean (ms) | P50 (ms) | P95 (ms) | Max (ms) |
 |---|---|---:|---:|---:|---:|---:|---:|
 | `v2.1.0-dev` | x86_64 | 13429/16300 (82.39%) | 14310/16300 (87.79%) | 158.108 | 160 | 234 | 515 |
+| `v2.1.0-dev` | aarch64 | 13429/16300 (82.39%) | 14309/16300 (87.79%) | 115.434 | 112 | 185 | 606 |
 | `v2.0.0` | x86_64 | 13397/16300 (82.19%) | 14281/16300 (87.61%) | 147.95 | 148 | 223 | 1061 |
 | `v2.0.0` | aarch64 | 13399/16300 (82.20%) | 14282/16300 (87.62%) | 115.22 | 112 | 185 | 536 |
 | `v1.0.1`<br/>`v1.0.0` | x86_64 | 12940/16300 (79.39%) | 13534/16300 (83.03%) | 114.70 | 114 | 178 | 486 |
@@ -226,6 +227,7 @@ From v2.0.0 onward, accuracy and latency come from the same deadline-free run. T
 | Version | Architecture | Top1 | Top2 | Contested Top1 | Contested Top2 | Mean (ms) | P50 (ms) | P95 (ms) | Max (ms) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
 | `v2.1.0-dev` | x86_64 | 63421/65000 (97.57%) | 64427/65000 (99.12%) | 10504/11685 (89.89%) | 11228/11685 (96.09%) | 8.133 | 5 | 24 | 92 |
+| `v2.1.0-dev` | aarch64 | 63420/65000 (97.57%) | 64427/65000 (99.12%) | 10503/11685 (89.88%) | 11228/11685 (96.09%) | 8.713 | 5 | 25 | 199 |
 | `v2.0.0` | x86_64 | 63364/65000 (97.48%) | 64292/65000 (98.91%) | 10533/11728 (89.81%) | 11244/11728 (95.87%) | 8.637 | 5 | 25 | 113 |
 | `v2.0.0` | aarch64 | 63361/65000 (97.48%) | 64291/65000 (98.91%) | 10532/11728 (89.80%) | 11244/11728 (95.87%) | 7.909 | 5 | 21 | 84 |
 | `v1.0.1`<br/>`v1.0.0` | x86_64 | 63036/65000 (96.98%) | 64104/65000 (98.62%) | 10491/11728 (89.45%) | 11196/11728 (95.46%) | 8.286 | 8 | 20 | 42 |
@@ -237,13 +239,14 @@ From v2.0.0 onward, accuracy and latency come from the same deadline-free run. T
 | `v0.8.0` | x86_64 | 61860/65000 (95.17%) | 63549/65000 (97.77%) | 9596/11728 (81.82%) | 10775/11728 (91.87%) | 11.819 | 9 | 29 | 73 |
 | `v0.8.0` | aarch64 | 61860/65000 (95.17%) | 63549/65000 (97.77%) | 9596/11728 (81.82%) | 10775/11728 (91.87%) | 6.552 | 5 | 16 | 36 |
 
-The table uses the runs with the preceding text. `Contested` is the subset whose Pinyin belongs to at least two target words in the corpus. Without preceding text, 2.1.0-dev scores 61189/63752 on x86_64; 2.0.0 scored 61173/63618 on both architectures with its earlier inputs.
+The table uses the runs with the preceding text. `Contested` is the subset whose Pinyin belongs to at least two target words in the corpus. Without preceding text, 2.1.0-dev scores 61189/63752 on both architectures; 2.0.0 scored 61173/63618 with its earlier inputs.
 
 ### One-key Completion Context Benchmark-12831
 
 | Version | Architecture | Completion hits | Average saved keys | Keystroke stability | Key P95 (ms) | Settled P95 (ms) |
 | --- | --- | --- | --- | --- | --- | --- |
 | `v2.1.0-dev` | x86_64 | 10512/12831 (81.93%) | 2.635 | 2151/2214 (97.15%) | 2.003 | 58.821 |
+| `v2.1.0-dev` | aarch64 | 10513/12831 (81.93%) | 2.635 | 2152/2215 (97.16%) | 2.023 | 37.786 |
 | `v2.0.0` | x86_64 | 10456/12831 (81.49%) | 2.632 | 2131/2193 (97.17%) | 2.137 | 58.125 |
 | `v2.0.0` | aarch64 | 10458/12831 (81.51%) | 2.632 | 2133/2195 (97.18%) | 2.137 | 59.205 |
 | `v1.0.1`<br/>`v1.0.0` | x86_64 | 10336/12831 (80.55%) | 2.638 | 2123/2185 (97.16%) | 1.441 | 16.180 |
@@ -260,6 +263,7 @@ The 65,000 short-word cases give 12,831 completion opportunities. For v2.0.0, se
 | Version | Architecture | Local continuation hits | Predictive coverage | Total saved keys | P95 (ms) |
 | --- | --- | --- | --- | --- | --- |
 | `v2.1.0-dev` | x86_64 | 3870/16300 (23.74%) | 16148/16300 (99.07%) | 9548 | 264 |
+| `v2.1.0-dev` | aarch64 | 3879/16300 (23.80%) | 16143/16300 (99.04%) | 9567 | 210 |
 | `v2.0.0` | x86_64 | 3766/16300 (23.10%) | 16121/16300 (98.90%) | 9271 | 251 |
 | `v2.0.0` | aarch64 | 3778/16300 (23.18%) | 16114/16300 (98.86%) | 9298 | 194 |
 | `v1.0.1`<br/>`v1.0.0` | x86_64 | 3514/16300 (21.56%) | 15814/16300 (97.02%) | 7479 | 196 |

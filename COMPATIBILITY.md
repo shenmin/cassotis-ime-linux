@@ -1,38 +1,45 @@
 # Compatibility
 
-## v2.1.0 Validation In Progress
+## v2.1.0 Development Validation
 
-The 2026-10-23 (UTC+8) development build uses the released Windows engine and
+The 2026-10-23/24 (UTC+8) development validation uses the released Windows engine and
 Cassotis Lexicon v2.3.0 inputs, including the revised benchmark readings and
 Taiwan-form traditional dictionary. The model files are unchanged.
 
-On Ubuntu 26.04.1 x86_64, 907 core tests, 69 final-Tab projection checks,
+On both Ubuntu 26.04.1 x86_64 and aarch64, 907 core tests, 69 final-Tab projection checks,
 SC/TC static and ready-neural candidate checks, isolated IBus/Fcitx 5 checks,
 and native next-character query, cache and cancellation checks pass. The new
 query interface is available to both foreground and background model views.
 
-The x86_64 process-cold trial returned the first key in 3.816 ms (maximum
-30.271 ms across 41 keys). With model initialization deliberately blocked,
-the first key took 3.881 ms and the maximum was 25.792 ms. These tests use
-fresh processes without dropping OS file caches. The text/next-character/query
+Fresh-process input checks passed on both architectures, each with 41 keys:
+
+| Architecture | Process-cold first / maximum key (ms) | Blocked-model first / maximum key (ms) |
+| --- | ---: | ---: |
+| x86_64 | 3.816 / 30.271 | 3.881 / 25.792 |
+| aarch64 | 3.823 / 35.745 | 4.165 / 27.355 |
+
+These tests do not drop OS file caches. Blocked-model tests deliberately hold
+model initialization and verify input again after releasing it. The text/next-character/query
 ABI checks also verify independent 100 ms foreground, 120 ms background and
 deadline-free test views, including supplementary-plane characters and the
 traditional-to-simplified query mapping.
 
-The deadline-free long/short corpus runs are complete: long Top1/Top2 are
-13,429/14,310 of 16,300; context-enabled short-word Top1/Top2 are
-63,421/64,427 of 65,000. Short completion hits 10,512/12,831, and long
-continuation hits 3,870/16,300 with 9,548 saved keys. All corpus validators pass.
+All four deadline-free corpus suites passed on both architectures. Long
+Top1/Top2 are 13,429/14,310 on x86_64 and 13,429/14,309 on aarch64, out of
+16,300. Context-enabled short Top1/Top2 are 63,421/64,427 and 63,420/64,427
+out of 65,000. Short completion hits 10,512/12,831 and 10,513/12,831;
+long continuation hits 3,870/16,300 and 3,879/16,300, saving 9,548 and 9,567
+keys. Accuracy requirements were not relaxed.
 Full measurements are in [BENCHMARK.md](BENCHMARK.md) /
 [Chinese](BENCHMARK.CN.md).
 
-The x86_64 Debian and portable validation packages contain the frozen SC/TC
+Both architectures' Debian and portable validation packages contain the frozen SC/TC
 databases and one verified model. Staged artifact checks, native inference,
 settings and third-party notice checks pass. Installed-package validation passed:
 
 | Platform | Verified checks |
 | --- | --- |
-| Ubuntu 26.04.1 x86_64, GNOME Wayland | Upgrade from 2.0.0, removal/reinstallation and unchanged personal dictionary/preferences; 30 input checks in each IBus/Fcitx 5, GTK 3/4, Wayland/XWayland combination (240 checks) |
+| Ubuntu 26.04.1 x86_64 and aarch64, GNOME Wayland | Upgrade from 2.0.0, removal/reinstallation and unchanged personal dictionary/preferences; 30 input checks in each IBus/Fcitx 5, GTK 3/4, Wayland/XWayland combination (240 checks per architecture) |
 | SteamOS 3.8.14 x86_64, KDE X11, IBus 1.5.32 | User-directory upgrade, uninstall/reinstall, discovery, settings launcher and 31 GTK input checks; personal dictionary/preferences and mount options unchanged, with no system installation |
 
 The new installed-input checks cover Taiwan-form candidates, traditional Tab
@@ -41,8 +48,9 @@ shuangpin, U/I/V input, English recognition and custom phrases. The SteamOS
 check uses the existing desktop mount configuration; it is not a new read-only
 mount test or a SteamOS Fcitx 5/game-mode claim.
 
-ARM64 validation is pending. Earlier architecture or desktop results below are
-historical, not acceptance of this build. No v2.1.0 release is qualified yet.
+These results qualify the tested development build, not an already published
+v2.1.0 release. Earlier architecture or desktop results below retain their
+historical scope; they are not substituted for the checks above.
 
 ## v2.0.0 Validation
 
