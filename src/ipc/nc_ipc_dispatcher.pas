@@ -94,6 +94,9 @@ var
     current_state: TncEngineState;
     payload_error: string;
     operation_succeeded: Boolean;
+    import_path: string;
+    import_entries, import_count: Integer;
+    path_bytes: TBytes;
 begin
     InitializeResponse(request, response);
     if (request.flags and c_ipc_known_flags) <> 0 then
@@ -254,6 +257,25 @@ begin
                 if not RequireEmptyPayload(request, response) then
                     Exit;
                 FShutdownRequested := True;
+            end;
+        imt_import_user_words:
+            begin
+                import_path := nc_payload_as_string(request.payload);
+                path_bytes := nc_utf8_payload(import_path);
+                if (Length(request.payload) = 0) or (Length(request.payload) > 4096) or
+                    (Pos(#0, import_path) > 0) or (import_path[1] <> '/') or
+                    (Length(path_bytes) <> Length(request.payload)) or
+                    not CompareMem(@path_bytes[0], @request.payload[0], Length(path_bytes)) then
+                begin
+                    SetErrorResponse(request, response, c_ipc_dispatch_error_invalid_payload,
+                        'Expected an absolute UTF-8 file path');
+                    Exit;
+                end;
+                if FEngine.ImportUserWords(import_path, import_entries, import_count) then
+                    response.payload := nc_utf8_payload(IntToStr(import_entries) + #9 + IntToStr(import_count))
+                else
+                    SetErrorResponse(request, response, c_ipc_dispatch_error_operation_failed,
+                        'Unable to import word frequencies; check the file format and user database');
             end;
         imt_clear_user_dictionary:
             begin

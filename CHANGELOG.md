@@ -3,7 +3,13 @@
 ## 2.1.0 - Unreleased
 
 - Align the engine and dictionaries with Cassotis IME and Cassotis Lexicon
-  v2.3.0, keeping the existing single language model and seven compact ranking units.
+  v2.4.0, keeping the existing single language model and seven compact ranking units.
+- Retain strongly supported common words when no context is available, and let
+  short phrases stand on their own rather than over-favoring a clause ending.
+- Import personal word frequencies from CSV, TSV or text exports in Advanced
+  settings, with confirmation, validated learning and an atomic transaction.
+- Clear learned Tab continuation feedback together with the rest of the user
+  dictionary; leave custom phrases intact.
 - Preserve a complete dictionary word while its last syllable is still being
   typed; do not carry a generated phrase from the previous keystroke into its place.
 - Keep longer predictive words in the completion area instead of mixing them

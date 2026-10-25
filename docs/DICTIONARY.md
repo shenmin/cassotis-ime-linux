@@ -1,10 +1,10 @@
 # Dictionary And Ranking Boundary
 
-Cassotis IME for Linux v2.1.0 uses the v2.3.0 releases of
+Cassotis IME for Linux v2.1.0 uses the v2.4.0 releases of
 [Cassotis IME](https://github.com/shenmin/cassotis-ime) and
 [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon).
-The tagged revisions are [`a1838831`](https://github.com/shenmin/cassotis-ime/commit/a183883175a059cc2ededf29bed2844f9d0b3c65)
-(engine) and [`74b99381`](https://github.com/shenmin/cassotis-lexicon/commit/74b99381da3776fde97dc41fb133abbdae159a80)
+The frozen releases are [v2.4.0](https://github.com/shenmin/cassotis-ime/tree/v2.4.0)
+(engine) and [v2.4.0](https://github.com/shenmin/cassotis-lexicon/tree/v2.4.0)
 (lexicon).
 Base dictionaries are read-only. Learning, preferences, and completion feedback
 are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
@@ -13,14 +13,14 @@ are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
 
 - Current schema: `24`; minimum readable schema: `18`.
 - Simplified database SHA-256:
-  `fea63432c7950e3c3a721bc98201598daf1e6ad796ee6572a59e4458605c5fdf`.
+  `d301dc9370a3f476abb9d221a86b3018f7045e94ccaa95137caf9c790e189766`.
 - Traditional database SHA-256:
-  `1639d53bb922a74db992f3e5538a3bb76e1ccded154bc1c375fdd41f91a6fbb7`.
-- Simplified base: 258,694 rows, including 23,918 single-character rows and
-  234,776 multi-character rows.
-- Traditional base: 259,571 rows, including 24,181 single-character rows and
-  235,390 multi-character rows.
-- Simplified/traditional short-query promotion rows: 1,488 / 1,668.
+  `465318995f0b5f4447c12c108317f2b09c21388fd5c528e9a096f13ae42739ea`.
+- Simplified base: 259,524 rows, including 23,918 single-character rows and
+  235,606 multi-character rows.
+- Traditional base: 260,404 rows, including 24,181 single-character rows and
+  236,223 multi-character rows.
+- Simplified/traditional short-query promotion rows: 1,489 / 1,672.
 - Simplified/traditional completion-competition rows: 42,453 / 42,448.
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379.
 - Simplified long-completion recall: 103,407 rows, including 41,244 visible paths.

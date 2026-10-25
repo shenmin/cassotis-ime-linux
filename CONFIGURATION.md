@@ -152,8 +152,40 @@ ordinary text input cannot be captured accidentally.
 
 The Advanced page can show engine scores in candidate annotations, open the
 data directory, or clear the user dictionary after confirmation. Clearing the
-user dictionary removes learned words and related preferences and cannot be
-undone.
+user dictionary removes learned words and related preferences, including Tab
+continuation feedback and imported frequencies, and cannot be undone. Custom
+phrases are kept.
+
+### Importing Word Frequencies
+
+In Advanced, choose **Import word frequencies** (导入输入频次), read the warning,
+then select a file containing your own typing statistics. This changes candidate
+ranking immediately; it is not a replacement base dictionary and does not need
+Apply. Use only statistics you trust. Reimporting the same file adds its counts
+again; an import cannot be undone separately. Back up your user data with the
+engine stopped if you need to restore it later.
+
+Accepted formats include CSV, tab-separated text, and numbered text exports:
+
+```text
+实现,shixian,30
+shiyan,实验,12
+"测试","ceshi","5"
+1. 输入法 — 20 次 — shurufa
+```
+
+For CSV/TSV, fields may be in any order; the count is optional and defaults to
+one. ASCII/full-width commas and optionally quoted fields are accepted. Use
+full pinyin, not abbreviations or Double Pinyin codes. Blank lines, `#` comments
+and invalid rows are skipped. UTF-8, BOM-marked UTF-16 and GBK files up to 16 MiB
+are supported.
+
+Entries pass normal user-learning validation; a parsed row may still be rejected
+if its text and reading do not match. Each row contributes at most 400 selections,
+and the most frequent row for an input becomes its latest choice. The entire
+import is one transaction; database errors roll it back. The result reports both
+parsed and imported rows. It takes effect in IBus and Fcitx 5 and survives an
+engine restart. Complete any pending composition before importing.
 
 Default paths follow the XDG base-directory specification:
 

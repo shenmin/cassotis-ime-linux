@@ -20,6 +20,7 @@ uses
     nc_types,
     nc_dictionary_reader,
     nc_dictionary_intf,
+    nc_user_word_import,
     nc_fuzzy_pinyin,
     nc_pinyin_parser,
     nc_exact_component_sort,
@@ -182,6 +183,7 @@ type
         m_literal_user_words_available: Integer;
         m_exact_base_entry_cache: TDictionary<string, Boolean>;
         m_normalized_base_entry_cache: TDictionary<string, Boolean>;
+        m_completion_corpus_score_cache: TDictionary<string, Integer>;
         m_single_char_readings_cache: TDictionary<string, TArray<string>>;
         m_explicit_user_entry_cache: TDictionary<string, Boolean>;
         m_literal_user_entry_cache: TDictionary<string, Boolean>;
@@ -458,6 +460,9 @@ type
         function should_suppress_exact_query_learning(const pinyin: string; const text: string): Boolean; override;
         procedure remove_user_entry(const pinyin: string; const text: string); override;
         function clear_user_dictionary: Boolean; override;
+        function import_user_choices(const entries: TncUserWordImportEntries;
+            out imported: Integer): Boolean; override;
+        function get_completion_corpus_score(const pinyin, text: string): Integer; override;
         function get_candidate_penalty(const pinyin: string; const text: string): Integer; override;
         function get_last_lookup_debug_hint: string;
         property db_path: string read m_base_db_path;
@@ -2758,6 +2763,7 @@ begin
     m_literal_user_words_available := -1;
     m_exact_base_entry_cache := TDictionary<string, Boolean>.Create;
     m_normalized_base_entry_cache := TDictionary<string, Boolean>.Create;
+    m_completion_corpus_score_cache := TDictionary<string, Integer>.Create;
     m_single_char_readings_cache := TDictionary<string, TArray<string>>.Create;
     m_explicit_user_entry_cache := TDictionary<string, Boolean>.Create;
     m_literal_user_entry_cache := TDictionary<string, Boolean>.Create;
@@ -3051,6 +3057,7 @@ begin
         m_normalized_base_entry_cache.Free;
         m_normalized_base_entry_cache := nil;
     end;
+    FreeAndNil(m_completion_corpus_score_cache);
     if m_single_char_readings_cache <> nil then
     begin
         m_single_char_readings_cache.Free;
@@ -11942,6 +11949,7 @@ begin
     begin
         m_normalized_base_entry_cache.Clear;
     end;
+    if m_completion_corpus_score_cache <> nil then m_completion_corpus_score_cache.Clear;
     if m_single_char_readings_cache <> nil then
     begin
         m_single_char_readings_cache.Clear;
@@ -19398,6 +19406,8 @@ begin
                 'DELETE FROM dict_user_context_query_choice;')) or
             (not m_user_connection.exec(
                 'DELETE FROM dict_user_completion_feedback;')) or
+            (not m_user_connection.exec(
+                'DELETE FROM dict_user_long_completion_feedback;')) or
             (not m_user_connection.exec('DELETE FROM dict_user_penalty;')) or
             (not m_user_connection.exec('DELETE FROM dict_user_bigram;')) or
             (not m_user_connection.exec('DELETE FROM dict_user_trigram;')) or
@@ -19430,6 +19440,173 @@ begin
             clear_user_read_caches;
         end;
     end;
+end;
+
+function TncSqliteDictionary.import_user_choices(const entries: TncUserWordImportEntries;
+    out imported: Integer): Boolean;
+const
+    c_max_import_count = 400;
+var
+    order: TArray<Integer>;
+    idx, extra: Integer;
+    key, text: string;
+    stmt: Psqlite3_stmt;
+    found: Boolean;
+
+    function before(const left, right: Integer): Boolean;
+    begin
+        Result := (entries[left].count < entries[right].count) or
+            ((entries[left].count = entries[right].count) and (left < right));
+    end;
+
+    procedure sort(const lo, hi: Integer);
+    var l, r, pivot, swap: Integer;
+    begin
+        l := lo; r := hi; pivot := order[lo + (hi - lo) div 2];
+        repeat
+            while before(order[l], pivot) do Inc(l);
+            while before(pivot, order[r]) do Dec(r);
+            if l <= r then
+            begin
+                swap := order[l]; order[l] := order[r]; order[r] := swap;
+                Inc(l); Dec(r);
+            end;
+        until l > r;
+        if lo < r then sort(lo, r);
+        if l < hi then sort(l, hi);
+    end;
+
+    procedure add_commits(const sql, stored_text: string; const count: Integer);
+    var update_stmt: Psqlite3_stmt;
+    begin
+        update_stmt := nil;
+        try
+            if not (m_user_connection.prepare(sql, update_stmt) and
+                m_user_connection.BindText(update_stmt, 1, key) and
+                m_user_connection.BindText(update_stmt, 2, stored_text) and
+                m_user_connection.BindInt(update_stmt, 3, count) and
+                (m_user_connection.step(update_stmt) = SQLITE_DONE)) then
+                raise Exception.Create('Unable to import word frequency');
+        finally
+            if update_stmt <> nil then m_user_connection.finalize(update_stmt);
+        end;
+    end;
+
+begin
+    imported := 0;
+    Result := False;
+    if (not ensure_open) or (not m_user_ready) or (m_user_connection = nil) or
+        (m_write_batch_depth <> 0) then Exit;
+    SetLength(order, Length(entries));
+    for idx := 0 to High(order) do order[idx] := idx;
+    // Latest choice must be the most frequent word, including counts over 400.
+    if Length(order) > 1 then sort(0, High(order));
+    begin_learning_batch;
+    if m_write_batch_depth <> 1 then Exit;
+    try
+        for idx in order do
+        begin
+            key := LowerCase(Trim(entries[idx].pinyin));
+            text := Trim(entries[idx].text);
+            if (key = '') or (text = '') or (entries[idx].count <= 0) or
+                (not is_full_pinyin_key(key)) then Continue;
+            record_commit_internal(key, text, True, False);
+            stmt := nil;
+            found := False;
+            try
+                if not (m_user_connection.prepare(
+                    'SELECT 1 FROM dict_user_stats WHERE pinyin=?1 AND text=?2 LIMIT 1', stmt) and
+                    m_user_connection.BindText(stmt, 1, key) and
+                    m_user_connection.BindText(stmt, 2,
+                        user_storage_text('dict_user_stats', key, text))) then
+                    raise Exception.Create('Unable to read imported learning');
+                case m_user_connection.step(stmt) of
+                    SQLITE_ROW: found := True;
+                    SQLITE_DONE: ;
+                else
+                    raise Exception.Create('Unable to read imported learning');
+                end;
+            finally
+                if stmt <> nil then m_user_connection.finalize(stmt);
+            end;
+            if not found then Continue;
+            extra := Min(entries[idx].count, c_max_import_count) - 1;
+            if extra > 0 then
+            begin
+                add_commits('UPDATE dict_user_stats SET commit_count=commit_count+?3 ' +
+                    'WHERE pinyin=?1 AND text=?2', user_storage_text('dict_user_stats', key, text), extra);
+                add_commits('UPDATE dict_user SET weight=weight+?3 WHERE pinyin=?1 AND text=?2',
+                    user_storage_text('dict_user', key, text), extra);
+            end;
+            Inc(imported);
+        end;
+        // Unlike opportunistic typing writes, a bulk import must report commit failure.
+        if not m_user_connection.exec('COMMIT;') then
+            raise Exception.Create('Unable to commit imported learning');
+        m_write_batch_depth := 0;
+        clear_user_read_caches;
+        note_user_data_changed;
+        Result := True;
+    except
+        rollback_learning_batch;
+        clear_user_read_caches;
+        imported := 0;
+    end;
+end;
+
+function TncSqliteDictionary.get_completion_corpus_score(const pinyin, text: string): Integer;
+const c_cache_limit = 16384;
+var
+    pinyin_key, text_key, cache_key, stored: string;
+    stmt: Psqlite3_stmt;
+
+    function prior_score(const key: string): Integer;
+    var prior_stmt: Psqlite3_stmt;
+    begin
+        Result := -1;
+        prior_stmt := nil;
+        try
+            if m_base_connection.prepare(
+                'SELECT corpus_score FROM dict_base_completion_prior WHERE pinyin=?1 AND text=?2 LIMIT 1', prior_stmt) and
+                m_base_connection.BindText(prior_stmt, 1, key) and
+                m_base_connection.BindText(prior_stmt, 2, text_key) and
+                (m_base_connection.step(prior_stmt) = SQLITE_ROW) then
+                Result := m_base_connection.ColumnInt(prior_stmt, 0);
+        finally
+            if prior_stmt <> nil then m_base_connection.finalize(prior_stmt);
+        end;
+    end;
+
+begin
+    Result := -1;
+    pinyin_key := LowerCase(Trim(pinyin));
+    text_key := Trim(text);
+    if (pinyin_key = '') or (text_key = '') or (not ensure_open) or (not m_base_ready) or
+        (m_base_connection = nil) then Exit;
+    cache_key := pinyin_key + #1 + text_key;
+    if m_completion_corpus_score_cache.TryGetValue(cache_key, Result) then Exit;
+    Result := prior_score(pinyin_key);
+    if Result < 0 then
+    begin
+        stmt := nil;
+        try
+            if m_base_connection.prepare('SELECT pinyin FROM dict_base WHERE text=?1 LIMIT 64', stmt) and
+                m_base_connection.BindText(stmt, 1, text_key) then
+                while m_base_connection.step(stmt) = SQLITE_ROW do
+                begin
+                    stored := m_base_connection.ColumnText(stmt, 0);
+                    if (stored <> pinyin_key) and same_normalized_pinyin_key(stored, pinyin_key) then
+                    begin
+                        Result := prior_score(stored);
+                        Break;
+                    end;
+                end;
+        finally
+            if stmt <> nil then m_base_connection.finalize(stmt);
+        end;
+    end;
+    if m_completion_corpus_score_cache.Count >= c_cache_limit then m_completion_corpus_score_cache.Clear;
+    m_completion_corpus_score_cache.AddOrSetValue(cache_key, Result);
 end;
 
 end.

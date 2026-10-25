@@ -12,9 +12,9 @@ const
     c_ipc_protocol_major = 1;
     c_ipc_protocol_minor = 0;
     c_windows_baseline_commit =
-        '51669ab1cecb2c3a143f5c3096b9f68247448667';
+        '583c1aa1d7c3966d3766af492fbc9b8ca3ad7178';
     c_lexicon_baseline_commit =
-        'e97468ca7f1fff4d3ec3c6a2d6aa6c706cf31cd4';
+        '4365d58fc8f198034a0e487b6d27ad1805905fc2';
 
 implementation
 

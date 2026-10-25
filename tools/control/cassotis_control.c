@@ -116,8 +116,9 @@ static void print_usage(const gchar *program_name)
         program_name, program_name, program_name, program_name,
         program_name);
     g_printerr("  %s get-preferences\n"
+               "  %s import-user-words FILE\n"
                "  %s set-preferences (same arguments as set-state; phrase JSON on stdin)\n",
-               program_name, program_name);
+               program_name, program_name, program_name);
 }
 
 static gchar *read_phrases(GError **error)
@@ -315,6 +316,13 @@ int main(int argc, char **argv)
         success = cassotis_client_ping(&client, &error);
         if (success)
             g_print("ping=ok\n");
+    } else if (g_strcmp0(argv[1], "import-user-words") == 0 && argc == 3) {
+        guint entries = 0, imported = 0;
+        gchar *path = g_canonicalize_filename(argv[2], NULL);
+        success = cassotis_client_import_user_words(&client, path, &entries, &imported, &error);
+        g_free(path);
+        if (success)
+            g_print("entries=%u\nimported=%u\n", entries, imported);
     } else if (g_strcmp0(argv[1], "clear-user-dictionary") == 0 &&
                argc == 2) {
         success = cassotis_client_clear_user_dictionary(&client, &error);

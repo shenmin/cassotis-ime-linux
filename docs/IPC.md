@@ -66,11 +66,35 @@ Message ordinals are wire ABI and must not be reordered.
 | 17 | `poll_result` | Request; asynchronous `engine_result` response |
 | 18 | `get_preferences` | Empty request; full preferences response |
 | 19 | `set_preferences` | Full preferences request; empty response |
+| 20 | `import_user_words` | Absolute file path request; import counts response |
 
 `create_context`, `destroy_context`, `reset_context`,
 `clear_user_dictionary`, and `poll_result` have empty payloads. Structured
 payloads start with `u16 schema_version` and `u16 reserved`, except the full
-preferences envelope below, which prefixes the compact state with its byte length.
+preferences envelope below, which prefixes the compact state with its byte length,
+and the raw UTF-8 import payload described below.
+
+### Personal Word Frequency Import
+
+`import_user_words` carries an absolute, NUL-free UTF-8 file path as its entire
+payload, without a schema or string-length prefix. Its size is 1 to 4,096 bytes.
+The service reads the file with the logged-in user's permissions and accepts
+only regular files of at most 16 MiB. The formats and learning limits are
+described in [Configuration](../CONFIGURATION.md) /
+[Chinese](../CONFIGURATION.CN.md).
+
+A successful response uses the same message ordinal and contains two decimal
+integers separated by one tab: parsed entries and imported entries. Some parsed
+entries can be rejected by the normal learning rules. The import commits in one
+transaction, invalidates cached candidates and pending background results, and
+resets composition contexts. Finish active input before importing. A failed
+operation returns a structured error, not a partial success count.
+
+The control client allows up to 120 seconds for the import response rather than
+the ordinary 3.5-second request timeout. It must not retry automatically: a lost
+acknowledgement does not prove that the transaction failed, and importing again
+adds the frequencies again. Older engines reject ordinal 20; upgrade the
+service and control client together.
 
 ## Payload Primitives
 

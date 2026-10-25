@@ -32,7 +32,8 @@ typedef enum {
     CASSOTIS_MESSAGE_CLEAR_USER_DICTIONARY = 16,
     CASSOTIS_MESSAGE_POLL_RESULT = 17,
     CASSOTIS_MESSAGE_GET_PREFERENCES = 18,
-    CASSOTIS_MESSAGE_SET_PREFERENCES = 19
+    CASSOTIS_MESSAGE_SET_PREFERENCES = 19,
+    CASSOTIS_MESSAGE_IMPORT_USER_WORDS = 20
 } CassotisMessageType;
 
 typedef enum {
@@ -228,6 +229,7 @@ typedef struct {
     guint32 payload_length;
 } CassotisFrameHeader;
 
+GByteArray *cassotis_protocol_build_import_request(guint64 request_id, const gchar *path);
 GByteArray *cassotis_protocol_build_empty_request(
     CassotisMessageType message_type,
     guint64 request_id,

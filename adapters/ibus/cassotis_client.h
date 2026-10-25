@@ -83,6 +83,8 @@ gboolean cassotis_client_get_state(CassotisClient *client,
 gboolean cassotis_client_set_state(CassotisClient *client,
                                    const CassotisEngineState *state,
                                    GError **error);
+gboolean cassotis_client_import_user_words(CassotisClient *client, const gchar *path,
+    guint *entries, guint *imported, GError **error);
 gboolean cassotis_client_clear_user_dictionary(CassotisClient *client,
                                                GError **error);
 gboolean cassotis_client_ping(CassotisClient *client, GError **error);

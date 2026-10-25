@@ -304,7 +304,7 @@ def settings_subtitle(engine_path):
     return f"Cassotis IME - 言泉输入法 ({version_text})"
 
 
-def run_control(control_path, arguments, input_text=None):
+def run_control(control_path, arguments, input_text=None, timeout=CONTROL_TIMEOUT_SECONDS):
     try:
         result = subprocess.run(
             [control_path, *arguments],
@@ -312,7 +312,7 @@ def run_control(control_path, arguments, input_text=None):
             check=False,
             capture_output=True,
             text=True,
-            timeout=CONTROL_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError) as error:
         raise ControlError(str(error)) from error
@@ -424,6 +424,21 @@ def set_state(control_path, state):
 def clear_user_dictionary(control_path):
     run_control(control_path, ["clear-user-dictionary"])
     return get_state(control_path)
+
+
+def import_user_words(control_path, path):
+    output = run_control(control_path, ["import-user-words", path], timeout=150)
+    try:
+        counts = dict(line.split("=", 1) for line in output.splitlines() if line)
+        entries, imported = int(counts["entries"]), int(counts["imported"])
+        if not 0 < imported <= entries:
+            raise ValueError("文件中没有可导入的有效词条")
+    except (ValueError, KeyError) as error:
+        raise ControlError(f"无法确认导入结果：{error}") from error
+    # The acknowledgement follows the commit. A later settings read must not
+    # turn a successful import into a retryable error or discard unsaved edits.
+    return {"_operation_message":
+            f"已导入 {imported} 个词（文件中共 {entries} 个），已立即生效"}
 
 
 def default_data_directory():
@@ -908,9 +923,12 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.clear_user_button.get_style_context().add_class("destructive-action")
         self.clear_user_button.connect("clicked", self._clear_user_dictionary)
         actions.pack_start(self.clear_user_button, False, False, 0)
+        self.import_user_button = Gtk.Button(label="导入输入频次")
+        self.import_user_button.connect("clicked", self._import_user_words)
+        actions.pack_start(self.import_user_button, False, False, 0)
         self._add_row(data, 1, "操作", actions)
         warning = Gtk.Label(
-            label="清空操作会删除本地用户词和相关学习记录，且无法撤销。"
+            label="清空操作会删除本地用户词、导入的输入频次和相关学习记录，且无法撤销。"
         )
         warning.set_xalign(0)
         warning.set_line_wrap(True)
@@ -1090,7 +1108,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
             return GLib.SOURCE_REMOVE
         self._set_busy(False, "")
         if error is None:
-            self._show_state(state)
+            success_message = state.pop("_operation_message", success_message)
+            if state:
+                self._show_state(state)
             if close_on_success:
                 self.close()
             else:
@@ -1186,7 +1206,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             text="确定要清空用户词库吗？",
         )
         dialog.format_secondary_text(
-            "此操作将删除此前记住的本地用户词和相关学习记录，且无法撤销。"
+            "此操作将删除此前记住的本地用户词、导入的输入频次和相关学习记录，且无法撤销。"
         )
         dialog.add_button("取消", Gtk.ResponseType.CANCEL)
         dialog.add_button("清空", Gtk.ResponseType.ACCEPT)
@@ -1199,6 +1219,51 @@ class SettingsWindow(Gtk.ApplicationWindow):
             "正在清空用户词库…",
             "用户词库已清空",
             "清空失败",
+        )
+
+    def _import_user_words(self, _button):
+        dialog = Gtk.MessageDialog(
+            transient_for=self, modal=True, message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.NONE, text="导入自己的输入频次？",
+        )
+        dialog.format_secondary_text(
+            "把文件里的词按使用次数记入用户词库，当作自己的选词习惯，只影响本机。\n\n"
+            "文本文件（.txt、.csv 或 .tsv，UTF-8、UTF-16 或 GBK 编码，最大 16 MiB），"
+            "每行一个词：词、拼音、次数，用逗号或 Tab 分隔，次数可以省略。例如：\n\n"
+            "知识,zhishi,120\n哪些,naxie,86\n输入法,shurufa\n\n"
+            "批量导入也可能带来负面效果：人名、昵称、打错的词或不再使用的旧词，"
+            "可能按导出的次数排到同音常用词前面。请先检查文件。\n\n"
+            "导入不能单独撤销：“清空用户词库”会同时删除导入记录和平时打字积累的学习记录。"
+            "继续并选择文件吗？"
+        )
+        dialog.add_button("取消", Gtk.ResponseType.CANCEL)
+        dialog.add_button("继续", Gtk.ResponseType.ACCEPT)
+        dialog.set_default_response(Gtk.ResponseType.CANCEL)
+        response = dialog.run()
+        dialog.destroy()
+        if response != Gtk.ResponseType.ACCEPT:
+            return
+        picker = Gtk.FileChooserDialog(
+            title="选择词频文件", transient_for=self, action=Gtk.FileChooserAction.OPEN,
+        )
+        picker.add_buttons("取消", Gtk.ResponseType.CANCEL, "导入", Gtk.ResponseType.ACCEPT)
+        file_filter = Gtk.FileFilter()
+        file_filter.set_name("词频文件（.txt / .csv / .tsv）")
+        for pattern in ("*.txt", "*.csv", "*.tsv"):
+            file_filter.add_pattern(pattern)
+        picker.add_filter(file_filter)
+        all_files = Gtk.FileFilter()
+        all_files.set_name("所有文件")
+        all_files.add_pattern("*")
+        picker.add_filter(all_files)
+        response = picker.run()
+        path = picker.get_filename()
+        picker.destroy()
+        if response != Gtk.ResponseType.ACCEPT or not path:
+            return
+        self._run_operation(
+            lambda: import_user_words(self.control_path, path),
+            "正在导入输入频次，请稍候…", "输入频次已导入", "导入失败",
         )
 
     def _on_destroy(self, _widget):

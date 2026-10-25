@@ -17,6 +17,7 @@ uses
     nc_platform_compat,
     nc_types,
     nc_custom_phrases,
+    nc_user_word_import,
     nc_quick_input,
     nc_english_input,
     nc_candidate_presentation,
@@ -988,6 +989,7 @@ type
         function apply_char_lm_short_top(var candidates: TncCandidateList;
             var source_indices: TArray<Integer>; const context, query: string;
             const page_size: Integer): Boolean;
+        function short_choice_may_replace(const query, first, chosen: string): Boolean;
         function apply_mixed_abbreviation_top(var candidates: TncCandidateList;
             var source_indices: TArray<Integer>; const page_size: Integer): Boolean;
         function build_tail_word_candidates(const syllables: TncPinyinParseResult;
@@ -1397,6 +1399,7 @@ type
         function remove_user_candidate(const pinyin: string; const text: string;
             const preserve_candidate: TncCandidate; const has_preserve_candidate: Boolean): Boolean; overload;
         function clear_user_dictionary: Boolean;
+        function import_user_words(const path: string; out entries, imported: Integer): Boolean;
         function dictionary_base_ready: Boolean;
         function dictionary_user_ready: Boolean;
         function is_user_or_literal_entry(const pinyin: string;
@@ -137883,10 +137886,28 @@ begin
         not nc_char_lm_choose_short(m_char_lm, context, choices, best) or
         (best = 0) then
         Exit;
+    // With no context, retain a far more frequent first word from the corpus.
+    if (context = '') and not short_choice_may_replace(query, choices[0].text,
+        choices[best].text) then
+        Exit;
     value := candidates[choices[best].position];
     promote_char_lm_candidate(candidates, source_indices, value,
         source_indices[choices[best].position], page_size);
     Result := True;
+end;
+
+function TncEngine.short_choice_may_replace(const query, first, chosen: string): Boolean;
+const
+    c_short_corpus_guard = 250;
+var
+    first_score, chosen_score: Integer;
+begin
+    Result := True;
+    if m_dictionary = nil then Exit;
+    chosen_score := m_dictionary.get_completion_corpus_score(query, chosen);
+    if chosen_score <= 0 then Exit;
+    first_score := m_dictionary.get_completion_corpus_score(query, first);
+    Result := first_score - chosen_score < c_short_corpus_guard;
 end;
 
 function TncEngine.apply_mixed_abbreviation_top(var candidates: TncCandidateList;
@@ -138555,6 +138576,10 @@ const
     // of them was the clause. A limit of 4 nats would have taken as many
     // clauses as it gave (13 first drafts were the clause, 13 next ones).
     c_max_plain_gap = 6.0;
+    // An input may continue instead of ending at the comma. Prefer a draft
+    // far ahead without the comma only when the comma scores are close.
+    c_plain_first_lead = 2.0;
+    c_plain_first_margin = 1.0;
     // The parser keeps one reading of the letters; where they also read as
     // the same number of syllables another way ("henganjing": heng an jing,
     // and hen gan jing for 很干净), the drafts of that reading join the
@@ -138591,6 +138616,7 @@ var
     scores, plain_scores, corrected_scores: TArray<Single>;
     judged: Boolean;
     best_plain: Single;
+    best_index: Integer;
     order: TArray<Integer>;
     context, lm_context, key, draft, corrected, aligned, spelled, top_text: string;
     longer_text, longer_reading: string;
@@ -139329,6 +139355,18 @@ begin
                                 order[0] := swap;
                                 Break;
                             end;
+                end;
+                best_index := 0;
+                for index := 1 to High(drafts) do
+                    if plain_scores[index] > plain_scores[best_index] then best_index := index;
+                if (best_index <> order[0]) and
+                    (plain_scores[best_index] - plain_scores[order[0]] >= c_plain_first_lead) and
+                    (scores[order[0]] - scores[best_index] <= c_plain_first_margin) then
+                begin
+                    index := 0;
+                    while order[index] <> best_index do Inc(index);
+                    for other := index downto 1 do order[other] := order[other - 1];
+                    order[0] := best_index;
                 end;
             end
             else
@@ -188637,6 +188675,22 @@ begin
     Result := (m_dictionary <> nil) and
         (m_dictionary.is_user_entry(pinyin, text) or
         m_dictionary.is_literal_user_entry(pinyin, text));
+end;
+
+function TncEngine.import_user_words(const path: string; out entries, imported: Integer): Boolean;
+var
+    content: string;
+    items: TncUserWordImportEntries;
+    skipped: Integer;
+begin
+    entries := 0;
+    imported := 0;
+    Result := False;
+    if (m_dictionary = nil) or (not nc_read_user_word_import_file(path, content)) or
+        (not nc_parse_user_word_import(content, items, skipped)) then Exit;
+    entries := Length(items);
+    Result := m_dictionary.import_user_choices(items, imported);
+    if Result then notify_user_dictionary_cleared;
 end;
 
 procedure TncEngine.notify_user_dictionary_cleared;

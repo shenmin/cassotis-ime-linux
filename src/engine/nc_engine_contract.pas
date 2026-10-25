@@ -26,6 +26,7 @@ type
         function SetState(const state: TncEngineState): Boolean;
             virtual; abstract;
         function ClearUserDictionary: Boolean; virtual; abstract;
+        function ImportUserWords(const path: string; out entries, imported: Integer): Boolean; virtual;
         function ProcessKey(const context_id: QWord; const generation_id: QWord;
             const key_event: TncKeyEvent): TncEngineResult; virtual; abstract;
         function PollResult(const context_id: QWord;
@@ -33,6 +34,13 @@ type
     end;
 
 implementation
+
+function TncEngineCore.ImportUserWords(const path: string; out entries, imported: Integer): Boolean;
+begin
+    entries := 0;
+    imported := 0;
+    Result := False;
+end;
 
 function TncEngineCore.PollResult(const context_id: QWord;
     const generation_id: QWord): TncEngineResult;

@@ -17,27 +17,27 @@ Both benchmarks are derived from the developer's own novel,
 (Chinese title: **永恒的舞动**). Benchmark cases are kept separate from the
 corresponding model-training data.
 
-## Frozen v2.3.0 Baseline
+## Frozen v2.4.0 Baseline
 
-Linux v2.1.0 targets the final v2.3.0 engine and lexicon tags. The current
+Linux v2.1.0 targets the final v2.4.0 engine and lexicon tags. The current
 validation uses newly built dictionaries and the revised benchmark readings.
 Corpus sizes remain unchanged, but the revised short-case classifications have
 11,685 contested cases instead of 11,728. Historical measurements retain their
 original inputs and dates; they are not paired results on the revised cases.
 
-- [Cassotis IME v2.3.0](https://github.com/shenmin/cassotis-ime/tree/v2.3.0),
+- [Cassotis IME v2.4.0](https://github.com/shenmin/cassotis-ime/tree/v2.4.0),
   including incremental prefix retention, canonical reading checks, traditional
-  model views and short-phrase correction/selection improvements.
-- [Cassotis Lexicon v2.3.0](https://github.com/shenmin/cassotis-lexicon/tree/v2.3.0)
+  model views, corpus-aware context-free word selection and short-phrase ranking.
+- [Cassotis Lexicon v2.4.0](https://github.com/shenmin/cassotis-lexicon/tree/v2.4.0)
 - Simplified dictionary schema 24, SHA-256
-  `fea63432c7950e3c3a721bc98201598daf1e6ad796ee6572a59e4458605c5fdf`
+  `d301dc9370a3f476abb9d221a86b3018f7045e94ccaa95137caf9c790e189766`
 - Traditional dictionary schema 24, SHA-256
-  `1639d53bb922a74db992f3e5538a3bb76e1ccded154bc1c375fdd41f91a6fbb7`
-- Simplified dictionary: 258,694 text-reading records, including 23,918
-  single-character and 234,776 multi-character records
-- Traditional dictionary: 259,571 text-reading records, including 24,181
-  single-character and 235,390 multi-character records
-- Simplified/traditional short-word promotion rows: 1,488 / 1,668
+  `465318995f0b5f4447c12c108317f2b09c21388fd5c528e9a096f13ae42739ea`
+- Simplified dictionary: 259,524 text-reading records, including 23,918
+  single-character and 235,606 multi-character records
+- Traditional dictionary: 260,404 text-reading records, including 24,181
+  single-character and 236,223 multi-character records
+- Simplified/traditional short-word promotion rows: 1,489 / 1,672
 - Simplified/traditional completion competition rows: 42,453 / 42,448
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379
 - Simplified long-completion tables: 41,244 visible paths and 103,407 total
@@ -189,7 +189,7 @@ not ignored failures, and are not included in binary release assets.
 
 ## v2.1.0 Native Measurements
 
-Measured on 2026-10-23/24 (UTC+8), with the frozen v2.3.0 engine, dictionaries
+Measured on 2026-10-25 (UTC+8), with the frozen v2.4.0 engine, dictionaries
 and revised cases above. The x86_64 host is Ubuntu 26.04.1 in an eight-vCPU,
 16 GiB virtual machine on an Intel Core i5-12600K. The aarch64 VM uses eight
 vCPUs and 8 GiB on Apple silicon. Runners execute sequentially
@@ -207,20 +207,26 @@ Accuracy and latency are measured on the same complete queries. Times are in ms.
 
 | Architecture | Track | Top1 | Top2 | Mean | Median | P95 | Maximum |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| x86_64 | Long sentences | 13,429/16,300 | 14,310/16,300 | 158.108 | 160 | 234 | 515 |
-| aarch64 | Long sentences | 13,429/16,300 | 14,309/16,300 | 115.434 | 112 | 185 | 606 |
-| x86_64 | Short, no context | 61,189/65,000 | 63,752/65,000 | 4.560 | 3 | 12 | 75 |
-| aarch64 | Short, no context | 61,189/65,000 | 63,752/65,000 | 5.199 | 3 | 14 | 88 |
-| x86_64 | Short, context | 63,421/65,000 | 64,427/65,000 | 8.133 | 5 | 24 | 92 |
-| aarch64 | Short, context | 63,420/65,000 | 64,427/65,000 | 8.713 | 5 | 25 | 199 |
+| x86_64 | Long sentences | 13,435/16,300 | 14,314/16,300 | 150.925 | 151 | 227 | 536 |
+| aarch64 | Long sentences | 13,435/16,300 | 14,313/16,300 | 117.718 | 115 | 189 | 581 |
+| x86_64 | Short, no context | 61,235/65,000 | 63,701/65,000 | 4.827 | 3 | 12 | 71 |
+| aarch64 | Short, no context | 61,235/65,000 | 63,701/65,000 | 4.967 | 3 | 13 | 52 |
+| x86_64 | Short, context | 63,455/65,000 | 64,423/65,000 | 8.491 | 5 | 24 | 79 |
+| aarch64 | Short, context | 63,454/65,000 | 64,423/65,000 | 7.988 | 5 | 22 | 68 |
 
-Among 11,685 contested short cases, Top1/Top2 are 8,889/10,701 without context
-on both architectures. With context they are 10,504/11,228 on x86_64 and
-10,503/11,228 on aarch64. Process high-water marks are 432,388 KiB (422.3 MiB)
-and 435,228 KiB (425.0 MiB), respectively; these are measured peaks, not universal
+Among 11,685 contested short cases, Top1/Top2 are 8,940/10,652 without context
+on both architectures. With context they are 10,539/11,225 on x86_64 and
+10,538/11,225 on aarch64. Process high-water marks are 431,208 KiB (421.1 MiB)
+and 433,388 KiB (423.2 MiB), respectively; these are measured peaks, not universal
 memory limits. Production foreground/background model safeguards remain
 100/120 ms, so these deadline-free
 results do not imply that every production request returns the same candidates.
+
+The previous v2.3.0-aligned development build scored 61,189/63,752 without
+context on the same cases. This update gains 46 first choices but loses 51
+Top2 hits on each architecture. The new corpus-prior guard retains the original
+order when a substantially less frequent word would otherwise be promoted;
+this is a ranking tradeoff, not an improvement in every metric.
 
 ### Completion
 
@@ -230,18 +236,18 @@ per successful hit.
 
 | Architecture | Track | Hits | Saved keys | Stability / coverage | Mean | Median | P95 | Maximum |
 | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
-| x86_64 | Short completion | 10,512/12,831 | 27,702; 2.635 per hit | 2,151/2,214 stable adjacent keys | 19.349 | 18.384 | 58.821 | 273.871 |
-| aarch64 | Short completion | 10,513/12,831 | 27,704; 2.635 per hit | 2,152/2,215 stable adjacent keys | 13.065 | 12.442 | 37.786 | 101.316 |
-| x86_64 | Long continuation | 3,870/16,300 | 9,548 | 16,148/16,300 predictive prompts | 167.970 | 163 | 264 | 805 |
-| aarch64 | Long continuation | 3,879/16,300 | 9,567 | 16,143/16,300 predictive prompts | 127.978 | 122 | 210 | 609 |
+| x86_64 | Short completion | 10,512/12,831 | 27,706; 2.636 per hit | 2,152/2,215 stable adjacent keys | 18.105 | 16.897 | 54.492 | 155.483 |
+| aarch64 | Short completion | 10,513/12,831 | 27,708; 2.636 per hit | 2,153/2,216 stable adjacent keys | 13.080 | 12.540 | 37.961 | 99.898 |
+| x86_64 | Long continuation | 3,876/16,300 | 9,576 | 16,147/16,300 predictive prompts | 160.186 | 156 | 251 | 549 |
+| aarch64 | Long continuation | 3,883/16,300 | 9,591 | 16,142/16,300 predictive prompts | 124.117 | 118 | 202 | 518 |
 
-Short-completion key P95 is 2.003 ms on x86_64 and 2.023 ms on aarch64. The
+Short-completion key P95 is 2.166 ms on x86_64 and 2.100 ms on aarch64. The
 remaining latency columns include the completed background evaluation, even when the displayed hint does not
 change. Long continuation includes final candidate selection and the displayed
-completion; its mean decomposes into 7.301 ms of decoding, 87.925 ms of final
-candidate work and 72.744 ms of completion on x86_64. The aarch64 means are
-7.209, 66.605 and 54.165 ms, respectively. Complete-sentence hits are 205 on
-x86_64 and 206 on aarch64. Prompt coverage is not precision.
+completion; its mean decomposes into 7.542 ms of decoding, 82.866 ms of final
+candidate work and 69.779 ms of completion on x86_64. The aarch64 means are
+7.481, 65.162 and 51.475 ms, respectively. Complete-sentence hits are 208 on
+x86_64 and 209 on aarch64. Prompt coverage is not precision.
 
 All corpus validators pass on both architectures without relaxing their accuracy
 requirements. Both installed-package desktop matrices and the SteamOS

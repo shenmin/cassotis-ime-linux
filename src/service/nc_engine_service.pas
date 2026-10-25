@@ -87,6 +87,7 @@ type
         function GetState(out state: TncEngineState): Boolean; override;
         function SetState(const state: TncEngineState): Boolean; override;
         function ClearUserDictionary: Boolean; override;
+        function ImportUserWords(const path: string; out entries, imported: Integer): Boolean; override;
         function ProcessKey(const context_id: QWord; const generation_id: QWord;
             const key_event: TncKeyEvent): TncEngineResult; override;
         function PollResult(const context_id: QWord;
@@ -804,6 +805,18 @@ begin
     Result := (FEngine <> nil) and FEngine.clear_user_dictionary;
     if not Result then
         Exit;
+    FContexts.ClearCompositions;
+    FLoadedContextId := c_invalid_context_id;
+    FEngine.Reset;
+end;
+
+function TncEngineService.ImportUserWords(const path: string; out entries, imported: Integer): Boolean;
+begin
+    entries := 0;
+    imported := 0;
+    Result := (FEngine <> nil) and FEngine.import_user_words(path, entries, imported);
+    if not Result then Exit;
+    // Every context and pending result was built against the previous learning.
     FContexts.ClearCompositions;
     FLoadedContextId := c_invalid_context_id;
     FEngine.Reset;
