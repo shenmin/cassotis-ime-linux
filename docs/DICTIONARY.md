@@ -127,19 +127,25 @@ shortcut that conflicts with the selected completion key.
 
 ## Runtime Paths
 
-The engine searches the user data directory before the system dictionary:
+Base dictionaries belong to the running installation. System packages read
+`/usr/share/cassotis-ime/dict_sc.db` and `dict_tc.db`; relocated installations
+read `share/cassotis-ime` beneath their own prefix. Old base dictionary copies
+in the user data directory do not override these files after an upgrade.
 
-```text
-~/.local/share/cassotis-ime/dict_sc.db
-~/.local/share/cassotis-ime/dict_tc.db
-~/.local/share/cassotis-ime/user_dict.db
-/usr/share/cassotis-ime/dict_sc.db
-/usr/share/cassotis-ime/dict_tc.db
-```
+User-directory installations read the base dictionaries from
+`$XDG_DATA_HOME/cassotis-ime` (default `~/.local/share/cassotis-ime`), including
+when the data directory is separate from `~/.local/libexec/cassotis-ime`.
+A development executable without accompanying dictionaries may also use this
+user data directory, then fall back to `/usr/share/cassotis-ime`.
 
-`CASSOTIS_DICTIONARY`, `CASSOTIS_TRADITIONAL_DICTIONARY`, and
-`CASSOTIS_USER_DICTIONARY` allow explicit paths. User data is never written into
-the base artifacts.
+`CASSOTIS_DICTIONARY` and `CASSOTIS_DICTIONARY_TC` explicitly override the
+simplified and traditional base paths; the engine's command-line dictionary
+options take precedence over these environment variables.
+
+The user dictionary stays at `$XDG_DATA_HOME/cassotis-ime/user_dict.db`, or at
+`CASSOTIS_USER_DICTIONARY` when explicitly set. Changing the base dictionary
+selection neither moves nor deletes personal data. User data is never written
+into the base artifacts.
 
 To inspect a dictionary without starting an input framework:
 

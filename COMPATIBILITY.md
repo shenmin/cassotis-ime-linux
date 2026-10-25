@@ -1,8 +1,8 @@
 # Compatibility
 
-## v2.1.0 Development Validation
+## v2.1.0 Validation
 
-The 2026-10-25 (UTC+8) development validation uses the released Windows engine and
+The 2026-10-25 (UTC+8) validation uses the released Windows engine and
 Cassotis Lexicon v2.4.0 inputs, including the revised benchmark readings and
 Taiwan-form traditional dictionary. The model files are unchanged.
 
@@ -54,9 +54,20 @@ synthetic dictionary, not personal exports. The SteamOS
 check uses the existing desktop mount configuration; it is not a new read-only
 mount test or a SteamOS Fcitx 5/game-mode claim.
 
-These results qualify the tested development build, not an already published
-v2.1.0 release. Earlier architecture or desktop results below retain their
-historical scope; they are not substituted for the checks above.
+A follow-up upgrade regression verifies the actual base database file descriptors
+with stale user-directory copies still present. It covers system/relocated and
+user installations, separate XDG data, symlinked homes/runtimes/launchers,
+development fallback, environment and command-line overrides, and missing
+explicit paths. Package validation also starts the staged executable without
+dictionary overrides and checks both SC/TC paths. Personal data remains separate.
+The corpus measurements above used explicit versioned databases; this path-only
+fix does not change those dictionaries, models or ranking algorithms.
+
+These results cover the v2.1.0 release inputs and the follow-up dictionary-path
+fix described above. Earlier architecture or desktop results below retain their
+historical scope; they are not substituted for the checks above. Upgrades refresh
+the input framework; an application that was already open may need to be closed
+normally and reopened to reconnect. Save any unsent text first.
 
 ## v2.0.0 Validation
 

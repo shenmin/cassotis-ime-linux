@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.1.0 - Unreleased
+## 2.1.0 - 2026-10-25
 
 - Align the engine and dictionaries with Cassotis IME and Cassotis Lexicon
   v2.4.0, keeping the existing single language model and seven compact ranking units.
@@ -22,6 +22,9 @@
   more common individual readings. Retain valid drafts when a correction cannot
   be aligned with the input.
 - Refresh dictionary readings, traditional forms and completion/promotion tables.
+- Load the base dictionaries accompanying the running installation, so old
+  user-directory copies cannot shadow an upgraded system package. Preserve
+  user-directory installations, explicit path overrides and personal data.
 
 ## 2.0.0 - 2026-10-18
 

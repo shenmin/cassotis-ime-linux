@@ -252,7 +252,7 @@ x86_64 and 209 on aarch64. Prompt coverage is not precision.
 All corpus validators pass on both architectures without relaxing their accuracy
 requirements. Both installed-package desktop matrices and the SteamOS
 user-installation checks also pass; see [Compatibility](COMPATIBILITY.md) for
-their scope. These measurements apply to the development build; historical
+their scope. These measurements apply to the v2.1.0 engine and dictionaries; historical
 release results below retain their original inputs and dates.
 
 ## v2.0.0 Deadline-Free Measurements

@@ -19,6 +19,7 @@ implementation
 
 uses
     SysUtils,
+    {$ifdef unix}BaseUnix,{$endif}
     nc_shortcut;
 
 function nc_normalize_punctuation_ascii_symbols(const value: string): string;
@@ -54,11 +55,48 @@ function get_install_data_path(const file_name: string): string;
 var
     executable_directory: string;
     candidate_path: string;
+    home_directory: string;
+    user_runtime_directory: string;
+    is_user_install: Boolean;
+    {$ifdef unix}
+    executable_info, user_runtime_info: Stat;
+    {$endif}
 begin
     Result := '';
-    executable_directory := ExtractFileDir(ExpandFileName(ParamStr(0)));
+    candidate_path := '';
+    {$ifdef linux}
+    candidate_path := UTF8Decode(fpReadLink('/proc/self/exe'));
+    {$endif}
+    if candidate_path = '' then
+        candidate_path := ExpandFileName(ParamStr(0));
+    executable_directory := ExtractFileDir(candidate_path);
     if executable_directory = '' then
         Exit;
+
+    // User installs keep their data in XDG_DATA_HOME, which may be elsewhere.
+    is_user_install := False;
+    home_directory := GetEnvironmentVariable('HOME');
+    if home_directory <> '' then
+    begin
+        user_runtime_directory := ExpandFileName(IncludeTrailingPathDelimiter(
+            home_directory) + '.local/libexec/cassotis-ime');
+        is_user_install := executable_directory = user_runtime_directory;
+        {$ifdef unix}
+        if not is_user_install then
+            if (fpStat(UTF8Encode(executable_directory), executable_info) = 0) and
+                (fpStat(UTF8Encode(user_runtime_directory), user_runtime_info) = 0) then
+                is_user_install := (executable_info.st_dev = user_runtime_info.st_dev) and
+                    (executable_info.st_ino = user_runtime_info.st_ino);
+        {$endif}
+    end;
+    if is_user_install then
+    begin
+        candidate_path := get_user_data_path(file_name);
+        if (candidate_path <> '') and FileExists(candidate_path) then
+            Result := candidate_path;
+        Exit;
+    end;
+
     candidate_path := ExpandFileName(IncludeTrailingPathDelimiter(
         executable_directory) + '..' + PathDelim + '..' + PathDelim +
         'share' + PathDelim + 'cassotis-ime' + PathDelim + file_name);
@@ -75,12 +113,13 @@ begin
     Result := GetEnvironmentVariable(environment_name);
     if Result <> '' then
         Exit;
-    user_path := get_user_data_path(file_name);
-    if (user_path <> '') and FileExists(user_path) then
-        Exit(user_path);
+    // A package upgrade must not be shadowed by an old user-directory copy.
     install_path := get_install_data_path(file_name);
     if install_path <> '' then
         Exit(install_path);
+    user_path := get_user_data_path(file_name);
+    if (user_path <> '') and FileExists(user_path) then
+        Exit(user_path);
     Result := '/usr/share/cassotis-ime/' + file_name;
 end;
 
