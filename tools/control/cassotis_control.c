@@ -98,6 +98,7 @@ static void print_state(const CassotisEngineState *state)
             state->decimal_period_after_digit ? 1U : 0U);
     g_print("auto_english=%u\n", state->auto_english ? 1U : 0U);
     g_print("punctuation_ascii_symbols=%s\n", state->punctuation_ascii_symbols);
+    g_print("candidate_layout=%u\n", (guint)state->candidate_layout);
 }
 
 static void print_usage(const gchar *program_name)
@@ -109,7 +110,7 @@ static void print_usage(const gchar *program_name)
         "       [PAGE_KEYS COMPLETION_KEY [PAGE_SIZE DEBUG] "
         "INPUT_KEY INPUT_MOD PUNCT_KEY PUNCT_MOD "
         "DICT_KEY DICT_MOD WIDTH_KEY WIDTH_MOD SETTINGS_KEY SETTINGS_MOD "
-        "[DISABLED_MASK [DECIMAL_PERIOD [AUTO_ENGLISH ASCII_SYMBOLS]]]]\n"
+        "[DISABLED_MASK [DECIMAL_PERIOD [AUTO_ENGLISH ASCII_SYMBOLS [LAYOUT]]]]]\n"
         "  %s ping\n"
         "  %s clear-user-dictionary\n"
         "  %s shutdown\n",
@@ -184,12 +185,12 @@ int main(int argc, char **argv)
             print_state(&state);
     } else if ((g_strcmp0(argv[1], "set-state") == 0 || preferences) &&
                (argc == 9 || argc == 21 || argc == 23 || argc == 24 ||
-                argc == 25 || argc == 27)) {
+                argc == 25 || argc == 27 || argc == 28)) {
         cassotis_engine_state_init_defaults(&state);
         if (!cassotis_client_get_state(&client, &state, &error))
             goto done;
         extended_state = argc >= 23;
-        for (index = 0; index < (guint)(argc == 27 ? 24 : argc - 2); ++index) {
+        for (index = 0; index < (guint)(argc >= 27 ? 24 : argc - 2); ++index) {
             guint32 maximum = 1U;
             if (index == 4)
                 maximum = CASSOTIS_FUZZY_RULE_MASK;
@@ -275,7 +276,7 @@ int main(int argc, char **argv)
         }
         if (argc >= 25)
             state.decimal_period_after_digit = values[22] != 0;
-        if (argc == 27) {
+        if (argc >= 27) {
             const gchar *symbols = argv[26];
             gsize length = strlen(symbols);
             if (length >= sizeof(state.punctuation_ascii_symbols)) {
@@ -293,6 +294,15 @@ int main(int argc, char **argv)
             state.auto_english = values[23] != 0;
             g_strlcpy(state.punctuation_ascii_symbols, symbols,
                       sizeof(state.punctuation_ascii_symbols));
+        }
+        if (argc == 28) {
+            guint32 layout;
+            if (!parse_uint(argv[27], CASSOTIS_LAYOUT_HORIZONTAL, &layout)) {
+                g_set_error_literal(&error, cassotis_client_error_quark(), 1,
+                                    "candidate layout must be 0..2");
+                goto done;
+            }
+            state.candidate_layout = (CassotisCandidateLayout)layout;
         }
         if (preferences) {
             phrases = read_phrases(&error);

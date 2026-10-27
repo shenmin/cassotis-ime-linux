@@ -16,7 +16,7 @@ const
     c_ipc_engine_state_shortcuts_schema_version = 3;
     c_ipc_engine_state_debug_schema_version = 4;
     c_ipc_engine_state_decimal_schema_version = 6;
-    c_ipc_engine_state_schema_version = 7;
+    c_ipc_engine_state_schema_version = 8;
     c_ipc_engine_result_schema_version = 2;
     c_ipc_payload_max_text_bytes = 1024 * 1024;
     c_ipc_payload_max_candidates = 256;
@@ -947,6 +947,7 @@ begin
         WriteShortcut(writer, state.shortcuts.full_width_toggle);
         WriteShortcut(writer, state.shortcuts.open_settings);
         writer.WriteString(nc_normalize_punctuation_ascii_symbols(state.punctuation_ascii_symbols));
+        writer.WriteByte(Ord(state.candidate_layout));
         Result := writer.Finish;
     finally
         writer.Free;
@@ -966,6 +967,7 @@ var
     candidate_page_key_scheme: Byte;
     one_key_completion_key: Byte;
     candidate_page_size: Byte;
+    candidate_layout: Byte;
     reserved: Word;
     reserved_byte: Byte;
 begin
@@ -976,6 +978,7 @@ begin
         candidate_page_key_scheme := Ord(state.candidate_page_key_scheme);
         one_key_completion_key := Ord(state.one_key_completion_key);
         candidate_page_size := Byte(state.candidate_page_size);
+        candidate_layout := Ord(state.candidate_layout);
         reserved := 0;
         reserved_byte := 0;
         Result := ReadPayloadHeaderVersion(reader, version) and
@@ -1005,6 +1008,13 @@ begin
         end;
         if Result and (version >= 7) then
             Result := reader.ReadString(state.punctuation_ascii_symbols);
+        if Result and (version >= 8) then
+            Result := reader.ReadByte(candidate_layout);
+        if Result and (candidate_layout > Ord(High(TncCandidateLayout))) then
+        begin
+            reader.SetError('State payload contains an invalid candidate layout');
+            Result := False;
+        end;
         if Result and (nc_normalize_punctuation_ascii_symbols(state.punctuation_ascii_symbols) <>
             state.punctuation_ascii_symbols) then
         begin
@@ -1101,6 +1111,7 @@ begin
             state.fuzzy_pinyin_rules :=
                 nc_fuzzy_pinyin_rules_from_mask(fuzzy_rules_mask);
             state.candidate_page_size := candidate_page_size;
+            state.candidate_layout := TncCandidateLayout(candidate_layout);
             state.candidate_page_key_scheme :=
                 TncCandidatePageKeyScheme(candidate_page_key_scheme);
             state.one_key_completion_key :=

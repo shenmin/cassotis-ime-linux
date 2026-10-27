@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Add automatic, fixed vertical and fixed horizontal candidate layouts to
+  Appearance settings, shared by IBus and Fcitx 5 and retained after restart.
+- Wrap long display text within horizontal items, including raw English and
+  the final completion item, without changing selection keys or committed text.
+- Keep automatic layout as the default; changing layout preserves composition
+  and does not alter candidate ranking or learning.
+
 ## 2.1.0 - 2026-10-25
 
 - Align the engine and dictionaries with Cassotis IME and Cassotis Lexicon

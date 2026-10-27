@@ -177,9 +177,9 @@ ends polling, whether the model accepted a completion or abstained. Adapters
 use a bounded polling interval and discard the request after focus loss,
 context reset, generation change, timeout, or transport failure.
 
-## Engine State Schema 7
+## Engine State Schema 8
 
-The current state payload is schema 7:
+The current state payload is schema 8:
 
 | Order | Type | Field |
 | ---: | --- | --- |
@@ -194,6 +194,7 @@ The current state payload is schema 7:
 | 9 | `u8` | reserved |
 | 10 | 5 x shortcut | mode, punctuation, dictionary, width, settings |
 | 11 | string | Half-width punctuation exceptions: unique ASCII punctuation, at most 32 characters |
+| 12 | `u8` | Candidate layout: 0 automatic, 1 fixed vertical, 2 fixed horizontal |
 
 One shortcut is `u16 key_code`, `u8` Shift/Ctrl/Alt mask, and a `u8 disabled`
 boolean (0 or 1). A disabled shortcut retains its validated chord but neither
@@ -209,7 +210,10 @@ older schemas still reject nonzero values there. Schema 6 adds flag bit 4
 frames decode with this option enabled by default; older schemas reject the
 new bit if present. Schema 7 adds English recognition at bit 5 (`0x20`) and
 the punctuation string. Older state payloads default to English recognition
-enabled and the Markdown punctuation preset. Older schemas must not carry new
+enabled and the Markdown punctuation preset. Schema 8 appends the candidate
+layout; older payloads default to automatic, and values outside 0..2 are rejected.
+Layout is presentation-only: it does not change engine ranking or reset a
+composition. Older schemas must not carry new
 flags or trailing data. Other payload types, except engine results, remain
 schema 1.
 

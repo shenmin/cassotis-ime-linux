@@ -79,6 +79,7 @@ type
         cpks_shift_tab
     );
     TncOneKeyCompletionKey = (ock_tab, ock_backtick);
+    TncCandidateLayout = (cl_auto, cl_vertical, cl_horizontal);
     TncShortcutAction = (
         sa_input_mode_toggle,
         sa_punctuation_toggle,
@@ -123,6 +124,7 @@ type
         auto_english: Boolean;
         custom_phrases: TncCustomPhraseList;
         candidate_page_size: Integer;
+        candidate_layout: TncCandidateLayout;
         candidate_page_key_scheme: TncCandidatePageKeyScheme;
         one_key_completion_key: TncOneKeyCompletionKey;
         debug_mode: Boolean;
@@ -485,6 +487,7 @@ begin
     value.punctuation_ascii_symbols := c_markdown_punctuation_ascii_symbols;
     value.auto_english := True;
     value.candidate_page_size := c_default_candidate_page_size;
+    value.candidate_layout := cl_auto;
     value.candidate_page_key_scheme := cpks_minus_plus;
     value.one_key_completion_key := ock_tab;
     value.debug_mode := False;
@@ -571,6 +574,7 @@ begin
         (left_value.auto_english = right_value.auto_english) and
         (left_value.candidate_page_size =
         right_value.candidate_page_size) and
+        (left_value.candidate_layout = right_value.candidate_layout) and
         (left_value.candidate_page_key_scheme =
         right_value.candidate_page_key_scheme) and
         (left_value.one_key_completion_key =

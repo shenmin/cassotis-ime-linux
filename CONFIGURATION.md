@@ -77,9 +77,27 @@ punctuation mode is unchanged.
 ## Candidates
 
 The candidate page size can be set from 3 through 9; the default is 9. The
-candidate panel's font, colors, placement, scaling, and orientation are owned
-by IBus/Fcitx and the desktop theme. Cassotis does not draw or position a
-separate popup on Linux.
+**Appearance** page also offers three layouts, shared by IBus and Fcitx 5 and
+preserved across restarts:
+
+| Layout | Behavior |
+| --- | --- |
+| Automatic (default) | Short lists are horizontal; wide lists or a completion switch to vertical. |
+| Fixed vertical | Candidates run top to bottom, with completion below them. Typing never switches orientation. |
+| Fixed horizontal | Candidates stay side by side. Long text wraps within each item; Tab completion is the final item. |
+
+Native panels have no common interface for a horizontal candidate row with an
+independent completion row below it. Fixed horizontal mode therefore places
+completion alongside candidates. Wrapping affects display only, not candidate
+order, selection labels, paging, or committed text. Prefer fixed vertical for
+frequent long sentences.
+
+Fonts, colors, placement and scaling remain controlled by IBus/Fcitx and the
+desktop theme; third-party panels may ignore the requested layout. Cassotis
+does not draw or position a separate popup, or reverse candidates based on
+whether it appears above or below the caret. The frameworks do not currently
+give the engine reliable popup-placement feedback; guessing would risk
+inconsistent selection behavior.
 
 ## Controlled Fuzzy Pinyin
 

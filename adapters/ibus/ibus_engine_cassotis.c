@@ -164,6 +164,7 @@ static gboolean refresh_engine_state(CassotisIbusEngine *self)
                      observed_state.punctuation_ascii_symbols) != 0 ||
               self->state.candidate_page_size !=
                   observed_state.candidate_page_size ||
+              self->state.candidate_layout != observed_state.candidate_layout ||
               self->state.candidate_page_key_scheme !=
                   observed_state.candidate_page_key_scheme ||
               self->state.one_key_completion_key !=
@@ -305,54 +306,23 @@ static gchar *candidate_display_text(const CassotisEngineState *state,
     return g_strdup(candidate_text);
 }
 
-static void render_result(CassotisIbusEngine *self,
-                          CassotisEngineResult *result)
+static IBusLookupTable *build_lookup_table(const CassotisEngineState *state,
+                                         const CassotisEngineResult *result)
 {
-    IBusEngine *engine = IBUS_ENGINE(self);
-    IBusText *text;
     IBusLookupTable *table;
     guint32 index;
     gchar *display_text;
-    gboolean has_completion;
-    gboolean has_raw;
-    gboolean vertical;
-    guint page_size;
-    const gchar *completion_key = self->state.one_key_completion_key ==
+    gboolean has_completion = result->completion_text != NULL &&
+                              result->completion_text[0] != '\0';
+    gboolean has_raw = result->page_index == 0 && result->raw_input_candidate != NULL &&
+                       result->raw_input_candidate[0] != '\0';
+    const gchar *completion_key = state->one_key_completion_key ==
         CASSOTIS_COMPLETION_BACKTICK ? "`" : "Tab";
-
-    if (result->commit_text != NULL && result->commit_text[0] != '\0') {
-        text = ibus_text_new_from_string(result->commit_text);
-        ibus_engine_commit_text(engine, text);
-    }
-
-    if (result->preedit_text != NULL && result->preedit_text[0] != '\0') {
-        text = ibus_text_new_from_string(result->preedit_text);
-        ibus_engine_update_preedit_text(
-            engine, text, (guint)g_utf8_strlen(result->preedit_text, -1), TRUE);
-    } else {
-        ibus_engine_hide_preedit_text(engine);
-    }
-
-    has_completion = result->completion_text != NULL &&
-                     result->completion_text[0] != '\0';
-    has_raw = result->page_index == 0 && result->raw_input_candidate != NULL &&
-              result->raw_input_candidate[0] != '\0';
-    self->rendered_raw_row = has_raw;
-    /* GNOME Shell fixes auxiliary text above the lookup table.  Completion
-       is represented as a dedicated lookup row so it is actually below the
-       candidates and remains clickable without changing engine candidates. */
-    ibus_engine_hide_auxiliary_text(engine);
-
-    if (result->candidate_count == 0 && !has_completion && !has_raw) {
-        ibus_engine_hide_lookup_table(engine);
-        self->page_index = 0;
-        self->rendered_page_candidate_count = 0;
-        self->rendered_completion_row = FALSE;
-        return;
-    }
-
-    vertical = cassotis_candidate_panel_requires_vertical(result);
-    page_size = effective_page_size(&self->state);
+    gboolean vertical = cassotis_candidate_panel_is_vertical(result, state->candidate_layout);
+    guint32 wrap_cells = cassotis_candidate_wrap_cells(result, state->candidate_layout);
+    guint page_size = effective_page_size(state);
+    if (result->candidate_count == 0 && !has_completion && !has_raw)
+        return NULL;
     table = ibus_lookup_table_new(
         page_size + (has_completion ? 1U : 0U) + (has_raw ? 1U : 0U),
         0, TRUE, TRUE);
@@ -360,27 +330,28 @@ static void render_result(CassotisIbusEngine *self,
         table, vertical ? IBUS_ORIENTATION_VERTICAL
                         : IBUS_ORIENTATION_HORIZONTAL);
 
-    self->selection_kind = result->selection_kind;
     if (has_raw) {
         ibus_lookup_table_append_label(table, ibus_text_new_from_string(""));
+        display_text = cassotis_candidate_wrap_text(result->raw_input_candidate, wrap_cells);
         ibus_lookup_table_append_candidate(
-            table, ibus_text_new_from_string(result->raw_input_candidate));
+            table, ibus_text_new_from_string(display_text));
+        g_free(display_text);
     }
     for (index = 0; index < result->candidate_count; ++index) {
         gchar label_text[2] = {
             cassotis_candidate_selection_key(result->selection_kind, index), '\0'};
         ibus_lookup_table_append_label(table, ibus_text_new_from_string(label_text));
     }
+    for (index = 0; index < result->candidate_count; ++index) {
+        gchar *unwrapped = candidate_display_text(state, &result->candidates[index]);
+        display_text = cassotis_candidate_wrap_text(unwrapped, wrap_cells);
+        ibus_lookup_table_append_candidate(table, ibus_text_new_from_string(display_text));
+        g_free(display_text);
+        g_free(unwrapped);
+    }
     if (has_completion) {
-        ibus_lookup_table_append_label(
-            table, ibus_text_new_from_string(completion_key));
-        for (index = 0; index < result->candidate_count; ++index) {
-            display_text = candidate_display_text(
-                &self->state, &result->candidates[index]);
-            text = ibus_text_new_from_string(display_text);
-            ibus_lookup_table_append_candidate(table, text);
-            g_free(display_text);
-        }
+        gchar *wrapped;
+        ibus_lookup_table_append_label(table, ibus_text_new_from_string(completion_key));
         /* The arrow denotes a prediction beyond typed Pinyin. Exact-tail
            conversion keeps the framework's normal text presentation. */
         display_text = g_strdup_printf("%s%s%s%s",
@@ -388,21 +359,10 @@ static void render_result(CassotisIbusEngine *self,
             result->candidate_count == page_size ? "" : "  ",
             result->completion_is_exact_tail ? "" : "\xE2\x87\xA5",
             result->completion_text);
-        text = ibus_text_new_from_string(display_text);
-        ibus_lookup_table_append_candidate(table, text);
+        wrapped = cassotis_candidate_wrap_text(display_text, wrap_cells);
+        ibus_lookup_table_append_candidate(table, ibus_text_new_from_string(wrapped));
+        g_free(wrapped);
         g_free(display_text);
-        self->rendered_page_candidate_count = result->candidate_count;
-        self->rendered_completion_row = TRUE;
-    } else {
-        for (index = 0; index < result->candidate_count; ++index) {
-            display_text = candidate_display_text(
-                &self->state, &result->candidates[index]);
-            text = ibus_text_new_from_string(display_text);
-            ibus_lookup_table_append_candidate(table, text);
-            g_free(display_text);
-        }
-        self->rendered_page_candidate_count = result->candidate_count;
-        self->rendered_completion_row = FALSE;
     }
     if (has_raw && result->raw_input_selected) {
         ibus_lookup_table_set_cursor_pos(table, 0);
@@ -411,6 +371,43 @@ static void render_result(CassotisIbusEngine *self,
         ibus_lookup_table_set_cursor_pos(
             table, (guint32)result->selected_index + (has_raw ? 1U : 0U));
     }
+    return table;
+}
+
+static void render_result(CassotisIbusEngine *self,
+                          CassotisEngineResult *result)
+{
+    IBusEngine *engine = IBUS_ENGINE(self);
+    IBusText *text;
+    IBusLookupTable *table;
+
+    if (result->commit_text != NULL && result->commit_text[0] != '\0') {
+        text = ibus_text_new_from_string(result->commit_text);
+        ibus_engine_commit_text(engine, text);
+    }
+    if (result->preedit_text != NULL && result->preedit_text[0] != '\0') {
+        text = ibus_text_new_from_string(result->preedit_text);
+        ibus_engine_update_preedit_text(
+            engine, text, (guint)g_utf8_strlen(result->preedit_text, -1), TRUE);
+    } else {
+        ibus_engine_hide_preedit_text(engine);
+    }
+
+    self->rendered_raw_row = result->page_index == 0 && result->raw_input_candidate != NULL &&
+                             result->raw_input_candidate[0] != '\0';
+    self->rendered_completion_row = result->completion_text != NULL &&
+                                    result->completion_text[0] != '\0';
+    self->rendered_page_candidate_count = result->candidate_count;
+    /* Auxiliary text is above the table in GNOME. Keep completion as the last
+       clickable item: below the candidates vertically, at the end horizontally. */
+    ibus_engine_hide_auxiliary_text(engine);
+    table = build_lookup_table(&self->state, result);
+    if (table == NULL) {
+        ibus_engine_hide_lookup_table(engine);
+        self->page_index = 0;
+        return;
+    }
+    self->selection_kind = result->selection_kind;
     self->page_index = result->page_index;
     ibus_engine_update_lookup_table(engine, table, TRUE);
 }

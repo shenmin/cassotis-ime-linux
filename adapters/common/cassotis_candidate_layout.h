@@ -80,4 +80,72 @@ static inline gboolean cassotis_candidate_panel_requires_vertical(
     return cassotis_candidate_row_requires_vertical(result);
 }
 
+static inline gboolean cassotis_candidate_panel_is_vertical(
+    const CassotisEngineResult *result, CassotisCandidateLayout layout)
+{
+    if (layout == CASSOTIS_LAYOUT_VERTICAL)
+        return TRUE;
+    if (layout == CASSOTIS_LAYOUT_HORIZONTAL)
+        return FALSE;
+    return cassotis_candidate_panel_requires_vertical(result);
+}
+
+/* Only the presentation is wrapped. Selection still addresses the engine's
+ * original candidate, including raw input and the final completion item. */
+static inline guint32 cassotis_candidate_wrap_cells(
+    const CassotisEngineResult *result, CassotisCandidateLayout layout)
+{
+    guint32 count;
+    guint32 item_cells;
+    if (layout != CASSOTIS_LAYOUT_HORIZONTAL || result == NULL)
+        return 0;
+    count = result->candidate_count;
+    if (result->page_index == 0 && result->raw_input_candidate != NULL &&
+        result->raw_input_candidate[0] != '\0')
+        ++count;
+    if (result->completion_text != NULL && result->completion_text[0] != '\0')
+        ++count;
+    if (count == 0)
+        return 0;
+    item_cells = CASSOTIS_HORIZONTAL_CANDIDATE_CELL_BUDGET / count;
+    if (item_cells <= CASSOTIS_CANDIDATE_LABEL_CELL_OVERHEAD)
+        return 2;
+    return MAX(2U, item_cells - CASSOTIS_CANDIDATE_LABEL_CELL_OVERHEAD);
+}
+
+static inline gchar *cassotis_candidate_wrap_text(const gchar *text,
+                                                 guint32 max_cells)
+{
+    gchar *valid;
+    const gchar *cursor;
+    GString *wrapped;
+    guint32 cells = 0;
+    gboolean join_next = FALSE;
+    if (max_cells == 0)
+        return g_strdup(text != NULL ? text : "");
+    valid = g_utf8_make_valid(text != NULL ? text : "", -1);
+    wrapped = g_string_new(NULL);
+    for (cursor = valid; *cursor; cursor = g_utf8_next_char(cursor)) {
+        gunichar value = g_utf8_get_char(cursor);
+        gboolean continuation = g_unichar_ismark(value) || value == 0x200d;
+        guint32 width = continuation ? 0U : (g_unichar_iswide(value) ? 2U : 1U);
+        if (value == '\n' || value == '\r') {
+            cells = 0;
+        } else {
+            if (value == '\t')
+                width = 4;
+            if (cells != 0 && cells + width > max_cells &&
+                !continuation && !join_next) {
+                g_string_append_c(wrapped, '\n');
+                cells = 0;
+            }
+            cells += width;
+        }
+        g_string_append_len(wrapped, cursor, g_utf8_next_char(cursor) - cursor);
+        join_next = value == 0x200d;
+    }
+    g_free(valid);
+    return g_string_free(wrapped, FALSE);
+}
+
 #endif

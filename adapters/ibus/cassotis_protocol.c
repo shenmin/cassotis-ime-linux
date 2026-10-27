@@ -9,7 +9,7 @@
 #define CASSOTIS_ENGINE_STATE_SHORTCUTS_SCHEMA 3U
 #define CASSOTIS_ENGINE_STATE_DEBUG_SCHEMA 4U
 #define CASSOTIS_ENGINE_STATE_DECIMAL_SCHEMA 6U
-#define CASSOTIS_ENGINE_STATE_SCHEMA 7U
+#define CASSOTIS_ENGINE_STATE_SCHEMA 8U
 #define CASSOTIS_MIN_PAGE_SIZE 3U
 #define CASSOTIS_DEFAULT_PAGE_SIZE 9U
 #define CASSOTIS_MAX_PAGE_SIZE 9U
@@ -62,6 +62,7 @@ void cassotis_engine_state_init_defaults(CassotisEngineState *state)
     g_strlcpy(state->punctuation_ascii_symbols, CASSOTIS_MARKDOWN_ASCII_SYMBOLS,
               sizeof(state->punctuation_ascii_symbols));
     state->candidate_page_size = CASSOTIS_DEFAULT_PAGE_SIZE;
+    state->candidate_layout = CASSOTIS_LAYOUT_AUTO;
     state->candidate_page_key_scheme = CASSOTIS_PAGE_KEYS_MINUS_PLUS;
     state->one_key_completion_key = CASSOTIS_COMPLETION_TAB;
     state->shortcuts.input_mode_toggle.key_code = 0x10U;
@@ -314,6 +315,7 @@ GByteArray *cassotis_protocol_build_set_state_request(
     append_shortcut(payload, &state->shortcuts.full_width_toggle);
     append_shortcut(payload, &state->shortcuts.open_settings);
     append_string(payload, state->punctuation_ascii_symbols);
+    append_u8(payload, (guint8)state->candidate_layout);
     return build_frame(CASSOTIS_MESSAGE_SET_STATE, request_id, 0, 0,
                        payload);
 }
@@ -694,6 +696,7 @@ gboolean cassotis_protocol_decode_engine_state(
     guint8 candidate_page_key_scheme;
     guint8 one_key_completion_key;
     guint8 candidate_page_size;
+    guint8 candidate_layout = CASSOTIS_LAYOUT_AUTO;
     guint8 reserved_byte;
     guint16 reserved;
 
@@ -745,6 +748,8 @@ gboolean cassotis_protocol_decode_engine_state(
         if (!valid)
             return set_reader_error(&reader, "invalid ASCII punctuation symbols");
     }
+    if (schema >= 8 && !reader_u8(&reader, &candidate_layout))
+        return FALSE;
     if (input_mode > CASSOTIS_INPUT_ENGLISH ||
         dictionary_variant > CASSOTIS_DICTIONARY_TRADITIONAL ||
         pinyin_scheme > CASSOTIS_PINYIN_PINYINJIAJIA ||
@@ -759,6 +764,7 @@ gboolean cassotis_protocol_decode_engine_state(
         (fuzzy_rules & ~CASSOTIS_FUZZY_RULE_MASK) != 0 ||
         candidate_page_size < CASSOTIS_MIN_PAGE_SIZE ||
         candidate_page_size > CASSOTIS_MAX_PAGE_SIZE ||
+        candidate_layout > CASSOTIS_LAYOUT_HORIZONTAL ||
         candidate_page_key_scheme > CASSOTIS_PAGE_KEYS_SHIFT_TAB ||
         one_key_completion_key > CASSOTIS_COMPLETION_BACKTICK ||
         (candidate_page_key_scheme == CASSOTIS_PAGE_KEYS_SHIFT_TAB &&
@@ -782,6 +788,7 @@ gboolean cassotis_protocol_decode_engine_state(
         (flags & CASSOTIS_STATE_FLAG_DECIMAL_PERIOD) != 0;
     state->auto_english = schema < 7 || (flags & CASSOTIS_STATE_FLAG_AUTO_ENGLISH) != 0;
     state->candidate_page_size = candidate_page_size;
+    state->candidate_layout = (CassotisCandidateLayout)candidate_layout;
     state->candidate_page_key_scheme =
         (CassotisCandidatePageKeyScheme)candidate_page_key_scheme;
     state->one_key_completion_key =

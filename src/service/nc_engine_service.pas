@@ -288,6 +288,7 @@ begin
         (not nc_custom_phrases_equal(old_state.custom_phrases, new_state.custom_phrases)) or
         (old_state.candidate_page_size <>
         new_state.candidate_page_size) or
+        (old_state.candidate_layout <> new_state.candidate_layout) or
         (old_state.candidate_page_key_scheme <>
         new_state.candidate_page_key_scheme) or
         (old_state.one_key_completion_key <>
@@ -744,6 +745,9 @@ begin
             not nc_custom_phrase_text_valid(phrase.text) then Exit(False);
     if (state.candidate_page_size < c_min_candidate_page_size) or
         (state.candidate_page_size > c_max_candidate_page_size) then
+        Exit(False);
+    if (Ord(state.candidate_layout) < Ord(Low(TncCandidateLayout))) or
+        (Ord(state.candidate_layout) > Ord(High(TncCandidateLayout))) then
         Exit(False);
     if nc_candidate_page_key_conflicts_with_one_key_completion(
         state.candidate_page_key_scheme, state.one_key_completion_key) or

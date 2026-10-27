@@ -129,6 +129,13 @@ typedef enum {
     CASSOTIS_COMPLETION_BACKTICK = 1
 } CassotisOneKeyCompletionKey;
 
+/* Wire values must match TncCandidateLayout in nc_types. */
+typedef enum {
+    CASSOTIS_LAYOUT_AUTO = 0,
+    CASSOTIS_LAYOUT_VERTICAL = 1,
+    CASSOTIS_LAYOUT_HORIZONTAL = 2
+} CassotisCandidateLayout;
+
 /* Wire values must match TncCandidateDisplayKind in nc_types. */
 typedef enum {
     CASSOTIS_CANDIDATE_DEFAULT = 0,
@@ -185,6 +192,7 @@ typedef struct {
     gchar punctuation_ascii_symbols[33];
     gboolean auto_english;
     guint8 candidate_page_size;
+    CassotisCandidateLayout candidate_layout;
     CassotisCandidatePageKeyScheme candidate_page_key_scheme;
     CassotisOneKeyCompletionKey one_key_completion_key;
     gboolean debug_mode;

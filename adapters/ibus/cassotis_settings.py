@@ -53,6 +53,7 @@ SHORTCUT_STATE_KEYS = (
 STATE_KEYS = BASE_STATE_KEYS + SHORTCUT_STATE_KEYS + (
     "shortcut_disabled_mask", "decimal_period_after_digit",
     "auto_english", "punctuation_ascii_symbols",
+    "candidate_layout",
 )
 
 SCHEME_NAMES = (
@@ -94,6 +95,7 @@ PAGE_KEY_PREVIEWS = (
 )
 
 COMPLETION_KEYS = ("Tab", "`")
+CANDIDATE_LAYOUTS = ("自动", "固定竖排", "固定横排")
 
 CONTROL_TIMEOUT_SECONDS = 35
 ENGINE_VERSION_TIMEOUT_SECONDS = 2
@@ -179,6 +181,7 @@ DEFAULT_STATE = {
     "candidate_page_key_scheme": 0,
     "one_key_completion_key": 0,
     "candidate_page_size": 9,
+    "candidate_layout": 0,
     "debug_mode": 0,
     "shortcut_input_mode_key": 0x10,
     "shortcut_input_mode_modifiers": 0,
@@ -204,7 +207,7 @@ PAGE_DEFAULT_KEYS = (
         "auto_english",
         "punctuation_ascii_symbols",
     ),
-    ("candidate_page_size",),
+    ("candidate_page_size", "candidate_layout"),
     ("fuzzy_pinyin_enabled", "fuzzy_pinyin_rules"),
     (
         "candidate_page_key_scheme",
@@ -361,6 +364,8 @@ def validate_state(state):
         raise ControlError("一键补全按键超出范围")
     if not 3 <= state["candidate_page_size"] <= 9:
         raise ControlError("每页候选数必须为 3 到 9")
+    if not 0 <= state["candidate_layout"] < len(CANDIDATE_LAYOUTS):
+        raise ControlError("候选布局超出范围")
     if state["debug_mode"] not in (0, 1):
         raise ControlError("调试模式超出范围")
     if state["candidate_page_key_scheme"] == 3 and \
@@ -653,6 +658,14 @@ class SettingsWindow(Gtk.ApplicationWindow):
             tuple((size, str(size)) for size in range(3, 10))
         )
         self._add_row(candidate, 0, "每页候选", self.candidate_page_size)
+        self.candidate_layout = self._combo(CANDIDATE_LAYOUTS)
+        self._add_row(candidate, 1, "候选布局", self.candidate_layout)
+        hint = Gtk.Label(label="自动：候选过长或有补全时竖排。\n"
+                         "固定横排：长文本在项内换行，Tab 补全显示在末项。\n"
+                         "固定竖排：候选与补全从上到下排列。")
+        hint.set_xalign(0)
+        hint.set_line_wrap(True)
+        content.pack_start(hint, False, False, 0)
         return page
 
     def _build_fuzzy_page(self):
@@ -986,6 +999,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self._set_combo_value(
             self.candidate_page_size, state["candidate_page_size"]
         )
+        self._set_combo_value(self.candidate_layout, state["candidate_layout"])
         self._set_combo_value(
             self.page_keys, state["candidate_page_key_scheme"]
         )
@@ -1039,6 +1053,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.candidate_page_size
             ),
             "debug_mode": int(self.debug_mode.get_active()),
+            "candidate_layout": self._combo_value(self.candidate_layout),
             "custom_phrases": self._phrase_rows(),
         }
         if changes["punctuation_full_width"] and not changes["full_width_mode"]:

@@ -70,17 +70,29 @@ const fcitx::KeyList kSelectionKeys = {
     fcitx::Key(FcitxKey_9),
 };
 
-fcitx::Text candidateDisplayText(const char *text, const char *comment) {
+fcitx::Text wrappedText(const std::string &text, guint32 wrapCells) {
+    gchar *wrapped = cassotis_candidate_wrap_text(text.c_str(), wrapCells);
+    fcitx::Text result(wrapped);
+    g_free(wrapped);
+    return result;
+}
+
+fcitx::Text candidateDisplayText(const char *text, const char *comment,
+                               guint32 wrapCells) {
     std::string displayText = text ? text : "";
-#ifndef CASSOTIS_FCITX_HAS_CANDIDATE_COMMENT
-    if (comment && *comment) {
-        displayText += "  ";
+    // Keep annotations within the same width allocation in fixed horizontal mode.
+#ifdef CASSOTIS_FCITX_HAS_CANDIDATE_COMMENT
+    if (wrapCells != 0 && comment && *comment) {
+        displayText += "\n";
         displayText += comment;
     }
 #else
-    (void)comment;
+    if (comment && *comment) {
+        displayText += wrapCells != 0 ? "\n" : "  ";
+        displayText += comment;
+    }
 #endif
-    return fcitx::Text(std::move(displayText));
+    return wrappedText(displayText, wrapCells);
 }
 
 bool statesEqual(const CassotisEngineState &left,
@@ -96,6 +108,7 @@ bool statesEqual(const CassotisEngineState &left,
            left.auto_english == right.auto_english &&
            strcmp(left.punctuation_ascii_symbols, right.punctuation_ascii_symbols) == 0 &&
            left.candidate_page_size == right.candidate_page_size &&
+           left.candidate_layout == right.candidate_layout &&
            left.candidate_page_key_scheme ==
                right.candidate_page_key_scheme &&
            left.one_key_completion_key == right.one_key_completion_key &&
@@ -261,7 +274,8 @@ class CassotisCandidateWord final : public fcitx::CandidateWord {
 public:
     CassotisCandidateWord(CassotisFcitxEngine *engine,
                           std::size_t globalIndex, const char *text,
-                          const char *comment, bool rawInput = false);
+                          const char *comment, guint32 wrapCells,
+                          bool rawInput = false);
 
     void select(fcitx::InputContext *inputContext) const override;
 
@@ -274,7 +288,7 @@ private:
 class CassotisCompletionWord final : public fcitx::CandidateWord {
 public:
     CassotisCompletionWord(CassotisFcitxEngine *engine, const char *text,
-                           bool exactTail);
+                           bool exactTail, guint32 wrapCells);
 
     void select(fcitx::InputContext *inputContext) const override;
 
@@ -532,6 +546,8 @@ void CassotisFcitxState::renderResult(CassotisEngineResult *result) {
     const bool hasRaw = result->page_index == 0 &&
         result->raw_input_candidate && *result->raw_input_candidate;
     renderedRawCandidate_ = hasRaw;
+    const guint32 wrapCells = cassotis_candidate_wrap_cells(
+        result, engine_->state_.candidate_layout);
     panel.reset();
 
     if (result->commit_text && *result->commit_text) {
@@ -571,12 +587,12 @@ void CassotisFcitxState::renderResult(CassotisEngineResult *result) {
             candidates->setSelectionKey(kSelectionKeys);
         }
         candidates->setLayoutHint(
-            cassotis_candidate_panel_requires_vertical(result)
+            cassotis_candidate_panel_is_vertical(result, engine_->state_.candidate_layout)
                 ? fcitx::CandidateLayoutHint::Vertical
                 : fcitx::CandidateLayoutHint::Horizontal);
         if (hasRaw) {
             candidates->insert(0, std::make_unique<CassotisCandidateWord>(
-                engine_, 0, result->raw_input_candidate, "", true));
+                engine_, 0, result->raw_input_candidate, "", wrapCells, true));
         }
         for (guint32 index = 0; index < result->candidate_count; ++index) {
             const auto &candidate = result->candidates[index];
@@ -591,14 +607,14 @@ void CassotisFcitxState::renderResult(CassotisEngineResult *result) {
             candidates->insert(
                 static_cast<int>(index + (hasRaw ? 1U : 0U)),
                 std::make_unique<CassotisCandidateWord>(
-                    engine_, index, candidate.text, comment.c_str()));
+                    engine_, index, candidate.text, comment.c_str(), wrapCells));
         }
         if (hasCompletion) {
             candidates->insert(
                 static_cast<int>(result->candidate_count + (hasRaw ? 1U : 0U)),
                 std::make_unique<CassotisCompletionWord>(
                     engine_, result->completion_text,
-                    result->completion_is_exact_tail));
+                    result->completion_is_exact_tail, wrapCells));
         }
         if (hasRaw && result->raw_input_selected) {
             candidates->setGlobalCursorIndex(0);
@@ -732,11 +748,11 @@ void CassotisFcitxState::acceptCompletion() {
 
 CassotisCandidateWord::CassotisCandidateWord(
     CassotisFcitxEngine *engine, std::size_t globalIndex, const char *text,
-    const char *comment, bool rawInput)
-    : fcitx::CandidateWord(candidateDisplayText(text, comment)), engine_(engine),
+    const char *comment, guint32 wrapCells, bool rawInput)
+    : fcitx::CandidateWord(candidateDisplayText(text, comment, wrapCells)), engine_(engine),
       globalIndex_(globalIndex), rawInput_(rawInput) {
 #ifdef CASSOTIS_FCITX_HAS_CANDIDATE_COMMENT
-    if (comment && *comment) {
+    if (wrapCells == 0 && comment && *comment) {
         setComment(fcitx::Text(comment));
     }
 #endif
@@ -754,10 +770,10 @@ void CassotisCandidateWord::select(
 }
 
 CassotisCompletionWord::CassotisCompletionWord(
-    CassotisFcitxEngine *engine, const char *text, bool exactTail)
+    CassotisFcitxEngine *engine, const char *text, bool exactTail, guint32 wrapCells)
     : fcitx::CandidateWord(
-          fcitx::Text(std::string(exactTail ? "" : "\xE2\x87\xA5") +
-                      (text ? text : ""))),
+          wrappedText(std::string(exactTail ? "" : "\xE2\x87\xA5") +
+                      (text ? text : ""), wrapCells)),
       engine_(engine) {}
 
 void CassotisCompletionWord::select(
