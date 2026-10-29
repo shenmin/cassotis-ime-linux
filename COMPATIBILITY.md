@@ -1,5 +1,21 @@
 # Compatibility
 
+## Portable System Installer Safety
+
+The corrected installer was tested on Fedora Linux 44 x86_64 (Cloud image
+with GNOME installed), with a Wayland desktop and SELinux enforcing. The
+test used the published v2.1.0 payload with only the system installer replaced.
+Installation, an upgrade with restrictive extraction permissions and `umask 077`,
+and uninstallation each passed a reboot and active Wayland-session check.
+
+All 13 pre-existing shared directories retained their ownership, modes and
+extended attributes, including SELinux labels. All 58 installed payload files
+passed target-policy label checks; all 56 checksums in the release manifest
+matched. An unrelated system file was
+preserved. This verifies the installer fix, not full Fedora input-framework or
+application compatibility. It does not repair directory attributes damaged by
+an older installer; see the [system-install warning](README.md#system-installation).
+
 ## v2.5.0 Validation
 
 The 2026-10-29 (UTC+8) validation uses the released v2.5.0 engine and

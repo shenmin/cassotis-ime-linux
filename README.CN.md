@@ -112,16 +112,21 @@ cd "cassotis-ime-linux-2.1.0-${arch}"
 
 仅当系统目录可写、具有管理员权限且运行库兼容时，才使用以下方式。SteamOS 等只读系统请使用上面的[用户目录安装](#user-installation)。
 
+**不要使用 v2.1.0 及更早便携包的系统安装功能。** 旧安装器可能覆盖系统目录的所有者、权限和 SELinux 标签，导致无法登录桌面。在修复版安装包发布前，请使用用户目录安装。修复后的安装器包含 `install-support/system_install.py`，保留已有目录属性；启用 SELinux 时，需要系统提供 `restorecon`（通常属于 `policycoreutils` 软件包）。
+
+在已解压的修复版便携包目录中执行：
+
 ```bash
-arch="$(uname -m)"  # 输出 x86_64 或 aarch64
-archive="cassotis-ime-linux-2.1.0-${arch}.tar.gz"
-sha256sum "${archive}"
-tar -xzf "${archive}"
-cd "cassotis-ime-linux-2.1.0-${arch}"
-sudo ./install.sh
+if test -r install-support/system_install.py; then
+    sudo ./install.sh --system
+else
+    printf 'Use a fixed portable installer or --user installation.\n' >&2
+fi
 ```
 
 便携安装器不会自动解决运行库依赖，所需库见 [BUILD.md](BUILD.md)。这种安装使用 `sudo ./uninstall.sh` 卸载。
+
+本次修复防止再次破坏目录属性，不会猜测或重置旧安装器已损坏的系统目录。如果已经无法登录，应先通过发行版的恢复工具修复目录属性，再重新安装；不要用关闭 SELinux 或递归修改权限替代修复。
 
 ## 架构
 - `src/engine`：拼音解析、候选生成、排序与用户学习，移植自 Windows 版引擎。

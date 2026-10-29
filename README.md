@@ -112,16 +112,21 @@ To upgrade, extract the new archive and repeat the preflight and installation co
 
 Use this method only with writable system directories, administrator privileges and compatible runtime libraries. For SteamOS and other read-only systems, use the [user installation](#user-installation) instead.
 
+**Do not use system installation from v2.1.0 or older portable archives.** Their installer can overwrite system-directory ownership, permissions and SELinux labels, preventing desktop login. Use user installation instead until a fixed archive is available. The corrected installer includes `install-support/system_install.py`; it preserves existing directory attributes and requires `restorecon` (usually provided by `policycoreutils`) when SELinux is enabled.
+
+Inside an extracted, fixed portable archive:
+
 ```bash
-arch="$(uname -m)"  # x86_64 or aarch64
-archive="cassotis-ime-linux-2.1.0-${arch}.tar.gz"
-sha256sum "${archive}"
-tar -xzf "${archive}"
-cd "cassotis-ime-linux-2.1.0-${arch}"
-sudo ./install.sh
+if test -r install-support/system_install.py; then
+    sudo ./install.sh --system
+else
+    printf 'Use a fixed portable installer or --user installation.\n' >&2
+fi
 ```
 
 The portable installer does not resolve runtime dependencies; [BUILD.md](BUILD.md) lists the required libraries. Remove this installation with `sudo ./uninstall.sh`.
+
+The fix prevents new damage; it does not guess or reset system-directory attributes damaged by an older installer. If login is already affected, recover those attributes using the distribution's recovery tools before reinstalling. Disabling SELinux or recursively changing permissions is not a substitute.
 
 ## Architecture
 - `src/engine`: Pinyin parsing, candidate generation, ranking and learning, ported from the Windows engine.
