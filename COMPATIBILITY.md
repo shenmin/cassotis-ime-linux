@@ -1,5 +1,42 @@
 # Compatibility
 
+## v2.5.0 Validation
+
+The 2026-10-29 (UTC+8) validation uses the released v2.5.0 engine and
+lexicon inputs. The shared neural graph is unchanged; the short-word tree
+and dictionary frequency/transition evidence have been updated.
+
+Both Ubuntu 26.04.1 x86_64 and aarch64 pass 924 core tests, 69 final-Tab
+contract checks, ten settings tests, simplified/traditional static and
+ready-neural candidate matrices, and isolated IBus/Fcitx 5 input checks.
+Native model-score, UTF-16, cache, cancellation, dictionary-path and service
+lifecycle checks pass on both architectures. Production foreground/background
+budgets remain 100/120 ms, independently of deadline-free corpus evaluation.
+
+All four full-corpus suites pass on both architectures without relaxing the
+quality gates. Fresh-process input checks also pass, each with 41 keys:
+
+| Architecture | Process-cold first / maximum key (ms) | Blocked-model first / maximum key (ms) |
+| --- | ---: | ---: |
+| x86_64 | 4.361 / 31.775 | 4.926 / 28.153 |
+| aarch64 | 4.869 / 25.245 | 4.210 / 26.484 |
+
+The blocked-model check holds initialization until input and commit checks
+finish, then verifies input after loading resumes. These trials do not clear
+the operating system's file cache.
+
+Automatic, fixed vertical and fixed horizontal layout settings remain shared
+by both adapters. The settings, display-wrapping and shortcut regressions are
+retained; none of these settings changes the engine's ranking or commit text.
+These tests do not establish a compositor-independent way of reversing the
+candidate order according to the panel's position above or below the cursor.
+
+Native quality measurements are recorded in [BENCHMARK.md](BENCHMARK.md) /
+[Chinese](BENCHMARK.CN.md). Earlier installed-desktop checks below retain
+their own dates and inputs; they are not substituted for this version's
+isolated framework tests. The validation does not restart the active desktop
+input method or replace personal settings and user dictionaries.
+
 ## v2.1.0 Validation
 
 The 2026-10-25 (UTC+8) validation uses the released Windows engine and

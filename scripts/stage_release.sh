@@ -90,6 +90,10 @@ fi
     cassotis_die '--prefix must be an absolute path below /'
 
 resolved_destdir="$(realpath -m -- "$destdir")"
+cassotis_validate_dictionary "$dictionary_path"
+if [[ -n "$traditional_dictionary_path" ]]; then
+    cassotis_validate_dictionary "$traditional_dictionary_path"
+fi
 [[ "$resolved_destdir" != '/' && "$resolved_destdir" != "$cassotis_root" ]] ||
     cassotis_die "refusing unsafe staging directory: $resolved_destdir"
 

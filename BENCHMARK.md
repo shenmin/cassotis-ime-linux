@@ -17,10 +17,36 @@ Both benchmarks are derived from the developer's own novel,
 (Chinese title: **永恒的舞动**). Benchmark cases are kept separate from the
 corresponding model-training data.
 
-## Frozen v2.4.0 Baseline
+## Frozen v2.5.0 Baseline
 
-Linux v2.1.0 targets the final v2.4.0 engine and lexicon tags. The current
-validation uses newly built dictionaries and the revised benchmark readings.
+Linux v2.5.0 uses the released
+[Windows engine v2.5.0](https://github.com/shenmin/cassotis-ime/releases/tag/v2.5.0)
+and [Cassotis Lexicon v2.5.0](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.5.0).
+The case files and scoring rules are unchanged from Linux v2.1.0: 16,300 long
+cases, 65,000 short cases (11,685 contested), and 12,831 short-completion
+opportunities. Corpus runs have no search or inference wall-clock deadline;
+production timeouts are unchanged.
+
+- Simplified database SHA-256:
+  `4b13bff070e7b006f0e592672ae30c0adadddc384c78fac595a6a6c23e9081c8`.
+- Traditional database SHA-256:
+  `9db30602f2a86c8fcbcc2d9b182b2fb69f168199cb4ce889f177f310ebdf07d6`.
+- Base text-reading records: 261,149 simplified / 262,028 traditional,
+  including 23,918 / 24,181 single-character records.
+- Word-frequency records: 199,072 / 198,640; short-word promotion records:
+  1,498 / 1,692; LM-transition records: 904,767 / 833,707.
+
+The neural model graph, vocabulary and reading map are unchanged. The compact
+short-word ranker now has 28 features, including general-text word frequency;
+the other six compact units are unchanged. Transition evidence loads per query
+into bounded caches. Automatic, fixed vertical and fixed horizontal panel layouts
+remain presentation-only settings and do not select different ranking algorithms.
+Full dictionary compatibility is recorded in [DICTIONARY.md](docs/DICTIONARY.md).
+
+## Previous v2.4.0 Baseline
+
+Linux v2.1.0 targeted the final v2.4.0 engine and lexicon tags. Its
+validation used newly built dictionaries and the revised benchmark readings.
 Corpus sizes remain unchanged, but the revised short-case classifications have
 11,685 contested cases instead of 11,728. Historical measurements retain their
 original inputs and dates; they are not paired results on the revised cases.
@@ -56,8 +82,9 @@ Traditional input is scored through a simplified-text model view while preservin
 traditional candidates and commits. Both foreground decisions and background
 completion use this view. Next-character queries share the text-scoring graph
 run; unknown, omitted and unscored query slots cannot introduce a false penalty.
-The model graph, vocabulary, reading map and seven compact ranking units are
-unchanged from v2.0.0.
+For Linux v2.1.0, the model graph, vocabulary, reading map and seven compact
+ranking units were unchanged from v2.0.0; the v2.5.0 short-word update is
+described above.
 
 The v2.0.0 port uses one approximately 150-million-parameter character language
 model for long sentences, short words, phrase correction and both forms of Tab
@@ -186,6 +213,78 @@ latency, and Linux process RSS/high-water marks. Memory events contain only
 the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
+
+## v2.5.0 Native Measurements
+
+Measured on 2026-10-29 (UTC+8), on Ubuntu 26.04.1 virtual machines with
+eight vCPUs: x86_64 with 16 GiB RAM on an Intel Core i5-12600K host and
+aarch64 with 8 GiB RAM on Apple silicon. Each machine ran one corpus runner
+at a time. Accuracy and latency use the same deadline-free run, eight model
+threads, and the frozen cases and databases listed above. The installed
+runtime retains its 100 ms foreground and 120 ms background safeguards.
+
+### Candidate Selection
+
+| Architecture | Track | Top1 | Top2 | Mean (ms) | P50 (ms) | P95 (ms) | Max (ms) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | Long, 16,300 | 13442 (82.47%) | 14358 (88.09%) | 142.697 | 143 | 214 | 534 |
+| aarch64 | Long, 16,300 | 13434 (82.42%) | 14351 (88.04%) | 112.076 | 110 | 178 | 496 |
+| x86_64 | Short without context, 65,000 | 61357 (94.40%) | 63736 (98.06%) | 4.806 | 3 | 12 | 69 |
+| aarch64 | Short without context, 65,000 | 61357 (94.40%) | 63736 (98.06%) | 4.713 | 3 | 12 | 49 |
+| x86_64 | Short with context, 65,000 | 63463 (97.64%) | 64436 (99.13%) | 8.825 | 5 | 25 | 74 |
+| aarch64 | Short with context, 65,000 | 63465 (97.64%) | 64438 (99.14%) | 7.566 | 5 | 20 | 56 |
+
+The contested subset contains 11,685 cases. Without context, both architectures
+score 8,956 Top1 and 10,659 Top2. With context, x86_64 scores 10,512/11,223
+and aarch64 scores 10,514/11,225. Relative to v2.1.0 on the same cases,
+context-free short Top1/Top2 improve by 122/35 on both architectures, while
+contextual contested Top1 decreases by 27 and 24 respectively. Overall
+contextual short Top1/Top2 improve by 8/13 and 11/15. The new general-text
+frequency evidence is not an improvement on every subset.
+
+Long Top1/Top2 changes from v2.1.0 are +7/+44 on x86_64 and -1/+38 on
+aarch64. Runs on different dates are not a controlled latency comparison,
+and a deadline-free engine decode is not end-to-end desktop keystroke latency.
+
+The candidate runner's process high-water marks were 412,804 KiB (403.1 MiB)
+on x86_64 and 406,960 KiB (397.4 MiB) on aarch64. These are measured corpus
+process peaks, not universal bounds or idle-memory claims.
+
+Both architectures pass 924 native unit tests, 69 final-Tab contract checks,
+ten settings tests, the simplified/traditional candidate matrices and isolated
+IBus/Fcitx 5 input tests. Regression coverage includes frequency evidence and
+missing-table handling, lazy transition-cache lifecycle, rare-character paging,
+whole-key readings, transition-backed phrases and candidate layout settings.
+
+### Short-word Completion
+
+| Architecture | Hits / 12,831 | Saved keys | Average per hit | Stability | Key P95 (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 10512 (81.93%) | 27700 | 2.635 | 2151/2214 (97.15%) | 2.039 |
+| aarch64 | 10513 (81.93%) | 27702 | 2.635 | 2152/2215 (97.16%) | 2.021 |
+
+| Architecture | Settled mean (ms) | P50 (ms) | P95 (ms) | Max (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| x86_64 | 17.809 | 17.066 | 53.904 | 152.001 |
+| aarch64 | 12.831 | 12.402 | 37.477 | 103.386 |
+
+Both runs contain 65,000 cases, 12,831 opportunities and 12,796 prompts.
+Completion hits are unchanged from v2.1.0 on each architecture. Settled latency
+includes finished background work even when the displayed hint stays unchanged.
+
+### Long-sentence Completion
+
+| Architecture | Hits / 16,300 | Predictive prompts | Saved keys | Mean (ms) | P50 (ms) | P95 (ms) | Max (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 3896 (23.90%) | 16152 | 9592 | 155.338 | 150 | 241 | 623 |
+| aarch64 | 3904 (23.95%) | 16147 | 9611 | 120.591 | 115 | 193 | 462 |
+
+Mean decoding / final-candidate / continuation times are
+7.459 / 82.100 / 65.780 ms on x86_64 and 7.161 / 63.292 / 50.137 ms on aarch64.
+The summed interval includes all three stages; independent rounding accounts
+for the 0.001 ms differences from the reported totals. Relative to v2.1.0,
+hits increase by 20 and 21, and saved keys by 16 and 20, respectively.
+These are deadline-free measurements, not the installed 120 ms continuation path.
 
 ## v2.1.0 Native Measurements
 

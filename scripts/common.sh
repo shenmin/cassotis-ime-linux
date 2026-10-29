@@ -418,6 +418,31 @@ cassotis_gnome_input_source_remove() {
     fi
 }
 
+cassotis_validate_dictionary() {
+    python3 - "$1" <<'PY'
+from contextlib import closing
+from pathlib import Path
+import sqlite3
+import sys
+
+path = Path(sys.argv[1]).resolve()
+for suffix in ("-wal", "-shm", "-journal"):
+    if Path(str(path) + suffix).exists():
+        raise SystemExit(f"Dictionary has an active journal: {path}{suffix}")
+with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
+    if db.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
+        raise SystemExit(f"Packaged dictionary must use rollback journaling: {path}")
+    for table in ("dict_base", "dict_base_short_promotion", "dict_base_word_frequency"):
+        try:
+            row = db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
+        except sqlite3.DatabaseError as error:
+            raise SystemExit(f"Incomplete dictionary ({table}): {path}: {error}")
+        if row is None:
+            raise SystemExit(f"Empty required dictionary table {table}: {path}")
+    db.execute("SELECT text, score FROM dict_base_word_frequency LIMIT 1").fetchone()
+PY
+}
+
 cassotis_atomic_install() {
     local source_path="$1"
     local destination_path="$2"

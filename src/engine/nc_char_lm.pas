@@ -119,8 +119,10 @@ type
         evidence: TncCharLmLongEvidence;
     end;
 
-    { A visible exact entry for the short-word choice: its page position and
-      the dictionary evidence the candidate list carries. }
+    { A visible exact entry for the short-word choice: its page position, the
+      dictionary evidence the candidate list carries, and how often the
+      general text holds the word as a word (100 * log10(1 + occurrences);
+      0 for none). }
     TncCharLmShortCandidate = record
         text: string;
         position: Integer;
@@ -128,6 +130,7 @@ type
         has_dict_weight: Boolean;
         display_score: Integer;
         user: Boolean;
+        word_frequency: Integer;
     end;
 
 const
@@ -153,10 +156,9 @@ const
     c_char_lm_short_choice_limit = 8;
     { The choice looks at the context-free scores first, which the host keeps.
       When the ranker's best candidate leads the next by at least this on
-      those alone, the call with the context is left out: the context
-      overturned such a lead in 2 of 30,000 held-out fiction cases and in none
-      of 56,886 chat cases, and it holds for a quarter of the calls. }
-    c_char_lm_short_plain_lead = 5.0;
+      those alone, the call with the context is left out. The frequency-aware
+      tree needs a wider lead before skipping context than its predecessor. }
+    c_char_lm_short_plain_lead = 6.0;
     { Tab continuation: show the most probable candidate when P(correct) is at
       least this. Chosen on the 7,996-sentence fiction Tab dev set (5-fold CV
       on the policy's own features) as the most hits whose prompt precision is
@@ -957,7 +959,7 @@ var
         lp, lp1, lp2: TArray<Double>;
         features: array[0..c_short_gbdt_feature_count - 1] of Double;
         own_chars, first_chars: TArray<string>;
-        at, against, units, shared, lp_rank, weight_rank, context_units: Integer;
+        at, against, units, shared, lp_rank, weight_rank, context_units, frequency_max: Integer;
         lp_max, lp1_max, gain_max, score, best_score, next_score: Double;
         line: string;
     begin
@@ -967,8 +969,10 @@ var
         lp_max := -MaxDouble;
         lp1_max := -MaxDouble;
         gain_max := -MaxDouble;
+        frequency_max := 0;
         for at := 0 to count - 1 do
         begin
+            frequency_max := Max(frequency_max, candidates[at].word_frequency);
             if with_context then
             begin
                 lp[at] := logp[slots[at][0]];
@@ -1036,6 +1040,12 @@ var
             features[22] := plain[at];
             features[23] := lp[at] - plain[at];
             features[24] := lp[at] - plain[at] - gain_max;
+            // The general text's evidence, which neither the model's score
+            // nor the dictionary weight carries: fit on fiction and chat
+            // without it, the choice took words of the novel (视线 above 实现).
+            features[25] := candidates[at].word_frequency;
+            features[26] := candidates[at].word_frequency - candidates[0].word_frequency;
+            features[27] := candidates[at].word_frequency - frequency_max;
             score := nc_short_gbdt_score(features);
             // The trace holds the view the call is decided on with its context.
             if Assigned(nc_char_lm_short_trace) and (with_context = (context <> '')) then

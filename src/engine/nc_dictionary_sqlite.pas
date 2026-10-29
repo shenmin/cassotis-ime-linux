@@ -77,9 +77,9 @@ type
         m_base_query_path_pinyin_cache: TDictionary<string, Boolean>;
         m_base_query_path_pinyin_cache_loaded: Boolean;
         m_lm_transition_bonus_cache: TncCompactStringIntMap;
+        m_lm_transition_loaded_queries: TDictionary<string, Boolean>;
         m_exact_pair_path_evidence_cache:
             TDictionary<string, TncPairPathEvidenceList>;
-        m_lm_transition_cache_loaded: Boolean;
         m_char_lm_entry_cache: TDictionary<string, TncCharLmCacheEntry>;
         m_char_lm_cache_order: TncStringQueue;
         m_char_lm_text_score_cache: TDictionary<string, Integer>;
@@ -114,6 +114,7 @@ type
         m_stmt_context_trigram_bonus: Psqlite3_stmt;
         m_stmt_base_query_path_bonus: Psqlite3_stmt;
         m_stmt_exact_pair_path_evidence: Psqlite3_stmt;
+        m_stmt_lm_transition_query: Psqlite3_stmt;
         m_stmt_compound_tail_support: Psqlite3_stmt;
         m_stmt_compound_tail_prefix_support: Psqlite3_stmt;
         m_stmt_compound_tail_prefix_range_support: Psqlite3_stmt;
@@ -183,7 +184,8 @@ type
         m_literal_user_words_available: Integer;
         m_exact_base_entry_cache: TDictionary<string, Boolean>;
         m_normalized_base_entry_cache: TDictionary<string, Boolean>;
-        m_completion_corpus_score_cache: TDictionary<string, Integer>;
+        m_word_frequency_cache: TDictionary<string, Integer>;
+        m_word_frequency_missing: Boolean;
         m_single_char_readings_cache: TDictionary<string, TArray<string>>;
         m_explicit_user_entry_cache: TDictionary<string, Boolean>;
         m_literal_user_entry_cache: TDictionary<string, Boolean>;
@@ -270,7 +272,7 @@ type
         procedure load_query_path_bonus_cache;
         function base_query_path_pinyin_may_exist(
             const query_key: string): Boolean;
-        procedure load_lm_transition_bonus_cache;
+        procedure load_lm_transition_query(const normalized_query: string);
         function ensure_char_lm_available(
             const reverse_model: Boolean = False): Boolean;
         procedure cache_char_lm_entry(const ngram: string;
@@ -395,6 +397,8 @@ type
             const text: string): Boolean; override;
         function single_char_matches_pinyin(const pinyin: string; const text_unit: string): Boolean; override;
         function get_single_char_readings(const text_unit: string): TArray<string>; override;
+        function lookup_key_single_chars(const pinyin: string;
+            out results: TncCandidateList): Boolean; override;
         function is_low_evidence_admin_place_alias_user_entry(const pinyin: string;
             const text: string; const latest_choice_text: string = '';
             const user_weight: Integer = -1; const commit_count: Integer = -1): Boolean; override;
@@ -462,7 +466,7 @@ type
         function clear_user_dictionary: Boolean; override;
         function import_user_choices(const entries: TncUserWordImportEntries;
             out imported: Integer): Boolean; override;
-        function get_completion_corpus_score(const pinyin, text: string): Integer; override;
+        function get_word_frequency_score(const text: string): Integer; override;
         function get_candidate_penalty(const pinyin: string; const text: string): Integer; override;
         function get_last_lookup_debug_hint: string;
         property db_path: string read m_base_db_path;
@@ -2648,6 +2652,7 @@ begin
     m_stmt_context_trigram_bonus := nil;
     m_stmt_base_query_path_bonus := nil;
     m_stmt_exact_pair_path_evidence := nil;
+    m_stmt_lm_transition_query := nil;
     m_stmt_compound_tail_support := nil;
     m_stmt_compound_tail_prefix_support := nil;
     m_stmt_compound_tail_prefix_range_support := nil;
@@ -2693,9 +2698,9 @@ begin
     m_base_query_path_pinyin_cache := TDictionary<string, Boolean>.Create;
     m_base_query_path_pinyin_cache_loaded := False;
     m_lm_transition_bonus_cache := TncCompactStringIntMap.Create;
+    m_lm_transition_loaded_queries := TDictionary<string, Boolean>.Create;
     m_exact_pair_path_evidence_cache :=
         TDictionary<string, TncPairPathEvidenceList>.Create;
-    m_lm_transition_cache_loaded := False;
     m_char_lm_entry_cache := TDictionary<string, TncCharLmCacheEntry>.Create;
     m_char_lm_cache_order := TncStringQueue.Create;
     m_char_lm_text_score_cache := TDictionary<string, Integer>.Create;
@@ -2763,7 +2768,8 @@ begin
     m_literal_user_words_available := -1;
     m_exact_base_entry_cache := TDictionary<string, Boolean>.Create;
     m_normalized_base_entry_cache := TDictionary<string, Boolean>.Create;
-    m_completion_corpus_score_cache := TDictionary<string, Integer>.Create;
+    m_word_frequency_cache := TDictionary<string, Integer>.Create;
+    m_word_frequency_missing := False;
     m_single_char_readings_cache := TDictionary<string, TArray<string>>.Create;
     m_explicit_user_entry_cache := TDictionary<string, Boolean>.Create;
     m_literal_user_entry_cache := TDictionary<string, Boolean>.Create;
@@ -2883,6 +2889,11 @@ begin
     begin
         m_lm_transition_bonus_cache.Free;
         m_lm_transition_bonus_cache := nil;
+    end;
+    if m_lm_transition_loaded_queries <> nil then
+    begin
+        m_lm_transition_loaded_queries.Free;
+        m_lm_transition_loaded_queries := nil;
     end;
     if m_exact_pair_path_evidence_cache <> nil then
     begin
@@ -3057,7 +3068,7 @@ begin
         m_normalized_base_entry_cache.Free;
         m_normalized_base_entry_cache := nil;
     end;
-    FreeAndNil(m_completion_corpus_score_cache);
+    FreeAndNil(m_word_frequency_cache);
     if m_single_char_readings_cache <> nil then
     begin
         m_single_char_readings_cache.Free;
@@ -6635,72 +6646,65 @@ begin
         present;
 end;
 
-procedure TncSqliteDictionary.load_lm_transition_bonus_cache;
+// Read only the requested query; do not materialize the full transition table.
+procedure TncSqliteDictionary.load_lm_transition_query(const normalized_query: string);
 const
     query_sql =
-        'SELECT query_pinyin, path_text, weight FROM dict_base_lm_transition';
+        'SELECT path_text, weight FROM dict_base_lm_transition WHERE query_pinyin = ?1';
+    c_lm_transition_cache_limit = 200000;
+    c_lm_transition_query_limit = 16384;
 var
-    stmt: Psqlite3_stmt;
     step_result: Integer;
-    normalized_query: string;
     normalized_path: string;
-    cache_key: string;
     weight: Integer;
     bonus_value: Integer;
 begin
-    if m_lm_transition_cache_loaded then
+    if (not m_base_ready) or (m_base_connection = nil) or
+        (m_lm_transition_bonus_cache = nil) or (m_lm_transition_loaded_queries = nil) then
     begin
         Exit;
     end;
-
-    m_lm_transition_cache_loaded := True;
-    if m_lm_transition_bonus_cache <> nil then
+    // Negative lookups also occupy the query cache, even with no stored paths.
+    if (m_lm_transition_bonus_cache.Count >= c_lm_transition_cache_limit) or
+        (m_lm_transition_loaded_queries.Count >= c_lm_transition_query_limit) then
     begin
         m_lm_transition_bonus_cache.Clear;
+        m_lm_transition_loaded_queries.Clear;
     end;
-    if (not m_base_ready) or (m_base_connection = nil) or
-        (m_lm_transition_bonus_cache = nil) then
+    m_lm_transition_loaded_queries.AddOrSetValue(normalized_query, True);
+    if m_stmt_lm_transition_query = nil then
+    begin
+        if not m_base_connection.prepare(query_sql, m_stmt_lm_transition_query) then
+        begin
+            m_stmt_lm_transition_query := nil;
+            Exit;
+        end;
+    end;
+    if (not m_base_connection.reset(m_stmt_lm_transition_query)) or
+        (not m_base_connection.clear_bindings(m_stmt_lm_transition_query)) or
+        (not m_base_connection.BindText(m_stmt_lm_transition_query, 1, normalized_query)) then
     begin
         Exit;
     end;
-
-    stmt := nil;
-    try
-        // Older dictionaries do not have this optional table. A failed prepare
-        // therefore means an empty model, not a failed dictionary open.
-        if not m_base_connection.prepare(query_sql, stmt) then
+    step_result := m_base_connection.step(m_stmt_lm_transition_query);
+    while step_result = SQLITE_ROW do
+    begin
+        normalized_path := Trim(m_base_connection.ColumnText(m_stmt_lm_transition_query, 0));
+        weight := m_base_connection.ColumnInt(m_stmt_lm_transition_query, 1);
+        if (normalized_path <> '') and (weight > 0) then
         begin
-            Exit;
-        end;
-
-        step_result := m_base_connection.step(stmt);
-        while step_result = SQLITE_ROW do
-        begin
-            normalized_query := LowerCase(Trim(m_base_connection.ColumnText(stmt, 0)));
-            normalized_path := Trim(m_base_connection.ColumnText(stmt, 1));
-            weight := m_base_connection.ColumnInt(stmt, 2);
-            if (normalized_query <> '') and (normalized_path <> '') and (weight > 0) then
+            if is_single_pair_lm_transition_path(normalized_path) then
             begin
-                if is_single_pair_lm_transition_path(normalized_path) then
-                begin
-                    bonus_value := calc_single_pair_lm_transition_bonus(weight);
-                end
-                else
-                begin
-                    bonus_value := calc_lm_transition_bonus(weight);
-                end;
-                cache_key := normalized_query + #1 + normalized_path;
-                m_lm_transition_bonus_cache.AddOrSetValue(
-                    cache_key, bonus_value);
+                bonus_value := calc_single_pair_lm_transition_bonus(weight);
+            end
+            else
+            begin
+                bonus_value := calc_lm_transition_bonus(weight);
             end;
-            step_result := m_base_connection.step(stmt);
+            m_lm_transition_bonus_cache.AddOrSetValue(
+                normalized_query + #1 + normalized_path, bonus_value);
         end;
-    finally
-        if stmt <> nil then
-        begin
-            m_base_connection.finalize(stmt);
-        end;
-        m_lm_transition_bonus_cache.TrimExcess;
+        step_result := m_base_connection.step(m_stmt_lm_transition_query);
     end;
 end;
 
@@ -11311,7 +11315,6 @@ begin
             begin
                 load_base_exact_pinyin_bloom;
                 load_query_path_bonus_cache;
-                load_lm_transition_bonus_cache;
             end;
         end;
     end;
@@ -11430,6 +11433,11 @@ begin
     begin
         m_base_connection.finalize(m_stmt_exact_pair_path_evidence);
         m_stmt_exact_pair_path_evidence := nil;
+    end;
+    if (m_stmt_lm_transition_query <> nil) and (m_base_connection <> nil) then
+    begin
+        m_base_connection.finalize(m_stmt_lm_transition_query);
+        m_stmt_lm_transition_query := nil;
     end;
     if (m_stmt_compound_tail_support <> nil) and (m_base_connection <> nil) then
     begin
@@ -11661,11 +11669,14 @@ begin
     begin
         m_lm_transition_bonus_cache.Clear;
     end;
+    if m_lm_transition_loaded_queries <> nil then
+    begin
+        m_lm_transition_loaded_queries.Clear;
+    end;
     if m_exact_pair_path_evidence_cache <> nil then
     begin
         m_exact_pair_path_evidence_cache.Clear;
     end;
-    m_lm_transition_cache_loaded := False;
     if m_char_lm_entry_cache <> nil then
     begin
         m_char_lm_entry_cache.Clear;
@@ -11949,7 +11960,8 @@ begin
     begin
         m_normalized_base_entry_cache.Clear;
     end;
-    if m_completion_corpus_score_cache <> nil then m_completion_corpus_score_cache.Clear;
+    if m_word_frequency_cache <> nil then m_word_frequency_cache.Clear;
+    m_word_frequency_missing := False;
     if m_single_char_readings_cache <> nil then
     begin
         m_single_char_readings_cache.Clear;
@@ -16015,6 +16027,47 @@ begin
     end;
 end;
 
+function TncSqliteDictionary.lookup_key_single_chars(const pinyin: string;
+    out results: TncCandidateList): Boolean;
+const
+    select_sql = 'SELECT text, comment, weight FROM dict_base WHERE pinyin = ?1 ' +
+        'AND length(text) = 1 ORDER BY weight DESC, text ASC LIMIT 16';
+var
+    stmt: Psqlite3_stmt;
+    item: TncCandidate;
+begin
+    SetLength(results, 0);
+    Result := False;
+    if (Trim(pinyin) = '') or (not m_base_ready) or (m_base_connection = nil) then
+    begin
+        Exit;
+    end;
+    stmt := nil;
+    try
+        if m_base_connection.prepare(select_sql, stmt) and
+            m_base_connection.BindText(stmt, 1, Trim(pinyin)) then
+        begin
+            while m_base_connection.step(stmt) = SQLITE_ROW do
+            begin
+                item := Default(TncCandidate);
+                item.text := m_base_connection.ColumnText(stmt, 0);
+                item.comment := m_base_connection.ColumnText(stmt, 1);
+                item.dict_weight := m_base_connection.ColumnInt(stmt, 2);
+                item.score := item.dict_weight;
+                item.has_dict_weight := True;
+                item.source := cs_rule;
+                results := results + [item];
+            end;
+        end;
+    finally
+        if stmt <> nil then
+        begin
+            m_base_connection.finalize(stmt);
+        end;
+    end;
+    Result := Length(results) > 0;
+end;
+
 procedure TncSqliteDictionary.prune_suspicious_user_entries;
 const
     select_entries_sql =
@@ -17223,9 +17276,10 @@ begin
         Exit;
     end;
 
-    if not m_lm_transition_cache_loaded then
+    if (m_lm_transition_loaded_queries <> nil) and
+        (not m_lm_transition_loaded_queries.ContainsKey(normalized_query)) then
     begin
-        load_lm_transition_bonus_cache;
+        load_lm_transition_query(normalized_query);
     end;
     cache_key := normalized_query + #1 + normalized_path;
     if m_lm_transition_bonus_cache <> nil then
@@ -19554,59 +19608,33 @@ begin
     end;
 end;
 
-function TncSqliteDictionary.get_completion_corpus_score(const pinyin, text: string): Integer;
+function TncSqliteDictionary.get_word_frequency_score(const text: string): Integer;
 const c_cache_limit = 16384;
 var
-    pinyin_key, text_key, cache_key, stored: string;
+    text_key: string;
     stmt: Psqlite3_stmt;
-
-    function prior_score(const key: string): Integer;
-    var prior_stmt: Psqlite3_stmt;
-    begin
-        Result := -1;
-        prior_stmt := nil;
-        try
-            if m_base_connection.prepare(
-                'SELECT corpus_score FROM dict_base_completion_prior WHERE pinyin=?1 AND text=?2 LIMIT 1', prior_stmt) and
-                m_base_connection.BindText(prior_stmt, 1, key) and
-                m_base_connection.BindText(prior_stmt, 2, text_key) and
-                (m_base_connection.step(prior_stmt) = SQLITE_ROW) then
-                Result := m_base_connection.ColumnInt(prior_stmt, 0);
-        finally
-            if prior_stmt <> nil then m_base_connection.finalize(prior_stmt);
-        end;
-    end;
-
 begin
-    Result := -1;
-    pinyin_key := LowerCase(Trim(pinyin));
+    Result := 0;
     text_key := Trim(text);
-    if (pinyin_key = '') or (text_key = '') or (not ensure_open) or (not m_base_ready) or
+    if (text_key = '') or m_word_frequency_missing or (not ensure_open) or (not m_base_ready) or
         (m_base_connection = nil) then Exit;
-    cache_key := pinyin_key + #1 + text_key;
-    if m_completion_corpus_score_cache.TryGetValue(cache_key, Result) then Exit;
-    Result := prior_score(pinyin_key);
-    if Result < 0 then
-    begin
-        stmt := nil;
-        try
-            if m_base_connection.prepare('SELECT pinyin FROM dict_base WHERE text=?1 LIMIT 64', stmt) and
-                m_base_connection.BindText(stmt, 1, text_key) then
-                while m_base_connection.step(stmt) = SQLITE_ROW do
-                begin
-                    stored := m_base_connection.ColumnText(stmt, 0);
-                    if (stored <> pinyin_key) and same_normalized_pinyin_key(stored, pinyin_key) then
-                    begin
-                        Result := prior_score(stored);
-                        Break;
-                    end;
-                end;
-        finally
-            if stmt <> nil then m_base_connection.finalize(stmt);
+    if m_word_frequency_cache.TryGetValue(text_key, Result) then Exit;
+    stmt := nil;
+    try
+        if not m_base_connection.prepare(
+            'SELECT score FROM dict_base_word_frequency WHERE text=?1 LIMIT 1', stmt) then
+        begin
+            m_word_frequency_missing := True;
+            Exit;
         end;
+        if m_base_connection.BindText(stmt, 1, text_key) and
+            (m_base_connection.step(stmt) = SQLITE_ROW) then
+            Result := m_base_connection.ColumnInt(stmt, 0);
+    finally
+        if stmt <> nil then m_base_connection.finalize(stmt);
     end;
-    if m_completion_corpus_score_cache.Count >= c_cache_limit then m_completion_corpus_score_cache.Clear;
-    m_completion_corpus_score_cache.AddOrSetValue(cache_key, Result);
+    if m_word_frequency_cache.Count >= c_cache_limit then m_word_frequency_cache.Clear;
+    m_word_frequency_cache.AddOrSetValue(text_key, Result);
 end;
 
 end.

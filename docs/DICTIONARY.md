@@ -1,10 +1,10 @@
 # Dictionary And Ranking Boundary
 
-Cassotis IME for Linux v2.1.0 uses the v2.4.0 releases of
+Cassotis IME for Linux v2.5.0 uses the v2.5.0 releases of
 [Cassotis IME](https://github.com/shenmin/cassotis-ime) and
 [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon).
-The frozen releases are [v2.4.0](https://github.com/shenmin/cassotis-ime/tree/v2.4.0)
-(engine) and [v2.4.0](https://github.com/shenmin/cassotis-lexicon/tree/v2.4.0)
+The frozen releases are [v2.5.0](https://github.com/shenmin/cassotis-ime/releases/tag/v2.5.0)
+(engine) and [v2.5.0](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.5.0)
 (lexicon).
 Base dictionaries are read-only. Learning, preferences, and completion feedback
 are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
@@ -13,14 +13,16 @@ are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
 
 - Current schema: `24`; minimum readable schema: `18`.
 - Simplified database SHA-256:
-  `d301dc9370a3f476abb9d221a86b3018f7045e94ccaa95137caf9c790e189766`.
+  `4b13bff070e7b006f0e592672ae30c0adadddc384c78fac595a6a6c23e9081c8`.
 - Traditional database SHA-256:
-  `465318995f0b5f4447c12c108317f2b09c21388fd5c528e9a096f13ae42739ea`.
-- Simplified base: 259,524 rows, including 23,918 single-character rows and
-  235,606 multi-character rows.
-- Traditional base: 260,404 rows, including 24,181 single-character rows and
-  236,223 multi-character rows.
-- Simplified/traditional short-query promotion rows: 1,489 / 1,672.
+  `9db30602f2a86c8fcbcc2d9b182b2fb69f168199cb4ce889f177f310ebdf07d6`.
+- Simplified base: 261,149 rows, including 23,918 single-character rows and
+  237,231 multi-character rows.
+- Traditional base: 262,028 rows, including 24,181 single-character rows and
+  237,847 multi-character rows.
+- Simplified/traditional short-query promotion rows: 1,498 / 1,692.
+- Simplified/traditional word-frequency rows: 199,072 / 198,640.
+- Simplified/traditional LM-transition rows: 904,767 / 833,707.
 - Simplified/traditional completion-competition rows: 42,453 / 42,448.
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379.
 - Simplified long-completion recall: 103,407 rows, including 41,244 visible paths.
@@ -31,8 +33,9 @@ not counts of unique words. The schema version is stored in
 `meta(key = 'schema_version')`. SQLite text is UTF-8.
 
 Older supported schemas remain readable with their available optional signals;
-they do not provide the complete v2.1.0 behavior. Release dictionaries must
-include the short-query promotion data as well as all other required tables.
+they do not provide the complete v2.5.0 behavior. Release dictionaries must
+include nonempty short-query promotion and word-frequency tables as well as
+all other required data. Staging rejects missing tables or active journals.
 Promotion entries are checked against the corresponding words and base weights
 so a stale promotion file cannot silently change ranking.
 
@@ -44,12 +47,17 @@ so a stale promotion file cannot silently change ranking.
 | Segmented paths | Query-path priors and word transitions |
 | Statistical language evidence | Forward and reverse character n-grams |
 | Popularity | Text and substring popularity priors |
-| Short exact input | Dictionary-backed no-context promotion signals |
+| Short exact input | Dictionary-backed no-context promotion and general-text word frequencies |
 | One-key completion | Exact-prefix lookup, transitions, priors, competition, pair audits, and expanded long-completion recall |
 
 Exact, alias, abbreviated-pinyin, prefix, segmented-path, and completion
 queries use bounded, indexed lookups. The provider batches n-gram requests and
 reuses query-local caches instead of repeatedly scanning the base dictionary.
+LM-transition bonuses are fetched by query and cached with bounded query and
+path counts, rather than loading every transition at startup. The short-word
+ranker reads `dict_base_word_frequency`: `100 * log10(1 + occurrences)` from
+general text, with zero for a missing word. This is distinct from the older
+completion prior's corpus score.
 
 ## Candidate Pipeline
 

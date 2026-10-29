@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Prepare Linux 2.5.0 with the engine and dictionaries of Cassotis IME and
+  Cassotis Lexicon v2.5.0.
+- Use general-text word frequencies in the retrained short-word choice model,
+  while retaining strongly supported common words without context and consulting
+  preceding text more often when context-free evidence is inconclusive.
+- Add transition-backed spans to short-phrase drafts; load transition evidence
+  per query with bounded caches rather than loading the entire table at startup.
+- Keep up to 512 full-Pinyin single-syllable candidates pageable without duplicates or
+  accidental truncation by abbreviated prefixes. Expose whole-key single-character
+  readings such as `ng` alongside abbreviated words.
+- Refresh base entries, single-character weights, word transitions and promotion
+  tables. Reject release dictionaries missing the new word-frequency table.
 - Add automatic, fixed vertical and fixed horizontal candidate layouts to
   Appearance settings, shared by IBus and Fcitx 5 and retained after restart.
 - Wrap long display text within horizontal items, including raw English and

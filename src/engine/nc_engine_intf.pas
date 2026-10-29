@@ -628,6 +628,7 @@ type
         m_quick_input: TncQuickInputState;
         m_composition_display_text: string;
         m_candidates: TncCandidateList;
+        m_whole_key_readings: TncCandidateList;
         m_one_key_completion: TncOneKeyCompletion;
         m_tab_projection_shown: TncOneKeyCompletion;
         m_tab_projection_query, m_tab_projection_document: string;
@@ -941,6 +942,9 @@ type
         function get_candidate_limit: Integer;
         function get_candidate_page_size: Integer;
         function get_total_candidate_limit: Integer;
+        function get_total_candidate_limit_max: Integer;
+        function is_single_full_syllable_composition: Boolean;
+        procedure append_whole_key_readings;
         function is_fuzzy_pinyin_active: Boolean; inline;
         function is_predictive_longer_candidate(const candidate: TncCandidate;
             const query: string): Boolean;
@@ -989,7 +993,6 @@ type
         function apply_char_lm_short_top(var candidates: TncCandidateList;
             var source_indices: TArray<Integer>; const context, query: string;
             const page_size: Integer): Boolean;
-        function short_choice_may_replace(const query, first, chosen: string): Boolean;
         function apply_mixed_abbreviation_top(var candidates: TncCandidateList;
             var source_indices: TArray<Integer>; const page_size: Integer): Boolean;
         function build_tail_word_candidates(const syllables: TncPinyinParseResult;
@@ -1694,6 +1697,10 @@ const
     c_default_total_limit = 256;
     c_candidate_total_expand_factor = 16;
     c_candidate_total_limit_max = 256;
+    // A single syllable keeps every character it reads, to be paged to (yi
+    // reads 446): at 256 the 190 last of yi were out of reach, 诣 and 饴
+    // among them.
+    c_single_syllable_total_limit = 512;
     c_user_score_bonus = 1000;
     c_partial_candidate_score_penalty = 260;
     c_left_context_max_len = 64;
@@ -5730,9 +5737,67 @@ end;
 function TncEngine.get_total_candidate_limit: Integer;
 begin
     Result := c_default_total_limit;
+    if is_single_full_syllable_composition then
+    begin
+        Result := c_single_syllable_total_limit;
+    end;
     if get_candidate_limit > Result then
     begin
         Result := get_candidate_limit;
+    end;
+end;
+
+function TncEngine.get_total_candidate_limit_max: Integer;
+begin
+    Result := c_candidate_total_limit_max;
+    if is_single_full_syllable_composition then
+    begin
+        Result := c_single_syllable_total_limit;
+    end;
+end;
+
+function TncEngine.is_single_full_syllable_composition: Boolean;
+begin
+    Result := (m_config.pinyin_input_scheme = pis_full_pinyin) and
+        (m_composition_text <> '') and
+        nc_is_canonical_pinyin_syllable(LowerCase(m_composition_text));
+end;
+
+// A few characters read a key that the parser takes for initials: ng and hm
+// (嗯, 噷). The candidates of such an input are the words the initials
+// abbreviate, and the characters themselves never came. They are looked up
+// here, and the page puts them on its first page
+// (keep_visible_whole_key_readings in get_candidates, which rebuilds the
+// candidates of such an input).
+procedure TncEngine.append_whole_key_readings;
+const
+    c_whole_key_max_length = 3;
+var
+    key: string;
+    idx: Integer;
+begin
+    SetLength(m_whole_key_readings, 0);
+    if (m_config.pinyin_input_scheme <> pis_full_pinyin) or (m_dictionary = nil) or
+        (m_confirmed_text <> '') then
+    begin
+        Exit;
+    end;
+    key := LowerCase(m_composition_text);
+    if (Length(key) < 2) or (Length(key) > c_whole_key_max_length) or
+        nc_is_canonical_pinyin_syllable(key) then
+    begin
+        Exit;
+    end;
+    for idx := 1 to Length(key) do
+    begin
+        if not CharInSet(key[idx], ['a' .. 'z']) then
+        begin
+            Exit;
+        end;
+    end;
+    if not m_dictionary.lookup_key_single_chars(key, m_whole_key_readings) then
+    begin
+        SetLength(m_whole_key_readings, 0);
     end;
 end;
 
@@ -9418,6 +9483,7 @@ begin
     if m_composition_decoded_as_whole then
         clear_keystroke_decode_state;
     build_candidates_core;
+    append_whole_key_readings;
     refresh_raw_input_candidate;
 
     // Once a decimal stops being a quick command, pinyin lookup may have no
@@ -127091,9 +127157,9 @@ var
             apply_selected_prefix_single_context_lm_local(m_candidates);
             Inc(sort_elapsed_ms, Int64(nc_monotonic_tick_ms - phase_start_tick));
             limit := get_total_candidate_limit;
-            if limit > c_candidate_total_limit_max then
+            if limit > get_total_candidate_limit_max then
             begin
-                limit := c_candidate_total_limit_max;
+                limit := get_total_candidate_limit_max;
             end;
             if (limit > 0) and (Length(m_candidates) > limit) then
             begin
@@ -129969,9 +130035,9 @@ var
             begin
                 limit := get_candidate_limit * c_candidate_total_expand_factor;
             end;
-            if limit > c_candidate_total_limit_max then
+            if limit > get_total_candidate_limit_max then
             begin
-                limit := c_candidate_total_limit_max;
+                limit := get_total_candidate_limit_max;
             end;
         end;
         if raw_from_dictionary and has_multi_syllable_input then
@@ -137829,6 +137895,10 @@ end;
 function TncEngine.apply_char_lm_short_top(var candidates: TncCandidateList;
     var source_indices: TArray<Integer>; const context, query: string;
     const page_size: Integer): Boolean;
+const
+    // Word frequency scores are 100 * log10(1 + occurrences): 100 apart is
+    // ten times as often.
+    c_short_word_frequency_floor = 100;
 var
     choices: TArray<TncCharLmShortCandidate>;
     choice: TncCharLmShortCandidate;
@@ -137879,6 +137949,7 @@ begin
         choice.has_dict_weight := candidates[idx].has_dict_weight;
         choice.display_score := candidates[idx].score;
         choice.user := candidates[idx].source = cs_user;
+        choice.word_frequency := m_dictionary.get_word_frequency_score(text);
         choices := choices + [choice];
     end;
     // Only reorder within the group when the visible top belongs to it.
@@ -137886,28 +137957,14 @@ begin
         not nc_char_lm_choose_short(m_char_lm, context, choices, best) or
         (best = 0) then
         Exit;
-    // With no context, retain a far more frequent first word from the corpus.
-    if (context = '') and not short_choice_may_replace(query, choices[0].text,
-        choices[best].text) then
+    // Without context, keep the first word when the model's choice is ten times rarer.
+    if (context = '') and (choices[0].word_frequency - choices[best].word_frequency >=
+        c_short_word_frequency_floor) then
         Exit;
     value := candidates[choices[best].position];
     promote_char_lm_candidate(candidates, source_indices, value,
         source_indices[choices[best].position], page_size);
     Result := True;
-end;
-
-function TncEngine.short_choice_may_replace(const query, first, chosen: string): Boolean;
-const
-    c_short_corpus_guard = 250;
-var
-    first_score, chosen_score: Integer;
-begin
-    Result := True;
-    if m_dictionary = nil then Exit;
-    chosen_score := m_dictionary.get_completion_corpus_score(query, chosen);
-    if chosen_score <= 0 then Exit;
-    first_score := m_dictionary.get_completion_corpus_score(query, first);
-    Result := first_score - chosen_score < c_short_corpus_guard;
 end;
 
 function TncEngine.apply_mixed_abbreviation_top(var candidates: TncCandidateList;
@@ -138652,8 +138709,17 @@ var
     end;
 
     // A span's dictionary entries, heaviest first ('' beyond the last one).
+    // A span of three syllables or more without an entry takes the paths the
+    // lexicon's corpus transitions hold for its key instead, heaviest first:
+    // 不|单单 for "budandan", which the page of that input shows first. Only
+    // the heaviest word of each part of a cut of three goes into a draft, so
+    // "wobudandan" (我|不|单单, 淡淡 above 单单) had 我不但但 and 我不淡淡 and
+    // no 我不单单; as one part of a cut of two it is.
     function nth_word(const start, count, rank: Integer): string;
-    var k: Integer;
+    var k, best, used: Integer;
+        paths: TncPairPathEvidenceList;
+        taken: TArray<Boolean>;
+        text: string;
     begin
         if not looked_up[start][count] then
         begin
@@ -138668,6 +138734,31 @@ var
                         word_weights[start][count] := word_weights[start][count] + [items[k].score];
                         if Length(words[start][count]) >= word_limit(count) then Break;
                     end;
+            if (count >= 3) and (Length(words[start][count]) = 0) and
+                m_dictionary.get_exact_pair_path_evidence(span_key(start, count), paths) then
+            begin
+                SetLength(taken, Length(paths));
+                for used := 1 to word_limit(count) do
+                begin
+                    best := -1;
+                    for k := 0 to High(paths) do
+                        if not taken[k] and (paths[k].lm_transition_weight > 0) and
+                            ((best < 0) or (paths[k].lm_transition_weight > paths[best].lm_transition_weight)) then
+                            best := k;
+                    if best < 0 then Break;
+                    taken[best] := True;
+                    text := StringReplace(Trim(paths[best].encoded_path), #3, '', [rfReplaceAll]);
+                    if (Length(text) <> count) or (get_candidate_text_unit_count(text) <> count) then
+                        Continue;
+                    for k := 0 to High(words[start][count]) do
+                        if words[start][count][k] = text then text := '';
+                    if text <> '' then
+                    begin
+                        words[start][count] := words[start][count] + [text];
+                        word_weights[start][count] := word_weights[start][count] + [paths[best].lm_transition_weight];
+                    end;
+                end;
+            end;
         end;
         if rank < Length(words[start][count]) then Result := words[start][count][rank]
         else Result := '';
@@ -185165,11 +185256,13 @@ var
         var idx, count: Integer; value: TncCandidate; key: string;
             pool: TncCandidateList; sources: TArray<Integer>;
         begin
-            if ((not m_config.candidate_expand_on_paging) and (not short_context_swapped) and
-                (m_quick_input.kind <> qik_date_alias)) or (m_page_index <> 0) or
+            if (m_page_index <> 0) or
                 long_visible_candidate_pool_cache_is_current(visible_page_size) then Exit;
             // Most queries already have a final pool. Freeze the same filtered
             // tail for single syllables/long exacts without another search.
+            // Paged without it, a page began at its index times the page size
+            // in the candidates, and what the filters left out of a page came
+            // again on the next ("na": 南安 on two pages).
             count := Length(Result);
             SetLength(pool, count + Length(m_candidates));
             SetLength(sources, Length(pool));
@@ -185312,6 +185405,43 @@ var
                     short_context_swapped := True;
                     Exit;
                 end;
+        end;
+
+        // A character that reads the whole key where the parser sees initials
+        // (嗯 for ng; append_whole_key_readings) takes the last place of the
+        // first page, behind the words the initials abbreviate (那个, 能够).
+        procedure keep_visible_whole_key_readings;
+        var reading: TncCandidate; idx, source: Integer; visible: Boolean;
+        begin
+            if (m_page_index <> 0) or (Length(m_whole_key_readings) = 0) then Exit;
+            for reading in m_whole_key_readings do
+            begin
+                visible := False;
+                for idx := 0 to High(Result) do
+                    if (Trim(Result[idx].comment) = '') and
+                        (Trim(Result[idx].text) = Trim(reading.text)) then
+                    begin
+                        visible := True;
+                        Break;
+                    end;
+                if visible then Continue;
+                source := -1;
+                for idx := 0 to High(m_candidates) do
+                    if (Trim(m_candidates[idx].comment) = '') and
+                        (Trim(m_candidates[idx].text) = Trim(reading.text)) then
+                    begin
+                        source := idx;
+                        Break;
+                    end;
+                if source < 0 then
+                begin
+                    m_candidates := m_candidates + [reading];
+                    source := High(m_candidates);
+                end;
+                promote_char_lm_candidate(Result, visible_source_indices,
+                    m_candidates[source], source, visible_page_size, 0,
+                    Min(Length(Result), visible_page_size - 1));
+            end;
         end;
     begin
         capture_supported_transition_top_local;
@@ -185510,6 +185640,7 @@ var
                 visible_page_size) then
                 short_context_swapped := True;
             enforce_visible_fixed_top_candidate;
+            keep_visible_whole_key_readings;
             if (Length(Result) > 0) and
                 (Trim(Result[0].comment) = '') and
                 (get_candidate_text_unit_count(Trim(Result[0].text)) =
@@ -185570,6 +185701,41 @@ var
         head_units_local: Integer;
         tail_units_local: Integer;
         tail_key_local: string;
+
+        // The keys before the tail read as whole syllables, one a character
+        // (xi'an: 西 + an). Initials taken as an abbreviation are none: "zhen"
+        // as 总和 + en made the syllable an input of three, and the page kept
+        // 16 of its characters.
+        function head_reads_whole_syllables_local: Boolean;
+        var
+            head_syllables_local: TncPinyinParseResult;
+            syllable_idx_local: Integer;
+        begin
+            Result := False;
+            if (Length(tail_key_local) >= Length(normalized_pinyin)) or
+                not SameText(Copy(normalized_pinyin,
+                Length(normalized_pinyin) - Length(tail_key_local) + 1, MaxInt),
+                tail_key_local) then
+            begin
+                Exit;
+            end;
+            head_syllables_local := get_effective_compact_pinyin_syllables(
+                Copy(normalized_pinyin, 1,
+                Length(normalized_pinyin) - Length(tail_key_local)));
+            if Length(head_syllables_local) <> head_units_local then
+            begin
+                Exit;
+            end;
+            for syllable_idx_local := 0 to High(head_syllables_local) do
+            begin
+                if not nc_is_canonical_pinyin_syllable(
+                    head_syllables_local[syllable_idx_local].text) then
+                begin
+                    Exit;
+                end;
+            end;
+            Result := True;
+        end;
     begin
         Result := 0;
         for idx_local := 0 to High(m_candidates) do
@@ -185584,6 +185750,10 @@ var
 
             head_units_local := get_candidate_text_unit_count(
                 Trim(m_candidates[idx_local].text));
+            if not head_reads_whole_syllables_local then
+            begin
+                Continue;
+            end;
             tail_units_local := get_effective_compact_pinyin_unit_count(
                 tail_key_local);
             if (head_units_local > 0) and (tail_units_local > 0) and
