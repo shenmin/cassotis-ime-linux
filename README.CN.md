@@ -17,7 +17,7 @@
 
 言泉输入法 Linux 版是一个面向 Linux 桌面的实验性中文拼音输入法。原生的 IBus 与 Fcitx 5 适配器共用一个以 Free Pascal 编写的引擎服务，引擎移植自[言泉输入法 Windows 版](https://github.com/shenmin/cassotis-ime)，词库由 [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon) 生成。候选排序全部在本机 CPU 上完成，核心是一个由本项目训练的字符级语言模型。
 
-当前源码面向 2.5.0，对齐言泉输入法与 Cassotis Lexicon v2.5.0。短词排序结合语言模型与通用文本词频，短语生成利用更丰富的词间转移证据，单字翻页保留更多有效候选。两个框架均保留自动、固定竖排和固定横排设置。仍使用同一个语言模型，更新了其中的短词排序策略。已发布安装包见 [Releases](https://github.com/shenmin/cassotis-ime-linux/releases)；下方安装示例使用当前正式版本 2.1.0。
+当前版本为 2.5.0，对齐言泉输入法与 Cassotis Lexicon v2.5.0。短词排序结合语言模型与通用文本词频，短语生成利用更丰富的词间转移证据，单字翻页保留更多有效候选。两个框架均提供自动、固定竖排和固定横排设置。仍使用同一个语言模型，更新了其中的短词排序策略。本版还修复了便携包系统安装覆盖已有目录权限与 SELinux 标签的问题。安装包见 [Releases](https://github.com/shenmin/cassotis-ime-linux/releases/tag/v2.5.0)。
 
 项目当前重点：
 - 跟进 Windows 版的每次发布，并用同一套基准测试核对两边是否一致；
@@ -69,7 +69,7 @@
 
 ```bash
 arch="$(dpkg --print-architecture)"  # 输出 amd64 或 arm64
-package="cassotis-ime_2.1.0_${arch}.deb"
+package="cassotis-ime_2.5.0_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -90,10 +90,10 @@ sudo apt install "./${package}"
 
 ```bash
 arch="$(uname -m)"  # 输出 x86_64 或 aarch64
-archive="cassotis-ime-linux-2.1.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-2.5.0-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-2.1.0-${arch}"
+cd "cassotis-ime-linux-2.5.0-${arch}"
 ./install.sh --user --check &&
 ./install.sh --user
 ```
@@ -112,7 +112,7 @@ cd "cassotis-ime-linux-2.1.0-${arch}"
 
 仅当系统目录可写、具有管理员权限且运行库兼容时，才使用以下方式。SteamOS 等只读系统请使用上面的[用户目录安装](#user-installation)。
 
-**不要使用 v2.1.0 及更早便携包的系统安装功能。** 旧安装器可能覆盖系统目录的所有者、权限和 SELinux 标签，导致无法登录桌面。在修复版安装包发布前，请使用用户目录安装。修复后的安装器包含 `install-support/system_install.py`，保留已有目录属性；启用 SELinux 时，需要系统提供 `restorecon`（通常属于 `policycoreutils` 软件包）。
+**不要使用 v2.1.0 及更早便携包的系统安装功能。** 旧安装器可能覆盖系统目录的所有者、权限和 SELinux 标签，导致无法登录桌面。请改用 v2.5.0 便携包，或采用用户目录安装。修复后的安装器包含 `install-support/system_install.py`，保留已有目录属性；启用 SELinux 时，需要系统提供 `restorecon`（通常属于 `policycoreutils` 软件包）。
 
 在已解压的修复版便携包目录中执行：
 

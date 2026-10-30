@@ -2,11 +2,13 @@
 
 ## Unreleased
 
+## 2.5.0 - 2026-10-30
+
 - Fix portable system installation overwriting shared system-directory ownership,
   permissions and SELinux labels. Install payload files with explicit modes and
   label them according to the target system policy without relabeling existing
   directories. Keep user installation and Debian package installation unchanged.
-- Prepare Linux 2.5.0 with the engine and dictionaries of Cassotis IME and
+- Align Linux 2.5.0 with the engine and dictionaries of Cassotis IME and
   Cassotis Lexicon v2.5.0.
 - Use general-text word frequencies in the retrained short-word choice model,
   while retaining strongly supported common words without context and consulting
