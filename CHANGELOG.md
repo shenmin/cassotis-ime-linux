@@ -4,6 +4,8 @@
 
 ## 2.5.0 - 2026-10-30
 
+- Explicitly shut down client sockets when the engine closes a connection, so a
+  child process awaiting exec cannot keep a stale connection alive during restart.
 - Fix portable system installation overwriting shared system-directory ownership,
   permissions and SELinux labels. Install payload files with explicit modes and
   label them according to the target system policy without relabeling existing

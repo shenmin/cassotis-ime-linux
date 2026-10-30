@@ -138,6 +138,9 @@ begin
     FDispatcher.Free;
     if FSocket >= 0 then
     begin
+        // close-on-exec does not close a forked child's pre-exec copy.
+        // End the connection even while such a child still holds the descriptor.
+        fpShutdown(FSocket, SHUT_RDWR);
         fpClose(FSocket);
         FSocket := -1;
     end;
