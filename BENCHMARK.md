@@ -17,7 +17,34 @@ Both benchmarks are derived from the developer's own novel,
 (Chinese title: **永恒的舞动**). Benchmark cases are kept separate from the
 corresponding model-training data.
 
-## Frozen v2.5.0 Baseline
+## Frozen v2.6.0 Baseline
+
+Linux v2.6.0 uses the released
+[Windows engine v2.6.0](https://github.com/shenmin/cassotis-ime/releases/tag/v2.6.0)
+and [Cassotis Lexicon v2.6.0](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.6.0).
+The corpus and scoring protocol remain unchanged: 16,300 long cases,
+65,000 short cases (11,685 contested), and 12,831 short-completion opportunities.
+Corpus tests are deadline-free; production timeouts remain unchanged.
+
+- Simplified database SHA-256:
+  `0fdd265c5e96ac7ad90a050aba72527ba0d26df80da35e1127112addfc3937b7`.
+- Traditional database SHA-256:
+  `9e88f9d2d3c60da5c496878968412c30b245d9b971594f763c788c8648dbbf2c`.
+- Base text-reading records: 261,809 simplified / 262,686 traditional,
+  including 23,919 / 24,182 single-character records.
+- Word-frequency records: 199,532 / 199,118; short-word promotion records:
+  1,520 / 1,715; LM-transition records: 904,762 / 833,701.
+
+The shared neural model, vocabulary and reading map are unchanged. Nine compact
+parameter units now include separate contextual and context-free short-word
+policies and context-detail scoring. Long-sentence ranking uses non-overlapping
+word-frequency evidence; correction jointly evaluates the Pinyin-conditioned
+and plain-LM gains, including bounded homophone word alternatives. The native
+UTF-16 correction interface is tested for candidate order, unchanged and invalid
+candidates, and equivalence to ordinary scoring. Single-character learning and
+split-syllable candidate behavior have explicit regression coverage.
+
+## Previous v2.5.0 Baseline
 
 Linux v2.5.0 uses the released
 [Windows engine v2.5.0](https://github.com/shenmin/cassotis-ime/releases/tag/v2.5.0)
@@ -213,6 +240,84 @@ latency, and Linux process RSS/high-water marks. Memory events contain only
 the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
+
+## v2.6.0 Native Measurements
+
+Measured on 2026-11-03 (UTC+8), on Ubuntu 26.04.1 virtual machines with
+eight vCPUs: x86_64 with 16 GiB RAM on an Intel Core i5-12600K host and
+aarch64 with 8 GiB RAM on Apple silicon. Each machine runs one corpus runner
+at a time, using eight model threads and the frozen v2.6.0 dictionaries.
+Accuracy and latency come from the same deadline-free queries; production
+foreground/background safeguards remain 100/120 ms.
+
+### Candidate Selection
+
+| Architecture | Track | Top1 | Top2 | Mean (ms) | P50 (ms) | P95 (ms) | Max (ms) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | Long, 16,300 | 13740 (84.29%) | 14686 (90.10%) | 160.204 | 156 | 260 | 649 |
+| aarch64 | Long, 16,300 | 13736 (84.27%) | 14684 (90.09%) | 123.633 | 118 | 210 | 573 |
+| x86_64 | Short without context, 65,000 | 61361 (94.40%) | 63763 (98.10%) | 4.813 | 3 | 12 | 66 |
+| aarch64 | Short without context, 65,000 | 61360 (94.40%) | 63763 (98.10%) | 4.782 | 3 | 12 | 54 |
+| x86_64 | Short with context, 65,000 | 63454 (97.62%) | 64518 (99.26%) | 8.576 | 5 | 24 | 79 |
+| aarch64 | Short with context, 65,000 | 63454 (97.62%) | 64520 (99.26%) | 7.784 | 5 | 21 | 55 |
+
+Without context, contested Top1/Top2 are 8,950/10,683 on both architectures,
+out of 11,685 cases. With context they are 10,514/11,280 on x86_64 and
+10,516/11,282 on aarch64.
+
+Relative to v2.5.0 on the same cases, long Top1/Top2 gain 298/328 on x86_64
+and 302/333 on aarch64. Context-free short Top1 gains 4 and 3 respectively,
+and Top2 gains 27 on each. Contextual short Top1 loses 9 and 11 cases, while
+Top2 gains 82 on each; contested Top1/Top2 gain 2/57 on each. Improvements
+are not uniform across every metric. Long-query latency also increases;
+these measurements are whole-query decoding times, not end-to-end keystroke
+latency, and runs on different dates are not a controlled speed comparison.
+
+Candidate-test process high-water memory is 425,428 KiB (415.5 MiB) on x86_64
+and 407,924 KiB (398.4 MiB) on aarch64. These are measured corpus-run peaks,
+not idle-memory figures or universal bounds.
+
+Both architectures pass 939 native core tests, 69 final-Tab contract checks,
+settings and SC/TC static/ready-neural candidate checks, isolated IBus/Fcitx 5
+input, and native model ABI/cache/cancellation tests. New coverage includes
+non-overlapping word evidence, contextual rankers, split-syllable candidates,
+standalone versus tail-character learning, and the UTF-16 correction-candidate
+interface. The existing layout and installer-safety checks are retained.
+
+### Completion
+
+All 65,000 short cases yield 12,831 completion opportunities. Settled latency
+includes every completed background evaluation, including unchanged hints.
+
+| Architecture | Hits | Saved keys | Average saved keys | Stable pairs | Mean (ms) | P50 (ms) | P95 (ms) | Max (ms) | Key P95 (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 10512/12831 (81.93%) | 27700 | 2.635 | 2151/2214 (97.15%) | 18.050 | 17.359 | 54.576 | 145.465 | 2.052 |
+| aarch64 | 10513/12831 (81.93%) | 27702 | 2.635 | 2152/2215 (97.16%) | 12.767 | 12.237 | 37.143 | 103.224 | 2.070 |
+
+The long suite has 16,300 opportunities. Its timing includes decoding, final
+candidate resolution and visible completion. Coverage is not precision.
+
+| Architecture | Hits | Predictive prompts | Saved keys | Mean (ms) | P50 (ms) | P95 (ms) | Max (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 3949 (24.23%) | 16155 (99.11%) | 9695 | 170.878 | 163 | 278 | 544 |
+| aarch64 | 3955 (24.26%) | 16152 (99.09%) | 9709 | 127.031 | 120 | 212 | 497 |
+
+Relative to v2.5.0, short completion hit and stability counts are unchanged.
+Long completion gains 53 hits and 103 saved keys on x86_64, and 51 hits and
+98 saved keys on aarch64. All four suites pass the existing quality gates;
+these results did not require relaxing them.
+
+### Cold Start
+
+Both trials use new production service processes and 41 input keys. The
+blocked-model trial holds native initialization until input and commit checks
+finish, then verifies input again after loading resumes. OS file caches are
+not cleared; this is not an end-to-end desktop startup measurement.
+
+| Architecture | Process-cold first / maximum key (ms) | Blocked-model first / maximum key (ms) |
+| --- | ---: | ---: |
+| x86_64 | 4.494 / 29.052 | 4.845 / 29.599 |
+| aarch64 | 4.314 / 26.446 | 4.474 / 26.212 |
 
 ## v2.5.0 Native Measurements
 

@@ -1,10 +1,10 @@
 # Dictionary And Ranking Boundary
 
-Cassotis IME for Linux v2.5.0 uses the v2.5.0 releases of
+Cassotis IME for Linux v2.6.0 uses the v2.6.0 releases of
 [Cassotis IME](https://github.com/shenmin/cassotis-ime) and
 [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon).
-The frozen releases are [v2.5.0](https://github.com/shenmin/cassotis-ime/releases/tag/v2.5.0)
-(engine) and [v2.5.0](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.5.0)
+The frozen releases are [v2.6.0](https://github.com/shenmin/cassotis-ime/releases/tag/v2.6.0)
+(engine) and [v2.6.0](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.6.0)
 (lexicon).
 Base dictionaries are read-only. Learning, preferences, and completion feedback
 are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
@@ -13,16 +13,16 @@ are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
 
 - Current schema: `24`; minimum readable schema: `18`.
 - Simplified database SHA-256:
-  `4b13bff070e7b006f0e592672ae30c0adadddc384c78fac595a6a6c23e9081c8`.
+  `0fdd265c5e96ac7ad90a050aba72527ba0d26df80da35e1127112addfc3937b7`.
 - Traditional database SHA-256:
-  `9db30602f2a86c8fcbcc2d9b182b2fb69f168199cb4ce889f177f310ebdf07d6`.
-- Simplified base: 261,149 rows, including 23,918 single-character rows and
-  237,231 multi-character rows.
-- Traditional base: 262,028 rows, including 24,181 single-character rows and
-  237,847 multi-character rows.
-- Simplified/traditional short-query promotion rows: 1,498 / 1,692.
-- Simplified/traditional word-frequency rows: 199,072 / 198,640.
-- Simplified/traditional LM-transition rows: 904,767 / 833,707.
+  `9e88f9d2d3c60da5c496878968412c30b245d9b971594f763c788c8648dbbf2c`.
+- Simplified base: 261,809 rows, including 23,919 single-character rows and
+  237,890 multi-character rows.
+- Traditional base: 262,686 rows, including 24,182 single-character rows and
+  238,504 multi-character rows.
+- Simplified/traditional short-query promotion rows: 1,520 / 1,715.
+- Simplified/traditional word-frequency rows: 199,532 / 199,118.
+- Simplified/traditional LM-transition rows: 904,762 / 833,701.
 - Simplified/traditional completion-competition rows: 42,453 / 42,448.
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379.
 - Simplified long-completion recall: 103,407 rows, including 41,244 visible paths.
@@ -33,7 +33,7 @@ not counts of unique words. The schema version is stored in
 `meta(key = 'schema_version')`. SQLite text is UTF-8.
 
 Older supported schemas remain readable with their available optional signals;
-they do not provide the complete v2.5.0 behavior. Release dictionaries must
+they do not provide the complete v2.6.0 behavior. Release dictionaries must
 include nonempty short-query promotion and word-frequency tables as well as
 all other required data. Staging rejects missing tables or active journals.
 Promotion entries are checked against the corresponding words and base weights
@@ -57,7 +57,11 @@ LM-transition bonuses are fetched by query and cached with bounded query and
 path counts, rather than loading every transition at startup. The short-word
 ranker reads `dict_base_word_frequency`: `100 * log10(1 + occurrences)` from
 general text, with zero for a missing word. This is distinct from the older
-completion prior's corpus score.
+completion prior's corpus score. Counts use non-overlapping word segmentation.
+Long-sentence ranking uses a non-overlapping path through those frequencies,
+without counting the same characters repeatedly. Frequency queries reuse one
+prepared SQLite statement, which is reset between reads and closed with its
+database; reopening clears both the statement and its result cache.
 
 ## Candidate Pipeline
 
@@ -68,7 +72,7 @@ completion prior's corpus score.
 3. Keep short exact-input and long-sentence search distinct. Apply fixed exact
    preferences and user choices only where their matching rules permit.
 4. Use one local character language model for sentence choice, short-word
-   context ranking, completion, and pinyin-constrained correction. Seven compact
+   context ranking, completion, and pinyin-constrained correction. Nine compact
    generated ranking units combine its scores with the relevant lexical,
    path, or completion evidence. The previous separate neural generators,
    repair graphs, and layered residual rankers are no longer runtime assets.

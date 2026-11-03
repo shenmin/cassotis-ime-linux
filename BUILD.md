@@ -71,11 +71,11 @@ Obtain matching simplified/traditional SQLite databases from
 [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon), then choose
 the installer for your desktop framework:
 
-The current 2.5.0 sources require dictionaries generated from Lexicon v2.5.0
+The current 2.6.0 sources require dictionaries generated from Lexicon v2.6.0
 for their complete ranking behavior. Import the auxiliary signals as well as
 base entries, especially the short-word promotion and word-frequency tables.
 Older databases can still be read, but lack the new frequency evidence and
-cannot be used to build a complete 2.5.0 package. Expected hashes and table
+cannot be used to build a complete 2.6.0 package. Expected hashes and table
 requirements are listed in [Dictionary Compatibility](docs/DICTIONARY.md#dictionary-compatibility).
 
 ```bash

@@ -16,6 +16,41 @@ preserved. This verifies the installer fix, not full Fedora input-framework or
 application compatibility. It does not repair directory attributes damaged by
 an older installer; see the [system-install warning](README.md#system-installation).
 
+## v2.6.0 Validation
+
+The 2026-11-03 (UTC+8) validation uses the v2.6.0 engine, compact ranking
+parameters and freshly built lexicon databases. The shared neural graph,
+vocabulary and reading map are unchanged.
+
+Both Ubuntu 26.04.1 x86_64 and aarch64 pass 939 core tests, 69 final-Tab
+contract checks, ten settings tests, simplified/traditional static and
+ready-neural candidate matrices, and isolated IBus/Fcitx 5 input checks.
+New tests cover split-syllable prefix retention, standalone-character learning,
+non-overlapping word-frequency evidence, contextual ranking and the native
+UTF-16 correction-candidate interface. Cache, cancellation, dictionary-path,
+service lifecycle, layout and installer-safety regressions remain enabled.
+
+All four full-corpus suites pass without relaxing accuracy gates. Foreground
+and background production budgets remain 100/120 ms, independent of the
+deadline-free corpus protocol. Fresh-process input checks also pass, with
+41 keys per trial:
+
+| Architecture | Process-cold first / maximum key (ms) | Blocked-model first / maximum key (ms) |
+| --- | ---: | ---: |
+| x86_64 | 4.494 / 29.052 | 4.845 / 29.599 |
+| aarch64 | 4.314 / 26.446 | 4.474 / 26.212 |
+
+The blocked-model trial verifies input before and after releasing the loading
+barrier. Neither trial clears OS file caches. Full quality, latency and memory
+measurements are in [BENCHMARK.md](BENCHMARK.md) /
+[Chinese](BENCHMARK.CN.md).
+
+Automatic, fixed vertical and fixed horizontal layout remain presentation-only
+settings shared by both adapters. Earlier installed-desktop checks below retain
+their original dates and scope; they are not substituted for this version's
+isolated framework tests, which do not restart the active desktop input method
+or replace personal settings and user dictionaries.
+
 ## v2.5.0 Validation
 
 The 2026-10-29 (UTC+8) validation uses the released v2.5.0 engine and

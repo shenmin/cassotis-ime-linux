@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Align Linux 2.6.0 with Cassotis IME and Cassotis Lexicon v2.6.0.
+- Add non-overlapping word-frequency evidence to long-sentence ranking. Judge
+  homophone corrections with both Pinyin-conditioned and whole-sentence scores,
+  including bounded dictionary-word alternatives.
+- Use separate contextual and context-free short-word policies, with a context
+  detail model and conservative second-candidate promotion in the same LM call.
+- Keep single characters in dictionary order without context. Learn a standalone
+  character preference only when committed alone, while retaining whole-phrase
+  learning after partial selections.
+- Keep split-syllable prefix characters selectable after whole-syllable entries;
+  use the shared model to distinguish genuine particle phrases from false splits.
+- Refresh simplified/traditional dictionaries, segmentation-based word frequencies
+  and script-specific readings, including both readings of U+4F3A.
+- Reuse the SQLite word-frequency statement and retain bounded caches, asynchronous
+  model loading, candidate-layout options and safe portable installation.
+
 ## 2.5.0 - 2026-10-30
 
 - Explicitly shut down client sockets when the engine closes a connection, so a

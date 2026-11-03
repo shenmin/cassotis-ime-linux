@@ -501,6 +501,25 @@ type
             out corrected_text, aligned_pinyin: string; out gain: Single): Integer;
     end;
 
+    { Optional: the long-sentence correction without a threshold, answered as
+      correct_short_phrase, that also scores candidates the engine proposes.
+      align_long gives the draft's syllables as the correction aligns them
+      (joined by #3, '' when it does not align). Of the candidates (texts as
+      long as the draft) the keep whose first changed character the model
+      rates highest get their gains over the draft in candidate_gains, when
+      the best of those characters reaches floor against the draft's
+      (log-probability), the others NaN. With the shared LM at hand the engine weighs these gains
+      together with that model's view of the sentences; without it the engine
+      asks try_repair, which applies the correction's own margin. }
+    IncLongLocalCorrector = interface
+        ['{0B6E2F4A-8C3D-4E71-A5B9-6D2C8E1F7A34}']
+        function align_long(const query_text, draft_text: string): string;
+        function correct_long(const query_text, draft_text, preceding_text: string;
+            const candidates: TArray<string>; const keep: Integer; const floor: Single;
+            out corrected_text, aligned_pinyin: string; out gain: Single;
+            out candidate_gains: TArray<Single>): Integer;
+    end;
+
     TncLongRankingStageDebug = record
         stage_name: string;
         top1_text: string;
@@ -629,6 +648,9 @@ type
         m_composition_display_text: string;
         m_candidates: TncCandidateList;
         m_whole_key_readings: TncCandidateList;
+        // The partials append_split_syllable_partials put behind a syllable's
+        // characters (text #1 rest).
+        m_split_syllable_partials: TDictionary<string, Boolean>;
         m_one_key_completion: TncOneKeyCompletion;
         m_tab_projection_shown: TncOneKeyCompletion;
         m_tab_projection_query, m_tab_projection_document: string;
@@ -882,6 +904,10 @@ type
         m_local_repair_validated: TncValidatedRepairPath;
         // The short-phrase stage's answer for the input it was asked about.
         m_short_phrase_key, m_short_phrase_debug: string;
+        // The particle phrases of a split syllable the shared LM rejected
+        // (judge_split_particle_candidates), for the input and context of key.
+        m_split_particle_query, m_split_particle_key, m_split_particle_debug: string;
+        m_split_particle_rejected: TArray<string>;
         m_short_phrase_texts, m_short_phrase_paths: TArray<string>;
         // The draft the shared LM prefers as the beginning of a longer text
         // (scored without the comma), when it is not the first phrase shown:
@@ -945,6 +971,10 @@ type
         function get_total_candidate_limit_max: Integer;
         function is_single_full_syllable_composition: Boolean;
         procedure append_whole_key_readings;
+        procedure append_split_syllable_partials;
+        function lookup_lm_word_frequency(const text: string): Integer;
+        function take_split_syllable_partials: TncCandidateList;
+        procedure restore_split_syllable_partials(const partials: TncCandidateList);
         function is_fuzzy_pinyin_active: Boolean; inline;
         function is_predictive_longer_candidate(const candidate: TncCandidate;
             const query: string): Boolean;
@@ -1018,6 +1048,9 @@ type
         function apply_short_phrase_lm(var candidates: TncCandidateList;
             var source_indices: TArray<Integer>; const query: string;
             const syllables: TncPinyinParseResult; const page_size: Integer): Boolean;
+        procedure judge_split_particle_candidates(const query: string);
+        function is_rejected_split_particle(const candidate: TncCandidate;
+            const query: string): Boolean;
         function has_validated_completion_prefix: Boolean;
         function has_current_validated_completion_prefix: Boolean;
         function project_validated_prefix_completion(
@@ -1446,6 +1479,24 @@ const
     c_long_sentence_complete_candidate_display_limit = 2;
     c_long_postprocess_emergency_budget_ms = 320;
     c_fast_repair_promote_margin = 6000;
+    // A long correction replaces the draft when the two models' log-probability
+    // gains over it (the correction's, the shared LM's without a context, as the
+    // long choice scores) add up to this many nats. The correction alone needed
+    // 1.0 of its own: the shared LM now overrules a rewrite it rates far below
+    // the draft and carries one it rates above it.
+    c_long_repair_joint_gain = 1.0;
+    // Beside the correction's own rewrite, the draft with one word replaced by
+    // another of the same syllables (two to four characters, the heaviest
+    // c_long_repair_swaps_per_key of the key) competes: the correction scores
+    // the c_long_repair_swap_keep whose first changed character it rates
+    // highest, from that character on, and the shared LM scores them too.
+    c_long_repair_swaps_per_key = 3;
+    c_long_repair_swap_keep = 3;
+    // Only when the best of those characters lies no more than 4 nats below
+    // the draft's: scoring every sentence's swaps cost two graph runs, 16 to
+    // 21 ms; held to this, 35 to 41% of them make the correction's run and 14
+    // to 22% the shared LM's, for nearly all of the gain.
+    c_long_repair_swap_floor = -4.0;
     c_short_nocontext_protected_baseline_min_weight = 1000;
     c_short_residual_visibility_only_max_weight = 0;
 
@@ -2058,6 +2109,7 @@ destructor TncEngine.Destroy;
 begin
     m_custom_phrases.Free;
     m_longer_check_verdicts.Free;
+    m_split_syllable_partials.Free;
     m_long_local_repair := nil;
     m_long_local_repair_model := nil;
     if m_document_context_model <> nil then
@@ -4656,6 +4708,10 @@ begin
     m_local_repair_validated := Default(TncValidatedRepairPath);
     m_short_phrase_key := '';
     m_short_phrase_debug := '';
+    m_split_particle_query := '';
+    m_split_particle_key := '';
+    m_split_particle_debug := '';
+    m_split_particle_rejected := nil;
     m_context_db_bonus_cache_key := '';
     SetLength(m_candidates, 0);
     SetLength(m_visible_candidates_cache, 0);
@@ -5798,6 +5854,188 @@ begin
     if not m_dictionary.lookup_key_single_chars(key, m_whole_key_readings) then
     begin
         SetLength(m_whole_key_readings, 0);
+    end;
+end;
+
+// A syllable typed whole whose letters also read as two syllables ("shua" as
+// shu a, "xian" as xi an) shows, after its own characters, those of the first
+// one with the rest still to type (书|a, 西|an), as the page of a longer input
+// shows the characters of its first syllable. The page of "shua" held its
+// five characters and nothing else. A longer rest goes first (xi|ao before
+// xia|o): the parser reads a bare a, e or o after a syllable last.
+function TncEngine.lookup_lm_word_frequency(const text: string): Integer;
+begin
+    Result := 0;
+    if m_dictionary <> nil then
+        Result := m_dictionary.get_word_frequency_score(text);
+end;
+
+procedure TncEngine.append_split_syllable_partials;
+var
+    key, head, tail: string;
+    splits: TArray<Integer>;
+    split, other, idx, limit, score: Integer;
+    heads: TncCandidateList;
+    candidate: TncCandidate;
+    seen: TDictionary<string, Boolean>;
+
+    function has_vowel(const text: string): Boolean;
+    var
+        k: Integer;
+    begin
+        for k := 1 to Length(text) do
+        begin
+            if CharInSet(text[k], ['a', 'e', 'i', 'o', 'u', 'v']) then
+            begin
+                Exit(True);
+            end;
+        end;
+        Result := False;
+    end;
+begin
+    if m_split_syllable_partials <> nil then
+    begin
+        m_split_syllable_partials.Clear;
+    end;
+    if (not is_single_full_syllable_composition) or (m_dictionary = nil) or
+        (m_confirmed_text <> '') or (Length(m_candidates) = 0) then
+    begin
+        Exit;
+    end;
+    key := LowerCase(m_composition_text);
+    splits := nil;
+    for split := 1 to Length(key) - 1 do
+    begin
+        tail := Copy(key, split + 1, MaxInt);
+        // Both parts with a vowel: r, m, n and ng read as syllables, but "re"
+        // is no r e (人|e), nor "ng" n g.
+        head := Copy(key, 1, split);
+        if has_vowel(head) and has_vowel(tail) and nc_is_canonical_pinyin_syllable(head) and
+            nc_is_canonical_pinyin_syllable(tail) then
+        begin
+            splits := splits + [split];
+        end;
+    end;
+    if Length(splits) = 0 then
+    begin
+        Exit;
+    end;
+    limit := get_total_candidate_limit_max;
+    score := m_candidates[0].score;
+    if m_split_syllable_partials = nil then
+    begin
+        m_split_syllable_partials := TDictionary<string, Boolean>.Create;
+    end;
+    seen := TDictionary<string, Boolean>.Create;
+    try
+        for idx := 0 to High(m_candidates) do
+        begin
+            score := Min(score, m_candidates[idx].score);
+            seen.AddOrSetValue(Trim(m_candidates[idx].text) + #1 +
+                Trim(m_candidates[idx].comment), True);
+        end;
+        for split in splits do
+        begin
+            head := Copy(key, 1, split);
+            tail := Copy(key, split + 1, MaxInt);
+            if not m_dictionary.lookup_exact_full_pinyin(head, heads) then
+            begin
+                Continue;
+            end;
+            for other := 0 to High(heads) do
+            begin
+                if Length(m_candidates) >= limit then
+                begin
+                    Exit;
+                end;
+                candidate := heads[other];
+                candidate.text := Trim(candidate.text);
+                if (Trim(candidate.comment) <> '') or
+                    (get_candidate_text_unit_count(candidate.text) <> 1) or
+                    seen.ContainsKey(candidate.text + #1 + tail) then
+                begin
+                    Continue;
+                end;
+                seen.Add(candidate.text + #1 + tail, True);
+                m_split_syllable_partials.AddOrSetValue(candidate.text + #1 + tail, True);
+                candidate.comment := tail;
+                // Behind every candidate of the syllable, in the head's order.
+                Dec(score);
+                candidate.score := score;
+                m_candidates := m_candidates + [candidate];
+            end;
+        end;
+    finally
+        seen.Free;
+    end;
+end;
+
+// The single-syllable page orders and filters a syllable's own candidates
+// with the partials of a missing apostrophe in mind (xi'an: 西 + an), and it
+// took the split partials for those: 书|a went first on the page of "shua"
+// and 甩 fourth on that of "shuai". They leave the candidates for that and
+// come back behind them.
+function TncEngine.take_split_syllable_partials: TncCandidateList;
+var
+    idx, kept: Integer;
+begin
+    Result := nil;
+    if (m_split_syllable_partials = nil) or (m_split_syllable_partials.Count = 0) then
+    begin
+        Exit;
+    end;
+    kept := 0;
+    for idx := 0 to High(m_candidates) do
+    begin
+        if (Trim(m_candidates[idx].comment) <> '') and
+            m_split_syllable_partials.ContainsKey(Trim(m_candidates[idx].text) + #1 +
+            Trim(m_candidates[idx].comment)) then
+        begin
+            Result := Result + [m_candidates[idx]];
+            Continue;
+        end;
+        if kept <> idx then
+        begin
+            m_candidates[kept] := m_candidates[idx];
+            if kept < Length(m_candidate_segment_paths) then
+            begin
+                if idx < Length(m_candidate_segment_paths) then
+                    m_candidate_segment_paths[kept] := m_candidate_segment_paths[idx]
+                else
+                    m_candidate_segment_paths[kept] := '';
+            end;
+        end;
+        Inc(kept);
+    end;
+    SetLength(m_candidates, kept);
+    if Length(m_candidate_segment_paths) > kept then
+    begin
+        SetLength(m_candidate_segment_paths, kept);
+    end;
+end;
+
+procedure TncEngine.restore_split_syllable_partials(const partials: TncCandidateList);
+var
+    idx: Integer;
+    seen: TDictionary<string, Boolean>;
+begin
+    if Length(partials) = 0 then
+    begin
+        Exit;
+    end;
+    seen := TDictionary<string, Boolean>.Create;
+    try
+        for idx := 0 to High(m_candidates) do
+            seen.AddOrSetValue(Trim(m_candidates[idx].text) + #1 +
+                Trim(m_candidates[idx].comment), True);
+        for idx := 0 to High(partials) do
+            if not seen.ContainsKey(Trim(partials[idx].text) + #1 +
+                Trim(partials[idx].comment)) then
+            begin
+                m_candidates := m_candidates + [partials[idx]];
+            end;
+    finally
+        seen.Free;
     end;
 end;
 
@@ -9484,6 +9722,7 @@ begin
         clear_keystroke_decode_state;
     build_candidates_core;
     append_whole_key_readings;
+    append_split_syllable_partials;
     refresh_raw_input_candidate;
 
     // Once a decimal stops being a quick command, pinyin lookup may have no
@@ -137543,6 +137782,202 @@ end;
 // characters' readings in the dictionary are not enough: 识 has no zhi there,
 // 标识符 has. Anything that cannot be cut so (letters, erhua) misreads
 // nothing.
+// The particle rule (try_get_short_particle_tail_query_parts) reads an input
+// that ends in a as a word and 啊 wherever the letters before the a read as
+// pinyin, also where the a ends the syllable the parser reads: "duoshua" is
+// duo shua, and the rule made it 多数啊. Of two syllables such an input mostly
+// has no word, and the page showed 多数啊 first, ahead of 多|shua; 甘薯啊 for
+// "ganshua", 赤狐啊 for "chihua". Where the a does end a word the split is
+// right (辛苦啊 for "xinkua", 可惜啊, 生气啊, 这里啊). Where such a phrase
+// leads the page, the shared LM decides: each such phrase is scored with what
+// the parser's two syllables spell, their words and their three heaviest
+// characters (多刷, 心夸, 这俩), a comma behind each, in one call, and a phrase
+// that does not lie above all of them leaves every page. Without the LM's
+// scores the parser's reading stands and they all go. A dictionary or user
+// entry, or the user's choice for the input, is no such phrase.
+procedure TncEngine.judge_split_particle_candidates(const query: string);
+const
+    c_max_phrases = 8;
+    c_syllable_chars = 3;
+    c_reading_words = 4;
+    c_clause_end = Char($FF0C);
+var
+    parser: TncPinyinParser;
+    syllables: TncPinyinParseResult;
+    last, particle, lm_context, key, text: string;
+    phrases, texts, heads, tails: TArray<string>;
+    words: TncCandidateList;
+    scores: TArray<Single>;
+    best: Single;
+    best_text, kept: string;
+    idx, other, scored: Integer;
+
+    function listed(const values: TArray<string>; const value: string): Boolean;
+    var k: Integer;
+    begin
+        for k := 0 to High(values) do
+            if values[k] = value then Exit(True);
+        Result := False;
+    end;
+
+    // The syllable's heaviest single characters, heaviest first.
+    function heaviest_chars(const syllable: string): TArray<string>;
+    var
+        results: TncCandidateList;
+        weights: TArray<Integer>;
+        k, slot, weight: Integer;
+    begin
+        Result := nil;
+        weights := nil;
+        if not m_dictionary.lookup_exact_full_pinyin(syllable, results) then Exit;
+        for k := 0 to High(results) do
+        begin
+            if (Trim(results[k].comment) <> '') or
+                (get_candidate_text_unit_count(Trim(results[k].text)) <> 1) then Continue;
+            weight := results[k].score;
+            if results[k].has_dict_weight then weight := results[k].dict_weight;
+            slot := Length(Result);
+            while (slot > 0) and (weights[slot - 1] < weight) do Dec(slot);
+            if slot >= c_syllable_chars then Continue;
+            Insert(Trim(results[k].text), Result, slot);
+            Insert(weight, weights, slot);
+            if Length(Result) > c_syllable_chars then
+            begin
+                SetLength(Result, c_syllable_chars);
+                SetLength(weights, c_syllable_chars);
+            end;
+        end;
+    end;
+begin
+    if (m_config.pinyin_input_scheme <> pis_full_pinyin) or is_fuzzy_pinyin_active or
+        (m_dictionary = nil) or (Pos('''', m_composition_text) > 0) or (query = '') then
+    begin
+        m_split_particle_query := '';
+        m_split_particle_key := '';
+        m_split_particle_debug := '';
+        m_split_particle_rejected := nil;
+        Exit;
+    end;
+    if m_segment_left_context <> '' then lm_context := m_segment_left_context
+    else if m_external_left_context <> '' then lm_context := m_external_left_context
+    else lm_context := m_left_context;
+    if lm_context = '' then lm_context := c_clause_end;
+    key := query + #1 + lm_context;
+    if (key = m_split_particle_key) and (query = m_split_particle_query) then Exit;
+    m_split_particle_query := query;
+    m_split_particle_key := key;
+    m_split_particle_debug := '';
+    m_split_particle_rejected := nil;
+
+    parser := TncPinyinParser.Create;
+    try
+        syllables := parser.parse(query);
+    finally
+        parser.Free;
+    end;
+    if (Length(syllables) <> 2) or
+        (not nc_is_canonical_pinyin_syllable(syllables[0].text)) or
+        (not nc_is_canonical_pinyin_syllable(syllables[1].text)) then Exit;
+    last := syllables[1].text;
+    if (Length(last) < 2) or (last[Length(last)] <> 'a') or
+        (not nc_is_canonical_pinyin_syllable(Copy(last, 1, Length(last) - 1))) then Exit;
+    particle := string(Char($554A));
+    phrases := nil;
+    for idx := 0 to High(m_candidates) do
+    begin
+        text := Trim(m_candidates[idx].text);
+        if (Trim(m_candidates[idx].comment) <> '') or (m_candidates[idx].source <> cs_rule) or
+            (get_candidate_text_unit_count(text) <> 3) or
+            (Copy(text, Length(text), 1) <> particle) then Continue;
+        if listed(phrases, text) then Continue;
+        if m_dictionary.is_base_entry(query, text) or m_dictionary.is_user_entry(query, text) or
+            (m_dictionary.get_query_choice_bonus(query, text) > 0) then Continue;
+        phrases := phrases + [text];
+        if Length(phrases) >= c_max_phrases then Break;
+    end;
+    if Length(phrases) = 0 then Exit;
+    // Only where such a phrase leads the page. Behind a word (国家 for "guojia",
+    // 回家, 说话) the phrases stay as they were: the call took 10 ms on keys
+    // typed every day.
+    idx := 0;
+    while (idx < Length(m_candidates)) and (Trim(m_candidates[idx].text) = '') do Inc(idx);
+    if (idx >= Length(m_candidates)) or (Trim(m_candidates[idx].comment) <> '') or
+        (not listed(phrases, Trim(m_candidates[idx].text))) then
+    begin
+        if m_config.debug_mode then
+            m_split_particle_debug := Format('[sparticle behind=%d]', [Length(phrases)]);
+        Exit;
+    end;
+    m_split_particle_rejected := Copy(phrases);
+
+    heads := heaviest_chars(syllables[0].text);
+    tails := heaviest_chars(last);
+    texts := nil;
+    for idx := 0 to High(phrases) do texts := texts + [phrases[idx] + c_clause_end];
+    for idx := 0 to High(heads) do
+        for other := 0 to High(tails) do
+            texts := texts + [heads[idx] + tails[other] + c_clause_end];
+    other := 0;
+    if m_dictionary.lookup_exact_full_pinyin(query, words) then
+        for idx := 0 to High(words) do
+        begin
+            text := Trim(words[idx].text);
+            if (Trim(words[idx].comment) <> '') or (get_candidate_text_unit_count(text) <> 2) or
+                listed(texts, text + c_clause_end) then Continue;
+            texts := texts + [text + c_clause_end];
+            Inc(other);
+            if other >= c_reading_words then Break;
+        end;
+    scored := 0;
+    if (Length(texts) > Length(phrases)) and m_char_lm_short_enabled and (m_char_lm <> nil) and
+        m_char_lm.char_lm_ready then
+    try
+        scored := m_char_lm.score_texts(lm_context, texts, Length(texts), 128, scores);
+    except
+        scored := 0;
+    end;
+    if (scored <> Length(texts)) or (Length(scores) <> Length(texts)) then
+    begin
+        if m_config.debug_mode then
+            m_split_particle_debug := Format('[sparticle unscored drop=%d]', [Length(phrases)]);
+        Exit;
+    end;
+    best := scores[Length(phrases)];
+    best_text := texts[Length(phrases)];
+    for idx := Length(phrases) + 1 to High(texts) do
+        if scores[idx] > best then
+        begin
+            best := scores[idx];
+            best_text := texts[idx];
+        end;
+    m_split_particle_rejected := nil;
+    kept := '';
+    for idx := 0 to High(phrases) do
+        if scores[idx] > best then
+            kept := kept + Format(' %s=%.2f', [phrases[idx], scores[idx]])
+        else
+            m_split_particle_rejected := m_split_particle_rejected + [phrases[idx]];
+    if m_config.debug_mode then
+        m_split_particle_debug := Format('[sparticle best=%s=%.2f kept=%d drop=%d%s]',
+            [Copy(best_text, 1, Length(best_text) - 1), best,
+            Length(phrases) - Length(m_split_particle_rejected),
+            Length(m_split_particle_rejected), kept]);
+end;
+
+function TncEngine.is_rejected_split_particle(const candidate: TncCandidate;
+    const query: string): Boolean;
+var
+    text: string;
+    idx: Integer;
+begin
+    Result := False;
+    if (Length(m_split_particle_rejected) = 0) or (query <> m_split_particle_query) or
+        (Trim(candidate.comment) <> '') then Exit;
+    text := Trim(candidate.text);
+    for idx := 0 to High(m_split_particle_rejected) do
+        if m_split_particle_rejected[idx] = text then Exit(True);
+end;
+
 function TncEngine.misreads_typed_keys(const text, pinyin, query: string): Boolean;
 const
     c_longest_syllable = 6;
@@ -137859,7 +138294,7 @@ begin
                 pool[idx].evidence := m_char_lm_long_pool_evidence[idx];
         end;
         if not nc_char_lm_choose_long(m_char_lm, '', pool, candidates[0].text,
-            expected_units, chosen, second) then
+            expected_units, chosen, second, lookup_lm_word_frequency) then
             Exit;
         // The final pool can hold complete paths the visible merge left out.
         if chosen <> Trim(candidates[0].text) then
@@ -137903,8 +138338,8 @@ var
     choices: TArray<TncCharLmShortCandidate>;
     choice: TncCharLmShortCandidate;
     text: string;
-    idx, other, best: Integer;
-    value: TncCandidate;
+    idx, other, best, second, second_source: Integer;
+    value, second_value: TncCandidate;
 begin
     Result := False;
     // Without left context the short promotion table has already ordered
@@ -137937,6 +138372,13 @@ begin
         if (text = '') or (Trim(candidates[idx].comment) <> '') or
             not (m_dictionary.is_base_entry(query, text) or m_dictionary.is_user_entry(query, text)) then
             Continue;
+        // Without a context a single character keeps the dictionary's order,
+        // which is by how often modern text uses it. A syllable that also
+        // reads as two (jiao as ji'ao, zhua as zhu'a) comes here, and the
+        // tree, fit on words of two to four characters, put 嚼 above 交 and
+        // 爪 above 抓 (the word frequency table has no single characters).
+        if (Trim(context) = '') and (get_candidate_text_unit_count(text) = 1) then
+            Continue;
         other := 0;
         while (other < Length(choices)) and (choices[other].text <> text) do
             Inc(other);
@@ -137954,7 +138396,7 @@ begin
     end;
     // Only reorder within the group when the visible top belongs to it.
     if (Length(choices) < 2) or (choices[0].position <> 0) or
-        not nc_char_lm_choose_short(m_char_lm, context, choices, best) or
+        not nc_char_lm_choose_short(m_char_lm, context, choices, best, second) or
         (best = 0) then
         Exit;
     // Without context, keep the first word when the model's choice is ten times rarer.
@@ -137962,8 +138404,17 @@ begin
         c_short_word_frequency_floor) then
         Exit;
     value := candidates[choices[best].position];
+    second_source := -1;
+    if second > 0 then
+    begin
+        second_value := candidates[choices[second].position];
+        second_source := source_indices[choices[second].position];
+    end;
     promote_char_lm_candidate(candidates, source_indices, value,
         source_indices[choices[best].position], page_size);
+    if second > 0 then
+        promote_char_lm_candidate(candidates, source_indices, second_value,
+            second_source, page_size, 0, 1);
     Result := True;
 end;
 
@@ -138344,6 +138795,118 @@ var
     candidate, saved: TncCandidate;
     validated: TncValidatedRepairPath;
     paging_pool_current: Boolean;
+    // The draft with one word of two to four characters replaced by another
+    // word of the same syllables, heaviest first.
+    function homophone_word_swaps(const draft, aligned: string): TArray<string>;
+    var
+        syllables: TArray<string>;
+        items: TncCandidateList;
+        order: TArray<Integer>;
+        weights: TArray<Integer>;
+        seen: TDictionary<string, Byte>;
+        size, start, k, j, taken, held: Integer;
+        key, span, swapped: string;
+        readable: Boolean;
+    begin
+        Result := nil;
+        syllables := aligned.Split([#3], TStringSplitOptions.ExcludeEmpty);
+        if Length(syllables) <> Length(draft) then Exit;
+        seen := TDictionary<string, Byte>.Create;
+        try
+            for size := 2 to 4 do
+                for start := 0 to Length(draft) - size do
+                begin
+                    key := '';
+                    for k := start to start + size - 1 do key := key + syllables[k];
+                    if not m_dictionary.lookup_isolated_exact_component(key, items) then Continue;
+                    span := Copy(draft, start + 1, size);
+                    // By weight, heaviest first; equal weights keep the dictionary's order.
+                    SetLength(order, Length(items));
+                    SetLength(weights, Length(items));
+                    for k := 0 to High(items) do
+                    begin
+                        if items[k].has_dict_weight then weights[k] := items[k].dict_weight
+                        else weights[k] := items[k].score;
+                        j := k;
+                        while (j > 0) and (weights[order[j - 1]] < weights[k]) do
+                        begin
+                            order[j] := order[j - 1];
+                            Dec(j);
+                        end;
+                        order[j] := k;
+                    end;
+                    taken := 0;
+                    for held in order do
+                    begin
+                        if (Length(items[held].text) <> size) or (items[held].text = span) or
+                            (items[held].comment <> '') or (items[held].source = cs_user) then Continue;
+                        readable := True;
+                        for k := 1 to size do
+                            readable := readable and ((Ord(items[held].text[k]) < $D800) or
+                                (Ord(items[held].text[k]) > $DFFF));
+                        if not readable then Continue;
+                        swapped := Copy(draft, 1, start) + items[held].text +
+                            Copy(draft, start + size + 1, MaxInt);
+                        if not seen.ContainsKey(swapped) then
+                        begin
+                            seen.Add(swapped, 0);
+                            Result := Result + [swapped];
+                        end;
+                        Inc(taken);
+                        if taken >= c_long_repair_swaps_per_key then Break;
+                    end;
+                end;
+        finally
+            seen.Free;
+        end;
+    end;
+    // The correction of the draft, or the draft itself.
+    function repaired_draft(const draft: string): string;
+    var
+        corrector: IncLongLocalCorrector;
+        swaps, texts: TArray<string>;
+        gains, text_gains, scores: TArray<Single>;
+        corrected: string;
+        gain, best: Single;
+        i: Integer;
+    begin
+        Result := draft;
+        if (m_char_lm <> nil) and m_char_lm_long_enabled and m_char_lm.char_lm_ready and
+            Supports(m_long_local_repair, IncLongLocalCorrector, corrector) then
+        begin
+            swaps := homophone_word_swaps(draft, corrector.align_long(repair_query, draft));
+            if corrector.correct_long(repair_query, draft, repair_context, swaps,
+                c_long_repair_swap_keep, c_long_repair_swap_floor, corrected, aligned_pinyin, gain,
+                gains) < 0 then Exit;
+            texts := [draft];
+            text_gains := [0];
+            if (corrected <> '') and (corrected <> draft) then
+            begin
+                texts := texts + [corrected];
+                text_gains := text_gains + [gain];
+            end;
+            for i := 0 to High(swaps) do
+                if (i < Length(gains)) and not IsNan(gains[i]) and (swaps[i] <> corrected) then
+                begin
+                    texts := texts + [swaps[i]];
+                    text_gains := text_gains + [gains[i]];
+                end;
+            if (Length(texts) < 2) or
+                (m_char_lm.score_texts('', texts, Length(texts), 0, scores) <> Length(texts)) then
+                Exit;
+            best := c_long_repair_joint_gain;
+            for i := 1 to High(texts) do
+                if text_gains[i] + scores[i] - scores[0] >= best then
+                begin
+                    best := text_gains[i] + scores[i] - scores[0];
+                    Result := texts[i];
+                end;
+            Exit;
+        end;
+        if not m_long_local_repair.try_repair(repair_query, draft, '', repair_context, Result,
+            aligned_pinyin, minimum_word_ratio) then
+            Result := draft;
+    end;
     procedure remember_validated_path(const source_index: Integer);
     begin
         if not m_local_repair_validated.exact_path or
@@ -138413,9 +138976,9 @@ begin
     if candidates[0].has_dict_weight and m_dictionary.is_base_entry(
         normalize_pinyin_text(m_composition_text), candidates[0].text) then Exit;
     // The pinyin-conditioned LM rewrites the settled top1 (after the shared
-    // LM's long rerank). A rewrite is kept when its characters spell the
-    // syllables and it has a dictionary path; the model already compared the
-    // whole sentences.
+    // LM's long rerank). A rewrite is kept when both models together prefer
+    // it (repaired_draft), its characters spell the syllables and it has a
+    // dictionary path.
     // The text before the input. When the host reads the document, use only
     // what it reported (its snapshot, else the current sentence before the
     // caret); empty means the input starts the text. Only for a document the
@@ -138441,9 +139004,7 @@ begin
         // Model vocabularies use canonical syllables, with explicit boundaries intact.
         repair_query := nc_normalize_umlaut_spelling(m_composition_text);
         try
-            if not m_long_local_repair.try_repair(repair_query, candidates[0].text, '',
-                repair_context, text, aligned_pinyin, minimum_word_ratio) then
-                text := candidates[0].text;
+            text := repaired_draft(candidates[0].text);
         except
             Exit;
         end;
@@ -138451,6 +139012,9 @@ begin
         if text <> candidates[0].text then
         begin
             validated := build_repair_path(m_dictionary, text, aligned_pinyin);
+            if Assigned(nc_char_lm_long_trace) then
+                nc_char_lm_long_trace('REPAIR_E'#9 + candidates[0].text + #9 + text + #9 +
+                    IntToStr(Ord(validated.exact_path)));
             if not validated.exact_path then text := candidates[0].text;
         end;
         m_local_repair_query_key := key;
@@ -156228,6 +156792,7 @@ var
     cached_page_sources: TArray<Integer>;
     umlaut_raw_prefixes_ready: Boolean;
     umlaut_raw_prefixes: TncCandidateList;
+    split_syllable_partials: TncCandidateList;
 
     function is_short_repeated_initial_display_query_local: Boolean;
     var
@@ -185249,7 +185814,8 @@ var
                 display_candidate_should_drop_short_nonlexicon_complete(value, source_index) or
                 candidate_is_repeated_particle_tail_complete_local(value) or
                 candidate_is_non_strict_one_plus_two_complete(value, source_index) or
-                is_predictive_longer_candidate(value, normalized_pinyin));
+                is_predictive_longer_candidate(value, normalized_pinyin) or
+                is_rejected_split_particle(value, normalized_pinyin));
         end;
 
         procedure freeze_remaining_pages;
@@ -185304,15 +185870,23 @@ var
 
         // A longer word the keys only begin goes to the Tab area, whatever put
         // it on the page (is_predictive_longer_candidate; paging already skips
-        // them), and the first page is filled again from the candidates.
+        // them), and so does a particle phrase of a split syllable the shared
+        // LM rejected (is_rejected_split_particle); the first page is filled
+        // again from the candidates.
         procedure drop_visible_predictive_longer_candidates;
         var idx, count, filled: Integer; value: TncCandidate; key: string;
             pooled, pool_has_longer: Boolean;
             pool: TncCandidateList; sources: TArray<Integer>;
+
+            function dropped(const candidate: TncCandidate): Boolean;
+            begin
+                Result := is_predictive_longer_candidate(candidate, normalized_pinyin) or
+                    is_rejected_split_particle(candidate, normalized_pinyin);
+            end;
         begin
             count := 0;
             for idx := 0 to High(Result) do
-                if not is_predictive_longer_candidate(Result[idx], normalized_pinyin) then
+                if not dropped(Result[idx]) then
                 begin
                     Result[count] := Result[idx];
                     visible_source_indices[count] := visible_source_indices[idx];
@@ -185323,8 +185897,7 @@ var
             pool_has_longer := False;
             if pooled then
                 for idx := 0 to High(m_long_visible_candidate_pool_cache) do
-                    if is_predictive_longer_candidate(
-                        m_long_visible_candidate_pool_cache[idx], normalized_pinyin) then
+                    if dropped(m_long_visible_candidate_pool_cache[idx]) then
                     begin
                         pool_has_longer := True;
                         Break;
@@ -185352,7 +185925,7 @@ var
                 for idx := 0 to High(m_long_visible_candidate_pool_cache) do
                 begin
                     value := m_long_visible_candidate_pool_cache[idx];
-                    if is_predictive_longer_candidate(value, normalized_pinyin) then Continue;
+                    if dropped(value) then Continue;
                     key := nc_visible_candidate_key(value, value.comment);
                     if emitted_visible_texts.ContainsKey(key) then Continue;
                     emitted_visible_texts.Add(key, True);
@@ -185482,6 +186055,7 @@ var
         // All display fast paths assemble their first page here. Do this
         // before slicing so a pinned exact cannot be lost on a later page.
         if m_page_index = 0 then enforce_final_fixed_top_candidate;
+        judge_split_particle_candidates(normalized_pinyin);
         normalize_page_and_selection;
         start_index := m_page_index * visible_page_size;
         promoted_repeated_initial_count := 0;
@@ -186091,6 +186665,7 @@ begin
     normalize_page_and_selection;
     if m_last_lookup_syllable_count = 1 then
     begin
+        split_syllable_partials := take_split_syllable_partials;
         expected_units := 1;
         if not is_shuangpin_input then
         begin
@@ -186127,6 +186702,7 @@ begin
             end;
         end;
         filter_display_single_syllable_prefix_partials;
+        restore_split_syllable_partials(split_syllable_partials);
         note_display_phase('single');
         build_current_page_result;
         Exit;
@@ -187330,6 +187906,10 @@ begin
         begin
             debug_parts.Add(m_short_phrase_debug);
         end;
+        if m_split_particle_debug <> '' then
+        begin
+            debug_parts.Add(m_split_particle_debug);
+        end;
         if m_raw_input_debug <> '' then
         begin
             debug_parts.Add(m_raw_input_debug);
@@ -187780,6 +188360,7 @@ var
     previous_committed_pinyin: string;
     literal_only_commit: Boolean;
     literal_word_to_record: Boolean;
+    single_char_tail: Boolean;
     literal_full_pinyin: string;
 
     function is_boundary_learning_unit(const text_value: string): Boolean;
@@ -188244,6 +188825,11 @@ begin
     begin
         commit_text := m_confirmed_text + commit_text;
     end;
+    // A single character learns its syllable only when it is committed on
+    // its own (the user, 2026-10-30): one chosen at the end of a longer
+    // input, after the characters before it, does not.
+    single_char_tail := (m_confirmed_text <> '') and
+        (get_candidate_text_unit_count(Trim(commit_segment_text)) = 1);
 
     out_text := commit_text;
     allow_learning := m_pending_commit_allow_learning;
@@ -188423,7 +189009,8 @@ begin
                     end;
                 end;
 
-                if (normalized_pinyin <> '') and (commit_segment_text <> '') then
+                if (normalized_pinyin <> '') and (commit_segment_text <> '') and
+                    (not single_char_tail) then
                 begin
                     if selected_short_phrase_choice then
                         m_dictionary.record_selected_short_phrase(normalized_pinyin,
@@ -188483,7 +189070,7 @@ begin
         record_context_pair(prev_left_context, out_text);
     end;
     if (not literal_only_commit) and (not fuzzy_commit_choice) and
-        (commit_segment_text <> '') then
+        (commit_segment_text <> '') and (not single_char_tail) then
     begin
         note_session_commit(commit_segment_text);
     end;

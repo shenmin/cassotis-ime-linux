@@ -186,6 +186,7 @@ type
         m_normalized_base_entry_cache: TDictionary<string, Boolean>;
         m_word_frequency_cache: TDictionary<string, Integer>;
         m_word_frequency_missing: Boolean;
+        m_stmt_word_frequency: Psqlite3_stmt;
         m_single_char_readings_cache: TDictionary<string, TArray<string>>;
         m_explicit_user_entry_cache: TDictionary<string, Boolean>;
         m_literal_user_entry_cache: TDictionary<string, Boolean>;
@@ -2770,6 +2771,7 @@ begin
     m_normalized_base_entry_cache := TDictionary<string, Boolean>.Create;
     m_word_frequency_cache := TDictionary<string, Integer>.Create;
     m_word_frequency_missing := False;
+    m_stmt_word_frequency := nil;
     m_single_char_readings_cache := TDictionary<string, TArray<string>>.Create;
     m_explicit_user_entry_cache := TDictionary<string, Boolean>.Create;
     m_literal_user_entry_cache := TDictionary<string, Boolean>.Create;
@@ -11423,6 +11425,11 @@ procedure TncSqliteDictionary.close;
 begin
     clear_dictionary_lookup_caches;
     clear_cached_user_statements;
+    if (m_stmt_word_frequency <> nil) and (m_base_connection <> nil) then
+    begin
+        m_base_connection.finalize(m_stmt_word_frequency);
+        m_stmt_word_frequency := nil;
+    end;
     if (m_stmt_base_query_path_bonus <> nil) and (m_base_connection <> nil) then
     begin
         m_base_connection.finalize(m_stmt_base_query_path_bonus);
@@ -19612,26 +19619,26 @@ function TncSqliteDictionary.get_word_frequency_score(const text: string): Integ
 const c_cache_limit = 16384;
 var
     text_key: string;
-    stmt: Psqlite3_stmt;
 begin
     Result := 0;
     text_key := Trim(text);
     if (text_key = '') or m_word_frequency_missing or (not ensure_open) or (not m_base_ready) or
         (m_base_connection = nil) then Exit;
     if m_word_frequency_cache.TryGetValue(text_key, Result) then Exit;
-    stmt := nil;
+    if (m_stmt_word_frequency = nil) and not m_base_connection.prepare(
+        'SELECT score FROM dict_base_word_frequency WHERE text=?1 LIMIT 1',
+        m_stmt_word_frequency) then
+    begin
+        m_word_frequency_missing := True;
+        Exit;
+    end;
     try
-        if not m_base_connection.prepare(
-            'SELECT score FROM dict_base_word_frequency WHERE text=?1 LIMIT 1', stmt) then
-        begin
-            m_word_frequency_missing := True;
-            Exit;
-        end;
-        if m_base_connection.BindText(stmt, 1, text_key) and
-            (m_base_connection.step(stmt) = SQLITE_ROW) then
-            Result := m_base_connection.ColumnInt(stmt, 0);
+        if m_base_connection.BindText(m_stmt_word_frequency, 1, text_key) and
+            (m_base_connection.step(m_stmt_word_frequency) = SQLITE_ROW) then
+            Result := m_base_connection.ColumnInt(m_stmt_word_frequency, 0);
     finally
-        if stmt <> nil then m_base_connection.finalize(stmt);
+        m_base_connection.reset(m_stmt_word_frequency);
+        m_base_connection.clear_bindings(m_stmt_word_frequency);
     end;
     if m_word_frequency_cache.Count >= c_cache_limit then m_word_frequency_cache.Clear;
     m_word_frequency_cache.AddOrSetValue(text_key, Result);
