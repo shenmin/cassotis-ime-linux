@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.6.0 - 2026-11-03
 
 - Align Linux 2.6.0 with Cassotis IME and Cassotis Lexicon v2.6.0.
 - Add non-overlapping word-frequency evidence to long-sentence ranking. Judge
