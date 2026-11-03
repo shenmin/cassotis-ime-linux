@@ -17,6 +17,8 @@
   and script-specific readings, including both readings of U+4F3A.
 - Reuse the SQLite word-frequency statement and retain bounded caches, asynchronous
   model loading, candidate-layout options and safe portable installation.
+- Keep a shared engine restarted by the other adapter reachable during source
+  installation; only the engine may remove stale sockets under its singleton lock.
 
 ## 2.5.0 - 2026-10-30
 

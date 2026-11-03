@@ -254,12 +254,12 @@ foreground/background safeguards remain 100/120 ms.
 
 | Architecture | Track | Top1 | Top2 | Mean (ms) | P50 (ms) | P95 (ms) | Max (ms) |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| x86_64 | Long, 16,300 | 13740 (84.29%) | 14686 (90.10%) | 160.204 | 156 | 260 | 649 |
-| aarch64 | Long, 16,300 | 13736 (84.27%) | 14684 (90.09%) | 123.633 | 118 | 210 | 573 |
-| x86_64 | Short without context, 65,000 | 61361 (94.40%) | 63763 (98.10%) | 4.813 | 3 | 12 | 66 |
-| aarch64 | Short without context, 65,000 | 61360 (94.40%) | 63763 (98.10%) | 4.782 | 3 | 12 | 54 |
-| x86_64 | Short with context, 65,000 | 63454 (97.62%) | 64518 (99.26%) | 8.576 | 5 | 24 | 79 |
-| aarch64 | Short with context, 65,000 | 63454 (97.62%) | 64520 (99.26%) | 7.784 | 5 | 21 | 55 |
+| x86_64 | Long, 16,300 | 13740 (84.29%) | 14686 (90.10%) | 163.435 | 160 | 264 | 619 |
+| aarch64 | Long, 16,300 | 13736 (84.27%) | 14684 (90.09%) | 124.143 | 118 | 209 | 557 |
+| x86_64 | Short without context, 65,000 | 61361 (94.40%) | 63763 (98.10%) | 4.724 | 3 | 12 | 122 |
+| aarch64 | Short without context, 65,000 | 61360 (94.40%) | 63763 (98.10%) | 4.819 | 3 | 13 | 51 |
+| x86_64 | Short with context, 65,000 | 63454 (97.62%) | 64518 (99.26%) | 8.426 | 5 | 24 | 272 |
+| aarch64 | Short with context, 65,000 | 63454 (97.62%) | 64520 (99.26%) | 7.898 | 5 | 21 | 58 |
 
 Without context, contested Top1/Top2 are 8,950/10,683 on both architectures,
 out of 11,685 cases. With context they are 10,514/11,280 on x86_64 and
@@ -273,8 +273,8 @@ are not uniform across every metric. Long-query latency also increases;
 these measurements are whole-query decoding times, not end-to-end keystroke
 latency, and runs on different dates are not a controlled speed comparison.
 
-Candidate-test process high-water memory is 425,428 KiB (415.5 MiB) on x86_64
-and 407,924 KiB (398.4 MiB) on aarch64. These are measured corpus-run peaks,
+Candidate-test process high-water memory is 425,556 KiB (415.6 MiB) on x86_64
+and 409,524 KiB (399.9 MiB) on aarch64. These are measured corpus-run peaks,
 not idle-memory figures or universal bounds.
 
 Both architectures pass 939 native core tests, 69 final-Tab contract checks,
@@ -291,16 +291,16 @@ includes every completed background evaluation, including unchanged hints.
 
 | Architecture | Hits | Saved keys | Average saved keys | Stable pairs | Mean (ms) | P50 (ms) | P95 (ms) | Max (ms) | Key P95 (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| x86_64 | 10512/12831 (81.93%) | 27700 | 2.635 | 2151/2214 (97.15%) | 18.050 | 17.359 | 54.576 | 145.465 | 2.052 |
-| aarch64 | 10513/12831 (81.93%) | 27702 | 2.635 | 2152/2215 (97.16%) | 12.767 | 12.237 | 37.143 | 103.224 | 2.070 |
+| x86_64 | 10512/12831 (81.93%) | 27700 | 2.635 | 2151/2214 (97.15%) | 18.230 | 17.501 | 55.296 | 166.194 | 2.043 |
+| aarch64 | 10513/12831 (81.93%) | 27702 | 2.635 | 2152/2215 (97.16%) | 12.461 | 11.947 | 36.199 | 101.196 | 2.034 |
 
 The long suite has 16,300 opportunities. Its timing includes decoding, final
 candidate resolution and visible completion. Coverage is not precision.
 
 | Architecture | Hits | Predictive prompts | Saved keys | Mean (ms) | P50 (ms) | P95 (ms) | Max (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| x86_64 | 3949 (24.23%) | 16155 (99.11%) | 9695 | 170.878 | 163 | 278 | 544 |
-| aarch64 | 3955 (24.26%) | 16152 (99.09%) | 9709 | 127.031 | 120 | 212 | 497 |
+| x86_64 | 3949 (24.23%) | 16155 (99.11%) | 9695 | 164.326 | 157 | 266 | 555 |
+| aarch64 | 3955 (24.26%) | 16152 (99.09%) | 9709 | 125.410 | 118 | 210 | 494 |
 
 Relative to v2.5.0, short completion hit and stability counts are unchanged.
 Long completion gains 53 hits and 103 saved keys on x86_64, and 51 hits and
@@ -316,8 +316,8 @@ not cleared; this is not an end-to-end desktop startup measurement.
 
 | Architecture | Process-cold first / maximum key (ms) | Blocked-model first / maximum key (ms) |
 | --- | ---: | ---: |
-| x86_64 | 4.494 / 29.052 | 4.845 / 29.599 |
-| aarch64 | 4.314 / 26.446 | 4.474 / 26.212 |
+| x86_64 | 4.539 / 28.193 | 4.327 / 27.065 |
+| aarch64 | 4.563 / 26.046 | 4.343 / 25.927 |
 
 ## v2.5.0 Native Measurements
 

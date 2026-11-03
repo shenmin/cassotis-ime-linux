@@ -24,7 +24,10 @@ vocabulary and reading map are unchanged.
 
 Both Ubuntu 26.04.1 x86_64 and aarch64 pass 939 core tests, 69 final-Tab
 contract checks, ten settings tests, simplified/traditional static and
-ready-neural candidate matrices, and isolated IBus/Fcitx 5 input checks.
+ready-neural candidate matrices, and IBus/Fcitx 5 input checks. The GNOME
+Wayland platform matrix covers per-user installation, input through the real
+desktop IBus daemon, Fcitx 5's isolated native frontend, and addon discovery
+and reload in the desktop Fcitx 5 daemon.
 New tests cover split-syllable prefix retention, standalone-character learning,
 non-overlapping word-frequency evidence, contextual ranking and the native
 UTF-16 correction-candidate interface. Cache, cancellation, dictionary-path,
@@ -37,8 +40,8 @@ deadline-free corpus protocol. Fresh-process input checks also pass, with
 
 | Architecture | Process-cold first / maximum key (ms) | Blocked-model first / maximum key (ms) |
 | --- | ---: | ---: |
-| x86_64 | 4.494 / 29.052 | 4.845 / 29.599 |
-| aarch64 | 4.314 / 26.446 | 4.474 / 26.212 |
+| x86_64 | 4.539 / 28.193 | 4.327 / 27.065 |
+| aarch64 | 4.563 / 26.046 | 4.343 / 25.927 |
 
 The blocked-model trial verifies input before and after releasing the loading
 barrier. Neither trial clears OS file caches. Full quality, latency and memory
@@ -46,10 +49,11 @@ measurements are in [BENCHMARK.md](BENCHMARK.md) /
 [Chinese](BENCHMARK.CN.md).
 
 Automatic, fixed vertical and fixed horizontal layout remain presentation-only
-settings shared by both adapters. Earlier installed-desktop checks below retain
-their original dates and scope; they are not substituted for this version's
-isolated framework tests, which do not restart the active desktop input method
-or replace personal settings and user dictionaries.
+settings shared by both adapters. Framework checks preserve personal settings
+and user dictionaries. Earlier checks below retain their original dates and
+scope; they are not substituted for this version's validation. Automated input
+contexts do not establish application focus, candidate positioning or visual
+appearance in every application and desktop environment.
 
 ## v2.5.0 Validation
 

@@ -242,7 +242,8 @@ if [[ -S "$engine_socket" ]]; then
 fi
 cassotis_stop_executable_by_path "$installed_engine_path" ||
     cassotis_die "could not stop the installed engine"
-rm -f -- "$engine_socket"
+# Another adapter may have restarted the shared engine. Stale socket cleanup
+# belongs to the engine under its singleton lock, not to the installer.
 
 install -d -m 0700 "$data_dir" "$component_dir" "$libexec_dir" \
     "$environment_dir" "$ibus_dropin_dir"

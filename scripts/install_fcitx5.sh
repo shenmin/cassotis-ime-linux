@@ -230,7 +230,8 @@ if [[ -S "$engine_socket" ]]; then
     done
 fi
 stop_installed_engine_by_path
-rm -f -- "$engine_socket"
+# A sibling adapter may already have restarted the engine. Only the engine,
+# while holding its singleton lock, may unlink a stale socket path.
 
 install -d -m 0700 "$data_dir" "$addon_dir" "$libexec_dir"
 install -d -m 0755 "$addon_metadata_dir" "$input_method_dir" \
