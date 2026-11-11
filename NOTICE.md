@@ -39,11 +39,18 @@ The shared character language model and vocabulary are supplied by
 [Cassotis IME](https://github.com/shenmin/cassotis-ime). Architecture,
 quantization settings and runtime asset checksums are recorded in
 `data/models/char_lm/runtime_manifest.json`. This is the only neural model
-distributed with version 2.0.0. One local session is shared by long-sentence
+distributed with this version. One local session is shared by long-sentence
 and short-word ranking, phrase correction, completion and continuation.
 Its custom attention operator is part of this project's source code.
 The model was trained on separately licensed corpora; no training documents
 are distributed with it. Inference does not transmit typed text.
+
+The model also uses everyday conversation from LCCC (Wang et al.,
+"A Large-Scale Chinese Short-Text Conversation Dataset", NLPCC 2020;
+https://github.com/thu-coai/CDial-GPT), released under the MIT License,
+Copyright (c) 2020 lemon234071. The lexicon's conversation-frequency table
+is derived from the same source. No source dialogues are distributed.
+The license is included in `docs/LCCC-LICENSE.txt`.
 
 English-word recognition uses a filtered subset of Alan Beale's 12Dicts
 `2of12full.txt`, packaged by Kevin Atkinson. The

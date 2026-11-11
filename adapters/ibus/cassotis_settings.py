@@ -54,6 +54,7 @@ STATE_KEYS = BASE_STATE_KEYS + SHORTCUT_STATE_KEYS + (
     "shortcut_disabled_mask", "decimal_period_after_digit",
     "auto_english", "punctuation_ascii_symbols",
     "candidate_layout",
+    "second_third_candidate_keys",
 )
 
 SCHEME_NAMES = (
@@ -64,6 +65,7 @@ SCHEME_NAMES = (
     "搜狗双拼",
     "紫光双拼",
     "拼音加加双拼",
+    "智能 ABC 双拼",
 )
 
 FUZZY_RULES = (
@@ -95,6 +97,7 @@ PAGE_KEY_PREVIEWS = (
 )
 
 COMPLETION_KEYS = ("Tab", "`")
+SECOND_THIRD_KEYS = ("关闭", "; / '（分号 / 单引号）")
 CANDIDATE_LAYOUTS = ("自动", "固定竖排", "固定横排")
 
 CONTROL_TIMEOUT_SECONDS = 35
@@ -180,6 +183,7 @@ DEFAULT_STATE = {
     "custom_phrases": [],
     "candidate_page_key_scheme": 0,
     "one_key_completion_key": 0,
+    "second_third_candidate_keys": 0,
     "candidate_page_size": 9,
     "candidate_layout": 0,
     "debug_mode": 0,
@@ -212,6 +216,7 @@ PAGE_DEFAULT_KEYS = (
     (
         "candidate_page_key_scheme",
         "one_key_completion_key",
+        "second_third_candidate_keys",
         *SHORTCUT_STATE_KEYS,
         "shortcut_disabled_mask",
     ),
@@ -362,6 +367,8 @@ def validate_state(state):
         raise ControlError("候选翻页方案超出范围")
     if not 0 <= state["one_key_completion_key"] < len(COMPLETION_KEYS):
         raise ControlError("一键补全按键超出范围")
+    if not 0 <= state["second_third_candidate_keys"] < len(SECOND_THIRD_KEYS):
+        raise ControlError("二三候选快捷键超出范围")
     if not 3 <= state["candidate_page_size"] <= 9:
         raise ControlError("每页候选数必须为 3 到 9")
     if not 0 <= state["candidate_layout"] < len(CANDIDATE_LAYOUTS):
@@ -713,6 +720,15 @@ class SettingsWindow(Gtk.ApplicationWindow):
         hint.set_line_wrap(True)
         self._add_row(completion, 1, "说明", hint)
 
+        selection = self._new_section("二三候选")
+        content.pack_start(selection, False, False, 0)
+        self.second_third_keys = self._combo(SECOND_THIRD_KEYS)
+        self._add_row(selection, 0, "快捷键", self.second_third_keys)
+        selection_hint = Gtk.Label(
+            label="用分号、单引号选择当前页的第二、第三候选。双拼编码中的分号优先；启用后单引号不再分隔音节。",
+            xalign=0, wrap=True)
+        self._add_row(selection, 1, "说明", selection_hint)
+
         shortcuts = self._new_section("功能快捷键")
         content.pack_start(shortcuts, False, False, 0)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -1007,6 +1023,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.completion_key, state["one_key_completion_key"]
         )
         self.debug_mode.set_active(bool(state["debug_mode"]))
+        self._set_combo_value(self.second_third_keys, state["second_third_candidate_keys"])
         for index, (prefix, _caption) in enumerate(SHORTCUTS):
             modifier, key, enabled = self.shortcut_widgets[prefix]
             self._set_combo_value(
@@ -1049,6 +1066,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             ),
             "candidate_page_key_scheme": self._combo_value(self.page_keys),
             "one_key_completion_key": self._combo_value(self.completion_key),
+            "second_third_candidate_keys": self._combo_value(self.second_third_keys),
             "candidate_page_size": self._combo_value(
                 self.candidate_page_size
             ),

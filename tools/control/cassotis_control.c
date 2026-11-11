@@ -99,6 +99,7 @@ static void print_state(const CassotisEngineState *state)
     g_print("auto_english=%u\n", state->auto_english ? 1U : 0U);
     g_print("punctuation_ascii_symbols=%s\n", state->punctuation_ascii_symbols);
     g_print("candidate_layout=%u\n", (guint)state->candidate_layout);
+    g_print("second_third_candidate_keys=%u\n", (guint)state->second_third_candidate_keys);
 }
 
 static void print_usage(const gchar *program_name)
@@ -110,7 +111,7 @@ static void print_usage(const gchar *program_name)
         "       [PAGE_KEYS COMPLETION_KEY [PAGE_SIZE DEBUG] "
         "INPUT_KEY INPUT_MOD PUNCT_KEY PUNCT_MOD "
         "DICT_KEY DICT_MOD WIDTH_KEY WIDTH_MOD SETTINGS_KEY SETTINGS_MOD "
-        "[DISABLED_MASK [DECIMAL_PERIOD [AUTO_ENGLISH ASCII_SYMBOLS [LAYOUT]]]]]\n"
+        "[DISABLED_MASK [DECIMAL_PERIOD [AUTO_ENGLISH ASCII_SYMBOLS [LAYOUT [SECOND_THIRD_KEYS]]]]]]\n"
         "  %s ping\n"
         "  %s clear-user-dictionary\n"
         "  %s shutdown\n",
@@ -185,7 +186,7 @@ int main(int argc, char **argv)
             print_state(&state);
     } else if ((g_strcmp0(argv[1], "set-state") == 0 || preferences) &&
                (argc == 9 || argc == 21 || argc == 23 || argc == 24 ||
-                argc == 25 || argc == 27 || argc == 28)) {
+                argc == 25 || argc == 27 || argc == 28 || argc == 29)) {
         cassotis_engine_state_init_defaults(&state);
         if (!cassotis_client_get_state(&client, &state, &error))
             goto done;
@@ -195,7 +196,7 @@ int main(int argc, char **argv)
             if (index == 4)
                 maximum = CASSOTIS_FUZZY_RULE_MASK;
             if (index == 2)
-                maximum = CASSOTIS_PINYIN_PINYINJIAJIA;
+                maximum = CASSOTIS_PINYIN_ZHINENGABC;
             else if (index == 7)
                 maximum = CASSOTIS_PAGE_KEYS_SHIFT_TAB;
             else if (extended_state && index == 9)
@@ -295,7 +296,7 @@ int main(int argc, char **argv)
             g_strlcpy(state.punctuation_ascii_symbols, symbols,
                       sizeof(state.punctuation_ascii_symbols));
         }
-        if (argc == 28) {
+        if (argc >= 28) {
             guint32 layout;
             if (!parse_uint(argv[27], CASSOTIS_LAYOUT_HORIZONTAL, &layout)) {
                 g_set_error_literal(&error, cassotis_client_error_quark(), 1,
@@ -303,6 +304,16 @@ int main(int argc, char **argv)
                 goto done;
             }
             state.candidate_layout = (CassotisCandidateLayout)layout;
+        }
+        if (argc == 29) {
+            guint32 selection_keys;
+            if (!parse_uint(argv[28], CASSOTIS_SECOND_THIRD_SEMICOLON_QUOTE,
+                            &selection_keys)) {
+                g_set_error_literal(&error, cassotis_client_error_quark(), 1,
+                                    "candidate selection keys must be 0..1");
+                goto done;
+            }
+            state.second_third_candidate_keys = (CassotisSecondThirdCandidateKeys)selection_keys;
         }
         if (preferences) {
             phrases = read_phrases(&error);

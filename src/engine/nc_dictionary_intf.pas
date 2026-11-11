@@ -177,6 +177,7 @@ type
         function clear_user_dictionary: Boolean; virtual;
         { General-text word frequency: 100 * log10(1 + occurrences), or zero. }
         function get_word_frequency_score(const text: string): Integer; virtual;
+        function get_conversation_frequency_score(const text: string): Integer; virtual;
         function import_user_choices(const entries: TncUserWordImportEntries;
             out imported: Integer): Boolean; virtual;
         function get_candidate_penalty(const pinyin: string; const text: string): Integer; virtual;
@@ -715,6 +716,11 @@ begin
 end;
 
 function TncDictionaryProvider.get_word_frequency_score(const text: string): Integer;
+begin
+    Result := 0;
+end;
+
+function TncDictionaryProvider.get_conversation_frequency_score(const text: string): Integer;
 begin
     Result := 0;
 end;

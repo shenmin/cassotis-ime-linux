@@ -16,7 +16,7 @@ const
     c_ipc_engine_state_shortcuts_schema_version = 3;
     c_ipc_engine_state_debug_schema_version = 4;
     c_ipc_engine_state_decimal_schema_version = 6;
-    c_ipc_engine_state_schema_version = 8;
+    c_ipc_engine_state_schema_version = 9;
     c_ipc_engine_result_schema_version = 2;
     c_ipc_payload_max_text_bytes = 1024 * 1024;
     c_ipc_payload_max_candidates = 256;
@@ -948,6 +948,7 @@ begin
         WriteShortcut(writer, state.shortcuts.open_settings);
         writer.WriteString(nc_normalize_punctuation_ascii_symbols(state.punctuation_ascii_symbols));
         writer.WriteByte(Ord(state.candidate_layout));
+        writer.WriteByte(Ord(state.second_third_candidate_keys));
         Result := writer.Finish;
     finally
         writer.Free;
@@ -968,6 +969,7 @@ var
     one_key_completion_key: Byte;
     candidate_page_size: Byte;
     candidate_layout: Byte;
+    second_third_candidate_keys: Byte;
     reserved: Word;
     reserved_byte: Byte;
 begin
@@ -979,6 +981,7 @@ begin
         one_key_completion_key := Ord(state.one_key_completion_key);
         candidate_page_size := Byte(state.candidate_page_size);
         candidate_layout := Ord(state.candidate_layout);
+        second_third_candidate_keys := Ord(state.second_third_candidate_keys);
         reserved := 0;
         reserved_byte := 0;
         Result := ReadPayloadHeaderVersion(reader, version) and
@@ -1010,6 +1013,13 @@ begin
             Result := reader.ReadString(state.punctuation_ascii_symbols);
         if Result and (version >= 8) then
             Result := reader.ReadByte(candidate_layout);
+        if Result and (version >= 9) then
+            Result := reader.ReadByte(second_third_candidate_keys);
+        if Result and (second_third_candidate_keys > Ord(High(TncSecondThirdCandidateKeys))) then
+        begin
+            reader.SetError('State payload contains invalid candidate selection keys');
+            Result := False;
+        end;
         if Result and (candidate_layout > Ord(High(TncCandidateLayout))) then
         begin
             reader.SetError('State payload contains an invalid candidate layout');
@@ -1112,6 +1122,7 @@ begin
                 nc_fuzzy_pinyin_rules_from_mask(fuzzy_rules_mask);
             state.candidate_page_size := candidate_page_size;
             state.candidate_layout := TncCandidateLayout(candidate_layout);
+            state.second_third_candidate_keys := TncSecondThirdCandidateKeys(second_third_candidate_keys);
             state.candidate_page_key_scheme :=
                 TncCandidatePageKeyScheme(candidate_page_key_scheme);
             state.one_key_completion_key :=

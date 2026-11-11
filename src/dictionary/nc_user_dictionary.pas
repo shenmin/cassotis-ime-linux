@@ -430,6 +430,7 @@ const
         '''setting.candidate_layout'', ' +
         '''setting.candidate_page_key_scheme'', ' +
         '''setting.one_key_completion_key'', ' +
+        '''setting.second_third_candidate_keys'', ' +
         '''setting.debug_mode'', ' +
         '''setting.shortcut_disabled_mask'', ' +
         '''setting.shortcut.input_mode.key'', ' +
@@ -535,6 +536,10 @@ begin
                     TncOneKeyCompletionKey(setting_value)
             else if key_name = 'setting.debug_mode' then
                 state.debug_mode := setting_value <> 0
+            else if (key_name = 'setting.second_third_candidate_keys') and
+                (setting_value >= Ord(Low(TncSecondThirdCandidateKeys))) and
+                (setting_value <= Ord(High(TncSecondThirdCandidateKeys))) then
+                state.second_third_candidate_keys := TncSecondThirdCandidateKeys(setting_value)
             else if (key_name = 'setting.shortcut_disabled_mask') and
                 (setting_value >= 0) and (setting_value <= 31) then
             begin
@@ -640,6 +645,9 @@ begin
         ExecutePairStatement(c_upsert_setting,
         'setting.one_key_completion_key', UTF8Decode(IntToStr(
         Ord(state.one_key_completion_key)))) and
+        ExecutePairStatement(c_upsert_setting,
+        'setting.second_third_candidate_keys', UTF8Decode(IntToStr(
+        Ord(state.second_third_candidate_keys)))) and
         ExecutePairStatement(c_upsert_setting, 'setting.debug_mode',
         UTF8Decode(IntToStr(Ord(state.debug_mode)))) and
         ExecutePairStatement(c_upsert_setting, 'setting.shortcut_disabled_mask',

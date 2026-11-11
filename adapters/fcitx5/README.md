@@ -8,7 +8,7 @@ Dictionary access, pinyin decoding, candidate recall and ranking, and user
 learning remain in the Free Pascal engine service. The adapter must not grow a
 second implementation of those policies.
 
-The adapter supports full pinyin and all six shuangpin schemes, paging and
+The adapter supports full pinyin and all seven shuangpin schemes, paging and
 cursor selection, mouse candidate activation, editing/cancel/raw commit,
 one-key completion, Chinese/English input, punctuation and width shortcuts,
 controlled fuzzy-pinyin actions, sensitive-field bypass, persistent user

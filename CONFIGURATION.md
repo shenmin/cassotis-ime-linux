@@ -12,7 +12,7 @@ property menu.
 | Option | Values | Default | Meaning |
 | --- | --- | --- | --- |
 | Input mode | Simplified Chinese, Traditional Chinese, English | Simplified Chinese | Selects Chinese/English input and the active base dictionary. |
-| Pinyin scheme | Full Pinyin; Microsoft, Xiaohe, Ziranma, Sogou, Ziguang, or Pinyin Jiajia shuangpin | Full Pinyin | Changes only keyboard decoding; all schemes share recall, ranking, learning, and completion. |
+| Pinyin scheme | Full Pinyin; Microsoft, Xiaohe, Ziranma, Sogou, Ziguang, Pinyin Jiajia, or Zhineng ABC shuangpin | Full Pinyin | Changes only keyboard decoding; all schemes share recall, ranking, learning, and completion. |
 | Punctuation | Chinese, English | Chinese | Chooses full-width Chinese punctuation mapping or literal English punctuation. |
 | Character width | Half width, full width | Half width | Converts printable ASCII characters when full-width mode is enabled. |
 | Decimal period after digits | On, off | On | In Chinese punctuation mode, a period immediately after directly typed digits produces `.` instead of `。`. |
@@ -47,7 +47,7 @@ original spelling unchanged.
 
 ## Quick Input
 
-In full pinyin, type a command directly. In any of the six shuangpin schemes,
+In full pinyin, type a command directly. In any of the seven shuangpin schemes,
 start with `Shift+U`, `Shift+I` or `Shift+V` so normal double-pinyin codes
 remain available.
 
@@ -122,6 +122,16 @@ or extend it in the background; insufficient-confidence predictions stay hidden.
 Completion is displayed separately from ordinary candidates and does not change
 their order. Ordinary candidate selection remains available while the model works.
 
+## Second/Third Selection Keys
+
+The Shortcuts page offers optional `;` / `'` selection of the second/third
+candidate on the current page. The default is off. With this option enabled,
+an apostrophe during Chinese composition selects a candidate instead of
+separating syllables; leave it off if you use explicit separators. In Double
+Pinyin, a semicolon that completes a valid pair still enters its final.
+If that candidate does not exist, the key leaves the composition unchanged.
+Outside composition and in U/I/V quick input, normal key handling is retained.
+
 ## Custom Phrases
 
 Add shortcuts and literal text on the **Custom Phrases** page, then click
@@ -129,7 +139,7 @@ Add shortcuts and literal text on the **Custom Phrases** page, then click
 The list supports 1,024 entries with up to 4,096 UTF-16 code units per phrase.
 In Chinese mode, an exact shortcut takes priority in the completion row;
 press the configured `Tab` or backtick key to commit it. Full pinyin and all
-six shuangpin schemes match the keys actually typed, not decoded pinyin.
+seven shuangpin schemes match the keys actually typed, not decoded pinyin.
 
 Numbered candidates and Space selection are unchanged. Whitespace, newlines
 and tabs are preserved; phrases are not converted between scripts or widths

@@ -16,6 +16,51 @@ preserved. This verifies the installer fix, not full Fedora input-framework or
 application compatibility. It does not repair directory attributes damaged by
 an older installer; see the [system-install warning](README.md#system-installation).
 
+## v2.7.0 Validation
+
+The 2026-11-11 (UTC+8) validation uses the v2.7.0 engine, updated shared
+character model and six matching decision trees, and fresh simplified and
+traditional lexicon databases with conversational-frequency evidence.
+
+Both Ubuntu 26.04.1 x86_64 and aarch64 pass 984 native core tests, settings
+and control-client round trips, simplified/traditional static and ready-model
+candidate matrices, and isolated IBus/Fcitx 5 input checks. Native inference
+checks cover score invariance across batches and caches, cancellation, numeric
+precision and the text/query/correction ABI. New regressions cover traditional
+and Double Pinyin correction, contextual single characters, split-first-syllable
+recall, missing conversational-frequency tables, Zhineng ABC and optional
+second/third candidate keys. The new settings preserve older control-client
+requests and existing saved values.
+
+The follow-up IBus runs exercise normal, debug, disabled-shortcut, Zhineng ABC
+and second/third-selection configurations in separate real input contexts.
+They verify committed text, rather than configuration persistence alone;
+Fcitx 5's native input tests also cover the added scheme and selection keys.
+
+Automatic, fixed vertical and fixed horizontal layout remain presentation-only
+settings shared by both adapters. Existing learning, lifecycle, dictionary-path
+and installer-safety checks remain enabled. Production foreground/background
+model budgets remain 100/120 ms; full-corpus measurements use the separately
+documented deadline-free protocol. Results and tradeoffs are recorded in
+[BENCHMARK.md](BENCHMARK.md) / [Chinese](BENCHMARK.CN.md).
+
+Framework checks use isolated contexts and preserve personal settings and user
+dictionaries. They do not establish application focus, candidate positioning or
+visual appearance in every application and compositor. Earlier desktop and
+installer checks below retain their original dates and scope, rather than being
+claimed as new tests of this version.
+
+All four full-corpus suites pass without relaxing their quality gates. Fresh
+production-process input tests also pass, with 41 keys in each trial:
+
+| Architecture | Process-cold first / maximum key (ms) | Blocked-model first / maximum key (ms) |
+| --- | ---: | ---: |
+| x86_64 | 4.863 / 44.210 | 4.795 / 28.418 |
+| aarch64 | 4.480 / 25.864 | 4.590 / 26.735 |
+
+The blocked-model test verifies input and commits while initialization is held,
+then verifies input after releasing it. These tests do not clear OS file caches.
+
 ## v2.6.0 Validation
 
 The 2026-11-03 (UTC+8) validation uses the v2.6.0 engine, compact ranking

@@ -70,7 +70,8 @@ type
         pis_ziranma_shuangpin,
         pis_sogou_shuangpin,
         pis_ziguang_shuangpin,
-        pis_pinyinjiajia_shuangpin
+        pis_pinyinjiajia_shuangpin,
+        pis_zhinengabc_shuangpin
     );
     TncCandidatePageKeyScheme = (
         cpks_minus_plus,
@@ -79,6 +80,7 @@ type
         cpks_shift_tab
     );
     TncOneKeyCompletionKey = (ock_tab, ock_backtick);
+    TncSecondThirdCandidateKeys = (stck_none, stck_semicolon_quote);
     TncCandidateLayout = (cl_auto, cl_vertical, cl_horizontal);
     TncShortcutAction = (
         sa_input_mode_toggle,
@@ -127,6 +129,7 @@ type
         candidate_layout: TncCandidateLayout;
         candidate_page_key_scheme: TncCandidatePageKeyScheme;
         one_key_completion_key: TncOneKeyCompletionKey;
+        second_third_candidate_keys: TncSecondThirdCandidateKeys;
         debug_mode: Boolean;
         shortcuts: TncShortcutConfig;
     end;
@@ -154,6 +157,7 @@ type
         candidate_expand_on_paging: Boolean;
         candidate_page_key_scheme: TncCandidatePageKeyScheme;
         one_key_completion_key: TncOneKeyCompletionKey;
+        second_third_candidate_keys: TncSecondThirdCandidateKeys;
         candidate_color_scheme: Integer;
         debug_mode: Boolean;
         dictionary_variant: TncDictionaryVariant;
@@ -490,6 +494,7 @@ begin
     value.candidate_layout := cl_auto;
     value.candidate_page_key_scheme := cpks_minus_plus;
     value.one_key_completion_key := ock_tab;
+    value.second_third_candidate_keys := stck_none;
     value.debug_mode := False;
     value.shortcuts.signature := c_nc_shortcut_config_signature;
     value.shortcuts.input_mode_toggle.key_code := $10;
@@ -579,6 +584,7 @@ begin
         right_value.candidate_page_key_scheme) and
         (left_value.one_key_completion_key =
         right_value.one_key_completion_key) and
+        (left_value.second_third_candidate_keys = right_value.second_third_candidate_keys) and
         (left_value.debug_mode = right_value.debug_mode) and
         (left_value.shortcuts.signature = right_value.shortcuts.signature) and
         ShortcutEqual(left_value.shortcuts.input_mode_toggle,

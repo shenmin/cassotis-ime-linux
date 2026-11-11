@@ -237,7 +237,7 @@ install -m 0644 "$cassotis_root/snapshot.jpg" \
     "$(stage_path "$doc_path/snapshot.jpg")"
 install -m 0644 "$cassotis_root/cassotis_ime_yanquan.png" \
     "$(stage_path "$doc_path/cassotis_ime_yanquan.png")"
-for document in DICTIONARY.md IPC.md LEXICON_ATTRIBUTION.md; do
+for document in DICTIONARY.md IPC.md LEXICON_ATTRIBUTION.md LCCC-LICENSE.txt; do
     install -m 0644 "$cassotis_root/docs/$document" \
         "$(stage_path "$doc_path/docs/$document")"
 done

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.7.0 - Unreleased
+
+- Align the engine and dictionaries with Cassotis IME and Cassotis Lexicon v2.7.0.
+- Update the shared character language model and its six score-based rankers;
+  use conversational frequency alongside general-text evidence for short words.
+- Enable the shared phrase and correction paths for traditional and Double Pinyin
+  input, and use context to rank single characters without losing prefix choices.
+- Retain split-first-syllable characters; refine rare-word completion and short
+  phrases ending in question-like particles.
+- Add Zhineng ABC Double Pinyin and optional semicolon/apostrophe selection of
+  the second/third candidate, with persisted settings shared by both frameworks.
+- Refresh simplified/traditional entries, Taiwan forms and ranking signals.
+  Preserve candidate-layout options, bounded memory and portable-install safeguards.
+
 ## 2.6.0 - 2026-11-03
 
 - Align Linux 2.6.0 with Cassotis IME and Cassotis Lexicon v2.6.0.

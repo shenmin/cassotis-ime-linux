@@ -1,10 +1,10 @@
 # Dictionary And Ranking Boundary
 
-Cassotis IME for Linux v2.6.0 uses the v2.6.0 releases of
+Cassotis IME for Linux v2.7.0 uses the v2.7.0 releases of
 [Cassotis IME](https://github.com/shenmin/cassotis-ime) and
 [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon).
-The frozen releases are [v2.6.0](https://github.com/shenmin/cassotis-ime/releases/tag/v2.6.0)
-(engine) and [v2.6.0](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.6.0)
+The frozen releases are [v2.7.0](https://github.com/shenmin/cassotis-ime/releases/tag/v2.7.0)
+(engine) and [v2.7.0](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.7.0)
 (lexicon).
 Base dictionaries are read-only. Learning, preferences, and completion feedback
 are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
@@ -13,16 +13,17 @@ are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
 
 - Current schema: `24`; minimum readable schema: `18`.
 - Simplified database SHA-256:
-  `0fdd265c5e96ac7ad90a050aba72527ba0d26df80da35e1127112addfc3937b7`.
+  `ae56a9bf0aa98c6a89e04f0c55d572131fbe6e7b23d1603a5d8344b87e3ba859`.
 - Traditional database SHA-256:
-  `9e88f9d2d3c60da5c496878968412c30b245d9b971594f763c788c8648dbbf2c`.
-- Simplified base: 261,809 rows, including 23,919 single-character rows and
-  237,890 multi-character rows.
-- Traditional base: 262,686 rows, including 24,182 single-character rows and
-  238,504 multi-character rows.
-- Simplified/traditional short-query promotion rows: 1,520 / 1,715.
-- Simplified/traditional word-frequency rows: 199,532 / 199,118.
-- Simplified/traditional LM-transition rows: 904,762 / 833,701.
+  `980c99a4cd3f655664a2cb14f549ff2a20b6aada2fc4602e66cd99f10dfec598`.
+- Simplified base: 264,167 rows, including 23,919 single-character rows and
+  240,248 multi-character rows.
+- Traditional base: 267,265 rows, including 24,182 single-character rows and
+  243,083 multi-character rows.
+- Simplified/traditional short-query promotion rows: 1,529 / 1,781.
+- Simplified/traditional word-frequency rows: 201,868 / 204,020.
+- Simplified/traditional conversation-frequency rows: 106,115 / 107,002.
+- Simplified/traditional LM-transition rows: 904,762 / 833,694.
 - Simplified/traditional completion-competition rows: 42,453 / 42,448.
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379.
 - Simplified long-completion recall: 103,407 rows, including 41,244 visible paths.
@@ -33,8 +34,8 @@ not counts of unique words. The schema version is stored in
 `meta(key = 'schema_version')`. SQLite text is UTF-8.
 
 Older supported schemas remain readable with their available optional signals;
-they do not provide the complete v2.6.0 behavior. Release dictionaries must
-include nonempty short-query promotion and word-frequency tables as well as
+they do not provide the complete v2.7.0 behavior. Release dictionaries must
+include nonempty short-query promotion, word-frequency and conversation-frequency tables as well as
 all other required data. Staging rejects missing tables or active journals.
 Promotion entries are checked against the corresponding words and base weights
 so a stale promotion file cannot silently change ranking.
@@ -47,7 +48,7 @@ so a stale promotion file cannot silently change ranking.
 | Segmented paths | Query-path priors and word transitions |
 | Statistical language evidence | Forward and reverse character n-grams |
 | Popularity | Text and substring popularity priors |
-| Short exact input | Dictionary-backed no-context promotion and general-text word frequencies |
+| Short exact input | Dictionary-backed no-context promotion, general-text and conversation word frequencies |
 | One-key completion | Exact-prefix lookup, transitions, priors, competition, pair audits, and expanded long-completion recall |
 
 Exact, alias, abbreviated-pinyin, prefix, segmented-path, and completion
@@ -63,9 +64,15 @@ without counting the same characters repeatedly. Frequency queries reuse one
 prepared SQLite statement, which is reset between reads and closed with its
 database; reopening clears both the statement and its result cache.
 
+The conversation table uses the same logarithmic scale and a separate prepared
+statement. Without preceding text, it can preserve the leading dictionary word
+when conversational evidence strongly favors it and general-text frequency and
+base weight do not contradict that choice. A missing conversational count is not
+treated as evidence against a word.
+
 ## Candidate Pipeline
 
-1. Decode full pinyin or one of six shuangpin schemes to canonical syllables,
+1. Decode full pinyin or one of seven shuangpin schemes to canonical syllables,
    respecting explicit separators and supported reading aliases.
 2. Recall exact and user entries, abbreviated pinyin, prefixes, stored paths,
    and dictionary-constrained sentence paths.

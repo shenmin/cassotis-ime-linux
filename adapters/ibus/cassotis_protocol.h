@@ -114,7 +114,8 @@ typedef enum {
     CASSOTIS_PINYIN_ZIRANMA = 3,
     CASSOTIS_PINYIN_SOGOU = 4,
     CASSOTIS_PINYIN_ZIGUANG = 5,
-    CASSOTIS_PINYIN_PINYINJIAJIA = 6
+    CASSOTIS_PINYIN_PINYINJIAJIA = 6,
+    CASSOTIS_PINYIN_ZHINENGABC = 7
 } CassotisPinyinScheme;
 
 typedef enum {
@@ -128,6 +129,11 @@ typedef enum {
     CASSOTIS_COMPLETION_TAB = 0,
     CASSOTIS_COMPLETION_BACKTICK = 1
 } CassotisOneKeyCompletionKey;
+
+typedef enum {
+    CASSOTIS_SECOND_THIRD_NONE = 0,
+    CASSOTIS_SECOND_THIRD_SEMICOLON_QUOTE = 1
+} CassotisSecondThirdCandidateKeys;
 
 /* Wire values must match TncCandidateLayout in nc_types. */
 typedef enum {
@@ -195,6 +201,7 @@ typedef struct {
     CassotisCandidateLayout candidate_layout;
     CassotisCandidatePageKeyScheme candidate_page_key_scheme;
     CassotisOneKeyCompletionKey one_key_completion_key;
+    CassotisSecondThirdCandidateKeys second_third_candidate_keys;
     gboolean debug_mode;
     CassotisShortcutConfig shortcuts;
 } CassotisEngineState;

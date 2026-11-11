@@ -432,7 +432,8 @@ for suffix in ("-wal", "-shm", "-journal"):
 with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
     if db.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
         raise SystemExit(f"Packaged dictionary must use rollback journaling: {path}")
-    for table in ("dict_base", "dict_base_short_promotion", "dict_base_word_frequency"):
+    for table in ("dict_base", "dict_base_short_promotion", "dict_base_word_frequency",
+                  "dict_base_conversation_frequency"):
         try:
             row = db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
         except sqlite3.DatabaseError as error:
@@ -440,6 +441,7 @@ with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
         if row is None:
             raise SystemExit(f"Empty required dictionary table {table}: {path}")
     db.execute("SELECT text, score FROM dict_base_word_frequency LIMIT 1").fetchone()
+    db.execute("SELECT text, score FROM dict_base_conversation_frequency LIMIT 1").fetchone()
 PY
 }
 

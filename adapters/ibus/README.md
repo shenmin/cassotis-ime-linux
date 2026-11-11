@@ -10,7 +10,7 @@ v2.0.0 exact, alias, prefix, jianpin, segmented-path, short-word, long-sentence,
 context-ranking, completion, and user-signal stages. It supports selection by
 space, number, mouse, and cursor movement; paging,
 backspace, Escape, and raw-pinyin commit with Enter; persistent cross-context
-user learning; full pinyin and six shuangpin schemes; Shift Chinese/English
+user learning; full pinyin and seven shuangpin schemes; Shift Chinese/English
 switching; `Ctrl+.` punctuation switching; `Shift+Space` full-/half-width
 switching; Chinese/English punctuation plus full-/half-width state; and
 `Ctrl+Delete` removal of the currently selected deletable user word. Controlled

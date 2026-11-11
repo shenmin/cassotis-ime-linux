@@ -172,6 +172,8 @@ install -m 0644 "$cassotis_root/docs/IPC.md" \
     "$bundle_dir/docs/IPC.md"
 install -m 0644 "$cassotis_root/docs/LEXICON_ATTRIBUTION.md" \
     "$bundle_dir/docs/LEXICON_ATTRIBUTION.md"
+install -m 0644 "$cassotis_root/docs/LCCC-LICENSE.txt" \
+    "$bundle_dir/docs/LCCC-LICENSE.txt"
 find "$bundle_dir" -exec touch -d "@$source_date_epoch" {} +
 tar --sort=name --mtime="@$source_date_epoch" --owner=0 --group=0 \
     --numeric-owner -C "$work_dir" -czf \

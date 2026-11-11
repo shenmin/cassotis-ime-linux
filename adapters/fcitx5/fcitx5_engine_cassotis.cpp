@@ -37,7 +37,7 @@ namespace {
 
 constexpr std::size_t kDefaultPageSize = 9;
 constexpr glong kSurroundingRadius = 2048;
-constexpr std::size_t kSchemeCount = 7;
+constexpr std::size_t kSchemeCount = CASSOTIS_PINYIN_ZHINENGABC + 1;
 constexpr std::size_t kFuzzyRuleCount = CASSOTIS_FUZZY_RULE_COUNT;
 constexpr std::uint64_t kStatePollIntervalUsec = 500000;
 constexpr std::uint64_t kResultPollIntervalUsec = 25000;
@@ -49,12 +49,12 @@ constexpr guint32 kDefaultFuzzyRules =
     CASSOTIS_FUZZY_IN_ING;
 
 const std::array<const char *, kSchemeCount> kSchemeSymbols = {
-    "拼", "微", "鹤", "自", "搜", "紫", "加",
+    "拼", "微", "鹤", "自", "搜", "紫", "加", "智",
 };
 
 const std::array<const char *, kSchemeCount> kSchemeNames = {
     "全拼",       "微软双拼", "小鹤双拼", "自然码双拼",
-    "搜狗双拼",   "紫光双拼", "拼音加加双拼",
+    "搜狗双拼",   "紫光双拼", "拼音加加双拼", "智能 ABC 双拼",
 };
 
 const std::array<const char *, kFuzzyRuleCount> kFuzzyRuleNames = {
@@ -112,6 +112,7 @@ bool statesEqual(const CassotisEngineState &left,
            left.candidate_page_key_scheme ==
                right.candidate_page_key_scheme &&
            left.one_key_completion_key == right.one_key_completion_key &&
+           left.second_third_candidate_keys == right.second_third_candidate_keys &&
            left.debug_mode == right.debug_mode &&
            std::memcmp(&left.shortcuts, &right.shortcuts,
                        sizeof(left.shortcuts)) == 0;

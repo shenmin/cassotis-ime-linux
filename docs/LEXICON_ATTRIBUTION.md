@@ -25,7 +25,7 @@ THUOCL provides broad word-list and document-frequency signals. Filtered IT,
 idiom/allusion, medical and other specialist subsets are used as isolated
 vertical-layer sources. Catalogue-only specialist entries have low weights and
 are excluded from predictive completion; reviewed general-use terms remain
-eligible. See the admission and familiarity records in Cassotis Lexicon v2.6.0.
+eligible. See the admission and familiarity records in Cassotis Lexicon v2.7.0.
 
 ## jieba Dictionary
 
@@ -36,6 +36,17 @@ eligible. See the admission and familiarity records in Cassotis Lexicon v2.6.0.
 - Copyright holder: Sun Junyi and jieba contributors
 
 The word frequencies are used as a ranking signal.
+
+## LCCC Conversation Frequencies
+
+- Name: Large-scale Cleaned Chinese Conversation (LCCC)
+- Homepage: https://github.com/thu-coai/CDial-GPT
+- Publication: Wang et al., "A Large-Scale Chinese Short-Text Conversation Dataset", NLPCC 2020
+- License: MIT; see [LCCC-LICENSE.txt](LCCC-LICENSE.txt)
+- Copyright holder: Copyright (c) 2020 lemon234071
+
+Word counts provide a separate everyday-conversation ranking signal. The
+dictionary contains derived counts, not source dialogues.
 
 ## OpenCC STPhrases
 

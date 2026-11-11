@@ -169,6 +169,8 @@ static gboolean refresh_engine_state(CassotisIbusEngine *self)
                   observed_state.candidate_page_key_scheme ||
               self->state.one_key_completion_key !=
                   observed_state.one_key_completion_key ||
+              self->state.second_third_candidate_keys !=
+                  observed_state.second_third_candidate_keys ||
               self->state.debug_mode != observed_state.debug_mode ||
               memcmp(&self->state.shortcuts, &observed_state.shortcuts,
                      sizeof(self->state.shortcuts)) != 0;
@@ -951,7 +953,7 @@ static void cassotis_property_activate(IBusEngine *engine,
         scheme = g_ascii_strtoull(
             property_name + strlen(CASSOTIS_PROP_SCHEME_PREFIX), &end, 10);
         if (end == NULL || *end != '\0' ||
-            scheme > CASSOTIS_PINYIN_PINYINJIAJIA)
+            scheme > CASSOTIS_PINYIN_ZHINENGABC)
             return;
         state.pinyin_scheme = (CassotisPinyinScheme)scheme;
     } else {

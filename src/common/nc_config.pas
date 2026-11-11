@@ -161,6 +161,7 @@ begin
     Result.candidate_expand_on_paging := False;
     Result.candidate_page_key_scheme := cpks_minus_plus;
     Result.one_key_completion_key := ock_tab;
+    Result.second_third_candidate_keys := stck_none;
     Result.candidate_color_scheme := c_default_candidate_color_scheme;
     Result.dictionary_variant := dv_simplified;
     Result.shortcuts := nc_default_shortcut_config;
