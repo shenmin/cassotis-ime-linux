@@ -12,19 +12,28 @@ jobs:
       - name: Install build dependencies
         timeout-minutes: 10
         run: |
-          # Avoid a stalled regional mirror preventing the build from starting.
-          sudo sed -i \
-            -e 's|mirror+file:/etc/apt/apt-mirrors.txt|https://archive.ubuntu.com/ubuntu|g' \
-            -e 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
-            -e 's|https://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
-            /etc/apt/sources.list.d/ubuntu.sources
+          # Keep Ubuntu's signing keys and suites when a mirror is unavailable.
           apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
-          sudo apt-get "${apt_options[@]}" -o APT::Update::Error-Mode=any update
-          sudo apt-get "${apt_options[@]}" install -y \
-            fpc gcc g++ pkg-config sqlite3 libsqlite3-dev libopencc-dev \
-            libglib2.0-dev libibus-1.0-dev \
-            fcitx5 fcitx5-modules libfcitx5core-dev libfcitx5config-dev \
-            python3 python3-gi gir1.2-gtk-3.0
+          installed=0
+          for mirror in https://archive.ubuntu.com/ubuntu https://mirrors.edge.kernel.org/ubuntu; do
+            if ! curl -4 --fail --silent --show-error --location \
+                --connect-timeout 5 --max-time 15 \
+                "$mirror/dists/noble/InRelease" --output /dev/null; then
+              echo "::warning::Ubuntu mirror unavailable: $mirror"
+              continue
+            fi
+            sudo sed -i "s|^URIs:.*|URIs: $mirror|" /etc/apt/sources.list.d/ubuntu.sources
+            if sudo apt-get "${apt_options[@]}" -o APT::Update::Error-Mode=any update && \
+                sudo apt-get "${apt_options[@]}" install -y \
+                  fpc gcc g++ pkg-config sqlite3 libsqlite3-dev libopencc-dev \
+                  libglib2.0-dev libibus-1.0-dev \
+                  fcitx5 fcitx5-modules libfcitx5core-dev libfcitx5config-dev \
+                  python3 python3-gi gir1.2-gtk-3.0; then
+              installed=1
+              break
+            fi
+          done
+          test "$installed" -eq 1
       - name: Validate scripts
         run: |
           find scripts packaging -type f -name '*.sh' -print0 | \
