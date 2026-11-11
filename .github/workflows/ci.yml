@@ -10,9 +10,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install build dependencies
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          # Avoid a stalled regional mirror preventing the build from starting.
+          sudo sed -i \
+            -e 's|mirror+file:/etc/apt/apt-mirrors.txt|https://archive.ubuntu.com/ubuntu|g' \
+            -e 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+            -e 's|https://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+            /etc/apt/sources.list.d/ubuntu.sources
+          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
+          sudo apt-get "${apt_options[@]}" -o APT::Update::Error-Mode=any update
+          sudo apt-get "${apt_options[@]}" install -y \
             fpc gcc g++ pkg-config sqlite3 libsqlite3-dev libopencc-dev \
             libglib2.0-dev libibus-1.0-dev \
             fcitx5 fcitx5-modules libfcitx5core-dev libfcitx5config-dev \
