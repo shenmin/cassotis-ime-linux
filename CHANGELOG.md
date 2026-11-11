@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.7.0 - Unreleased
+## 2.7.0 - 2026-11-11
 
 - Align the engine and dictionaries with Cassotis IME and Cassotis Lexicon v2.7.0.
 - Update the shared character language model and its six score-based rankers;
