@@ -34,7 +34,7 @@ The case files and deadline-free scoring protocol are unchanged from v2.6.0.
   conversational-frequency records: 106,115 / 107,002;
   short-word promotion records: 1,529 / 1,781.
 - Shared neural model SHA-256:
-  `15dfeb8f116cbab8af6875198468d27b1affca372e138b5a912d9ab043aa1117e`.
+  `15dfeb8f116cbab8af6875198468d27b1affca372e138b5a912d9ab043a1117e`.
 
 The shared character model and six score-based policies are updated together;
 the vocabulary, reading map and fixed-range inference contract are unchanged.
