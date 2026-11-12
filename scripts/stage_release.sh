@@ -233,10 +233,10 @@ for document in README.md README.CN.md BUILD.md COMPATIBILITY.md \
             "$(stage_path "$doc_path/$document")"
     fi
 done
-install -m 0644 "$cassotis_root/snapshot.jpg" \
-    "$(stage_path "$doc_path/snapshot.jpg")"
-install -m 0644 "$cassotis_root/cassotis_ime_yanquan.png" \
-    "$(stage_path "$doc_path/cassotis_ime_yanquan.png")"
+for image in snapshot.jpg cassotis_ime_yanquan.png readme_slogan.svg \
+             readme_slogan_dark.svg; do
+    install -m 0644 "$cassotis_root/$image" "$(stage_path "$doc_path/$image")"
+done
 for document in DICTIONARY.md IPC.md LEXICON_ATTRIBUTION.md LCCC-LICENSE.txt; do
     install -m 0644 "$cassotis_root/docs/$document" \
         "$(stage_path "$doc_path/docs/$document")"
