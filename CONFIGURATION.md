@@ -124,13 +124,23 @@ their order. Ordinary candidate selection remains available while the model work
 
 ## Second/Third Selection Keys
 
-The Shortcuts page offers optional `;` / `'` selection of the second/third
+The **Keys** page offers optional `;` / `'` selection of the second/third
 candidate on the current page. The default is off. With this option enabled,
 an apostrophe during Chinese composition selects a candidate instead of
 separating syllables; leave it off if you use explicit separators. In Double
 Pinyin, a semicolon that completes a valid pair still enters its final.
 If that candidate does not exist, the key leaves the composition unchanged.
 Outside composition and in U/I/V quick input, normal key handling is retained.
+
+## First Or Last Character
+
+In **Keys**, enable the optional bracket keys to commit just one character
+of the highlighted Chinese candidate: `[` takes its first character, `]` its
+last. For example, with 你好 highlighted, the keys commit 你 and 好 respectively.
+The rest of the composition is discarded; this does not teach the user
+dictionary either the word or the extracted character. The setting is off by
+default and unavailable when the brackets are assigned to candidate paging.
+Outside a Chinese candidate list the brackets retain their usual behavior.
 
 ## Custom Phrases
 

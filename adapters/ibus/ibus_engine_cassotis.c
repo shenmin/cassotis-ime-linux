@@ -171,6 +171,7 @@ static gboolean refresh_engine_state(CassotisIbusEngine *self)
                   observed_state.one_key_completion_key ||
               self->state.second_third_candidate_keys !=
                   observed_state.second_third_candidate_keys ||
+              self->state.select_character_keys != observed_state.select_character_keys ||
               self->state.debug_mode != observed_state.debug_mode ||
               memcmp(&self->state.shortcuts, &observed_state.shortcuts,
                      sizeof(self->state.shortcuts)) != 0;

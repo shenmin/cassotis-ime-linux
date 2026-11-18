@@ -16,7 +16,7 @@ const
     c_ipc_engine_state_shortcuts_schema_version = 3;
     c_ipc_engine_state_debug_schema_version = 4;
     c_ipc_engine_state_decimal_schema_version = 6;
-    c_ipc_engine_state_schema_version = 9;
+    c_ipc_engine_state_schema_version = 10;
     c_ipc_engine_result_schema_version = 2;
     c_ipc_payload_max_text_bytes = 1024 * 1024;
     c_ipc_payload_max_candidates = 256;
@@ -949,6 +949,7 @@ begin
         writer.WriteString(nc_normalize_punctuation_ascii_symbols(state.punctuation_ascii_symbols));
         writer.WriteByte(Ord(state.candidate_layout));
         writer.WriteByte(Ord(state.second_third_candidate_keys));
+        writer.WriteByte(Ord(state.select_character_keys));
         Result := writer.Finish;
     finally
         writer.Free;
@@ -970,6 +971,7 @@ var
     candidate_page_size: Byte;
     candidate_layout: Byte;
     second_third_candidate_keys: Byte;
+    select_character_keys: Byte;
     reserved: Word;
     reserved_byte: Byte;
 begin
@@ -982,6 +984,7 @@ begin
         candidate_page_size := Byte(state.candidate_page_size);
         candidate_layout := Ord(state.candidate_layout);
         second_third_candidate_keys := Ord(state.second_third_candidate_keys);
+        select_character_keys := Ord(sck_none);
         reserved := 0;
         reserved_byte := 0;
         Result := ReadPayloadHeaderVersion(reader, version) and
@@ -1015,6 +1018,13 @@ begin
             Result := reader.ReadByte(candidate_layout);
         if Result and (version >= 9) then
             Result := reader.ReadByte(second_third_candidate_keys);
+        if Result and (version >= 10) then
+            Result := reader.ReadByte(select_character_keys);
+        if Result and (select_character_keys > Ord(High(TncSelectCharacterKeys))) then
+        begin
+            reader.SetError('State payload contains invalid character selection keys');
+            Result := False;
+        end;
         if Result and (second_third_candidate_keys > Ord(High(TncSecondThirdCandidateKeys))) then
         begin
             reader.SetError('State payload contains invalid candidate selection keys');
@@ -1123,6 +1133,7 @@ begin
             state.candidate_page_size := candidate_page_size;
             state.candidate_layout := TncCandidateLayout(candidate_layout);
             state.second_third_candidate_keys := TncSecondThirdCandidateKeys(second_third_candidate_keys);
+            state.select_character_keys := TncSelectCharacterKeys(select_character_keys);
             state.candidate_page_key_scheme :=
                 TncCandidatePageKeyScheme(candidate_page_key_scheme);
             state.one_key_completion_key :=
@@ -1133,6 +1144,12 @@ begin
                 state.one_key_completion_key) then
             begin
                 reader.SetError('State payload contains conflicting page and completion keys');
+                Result := False;
+            end
+            else if nc_select_character_keys_conflict_with_page_keys(
+                state.select_character_keys, state.candidate_page_key_scheme) then
+            begin
+                reader.SetError('State payload contains conflicting page and character keys');
                 Result := False;
             end
             else if not ShortcutConfigIsValid(state.shortcuts) then

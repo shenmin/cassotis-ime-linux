@@ -9,7 +9,7 @@
 #define CASSOTIS_ENGINE_STATE_SHORTCUTS_SCHEMA 3U
 #define CASSOTIS_ENGINE_STATE_DEBUG_SCHEMA 4U
 #define CASSOTIS_ENGINE_STATE_DECIMAL_SCHEMA 6U
-#define CASSOTIS_ENGINE_STATE_SCHEMA 9U
+#define CASSOTIS_ENGINE_STATE_SCHEMA 10U
 #define CASSOTIS_MIN_PAGE_SIZE 3U
 #define CASSOTIS_DEFAULT_PAGE_SIZE 9U
 #define CASSOTIS_MAX_PAGE_SIZE 9U
@@ -66,6 +66,7 @@ void cassotis_engine_state_init_defaults(CassotisEngineState *state)
     state->candidate_page_key_scheme = CASSOTIS_PAGE_KEYS_MINUS_PLUS;
     state->one_key_completion_key = CASSOTIS_COMPLETION_TAB;
     state->second_third_candidate_keys = CASSOTIS_SECOND_THIRD_NONE;
+    state->select_character_keys = CASSOTIS_SELECT_CHARACTER_NONE;
     state->shortcuts.input_mode_toggle.key_code = 0x10U;
     state->shortcuts.punctuation_toggle.key_code = 0xbeU;
     state->shortcuts.punctuation_toggle.modifiers =
@@ -318,6 +319,7 @@ GByteArray *cassotis_protocol_build_set_state_request(
     append_string(payload, state->punctuation_ascii_symbols);
     append_u8(payload, (guint8)state->candidate_layout);
     append_u8(payload, (guint8)state->second_third_candidate_keys);
+    append_u8(payload, (guint8)state->select_character_keys);
     return build_frame(CASSOTIS_MESSAGE_SET_STATE, request_id, 0, 0,
                        payload);
 }
@@ -700,6 +702,7 @@ gboolean cassotis_protocol_decode_engine_state(
     guint8 candidate_page_size;
     guint8 candidate_layout = CASSOTIS_LAYOUT_AUTO;
     guint8 second_third_candidate_keys = CASSOTIS_SECOND_THIRD_NONE;
+    guint8 select_character_keys = CASSOTIS_SELECT_CHARACTER_NONE;
     guint8 reserved_byte;
     guint16 reserved;
 
@@ -755,6 +758,8 @@ gboolean cassotis_protocol_decode_engine_state(
         return FALSE;
     if (schema >= 9 && !reader_u8(&reader, &second_third_candidate_keys))
         return FALSE;
+    if (schema >= 10 && !reader_u8(&reader, &select_character_keys))
+        return FALSE;
     if (input_mode > CASSOTIS_INPUT_ENGLISH ||
         dictionary_variant > CASSOTIS_DICTIONARY_TRADITIONAL ||
         pinyin_scheme > CASSOTIS_PINYIN_ZHINENGABC ||
@@ -771,6 +776,9 @@ gboolean cassotis_protocol_decode_engine_state(
         candidate_page_size > CASSOTIS_MAX_PAGE_SIZE ||
         candidate_layout > CASSOTIS_LAYOUT_HORIZONTAL ||
         second_third_candidate_keys > CASSOTIS_SECOND_THIRD_SEMICOLON_QUOTE ||
+        select_character_keys > CASSOTIS_SELECT_CHARACTER_BRACKETS ||
+        (select_character_keys == CASSOTIS_SELECT_CHARACTER_BRACKETS &&
+         candidate_page_key_scheme == CASSOTIS_PAGE_KEYS_BRACKETS) ||
         candidate_page_key_scheme > CASSOTIS_PAGE_KEYS_SHIFT_TAB ||
         one_key_completion_key > CASSOTIS_COMPLETION_BACKTICK ||
         (candidate_page_key_scheme == CASSOTIS_PAGE_KEYS_SHIFT_TAB &&
@@ -796,6 +804,7 @@ gboolean cassotis_protocol_decode_engine_state(
     state->candidate_page_size = candidate_page_size;
     state->candidate_layout = (CassotisCandidateLayout)candidate_layout;
     state->second_third_candidate_keys = (CassotisSecondThirdCandidateKeys)second_third_candidate_keys;
+    state->select_character_keys = (CassotisSelectCharacterKeys)select_character_keys;
     state->candidate_page_key_scheme =
         (CassotisCandidatePageKeyScheme)candidate_page_key_scheme;
     state->one_key_completion_key =

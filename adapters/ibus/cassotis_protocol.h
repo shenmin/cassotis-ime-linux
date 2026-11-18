@@ -135,6 +135,11 @@ typedef enum {
     CASSOTIS_SECOND_THIRD_SEMICOLON_QUOTE = 1
 } CassotisSecondThirdCandidateKeys;
 
+typedef enum {
+    CASSOTIS_SELECT_CHARACTER_NONE = 0,
+    CASSOTIS_SELECT_CHARACTER_BRACKETS = 1
+} CassotisSelectCharacterKeys;
+
 /* Wire values must match TncCandidateLayout in nc_types. */
 typedef enum {
     CASSOTIS_LAYOUT_AUTO = 0,
@@ -202,6 +207,7 @@ typedef struct {
     CassotisCandidatePageKeyScheme candidate_page_key_scheme;
     CassotisOneKeyCompletionKey one_key_completion_key;
     CassotisSecondThirdCandidateKeys second_third_candidate_keys;
+    CassotisSelectCharacterKeys select_character_keys;
     gboolean debug_mode;
     CassotisShortcutConfig shortcuts;
 } CassotisEngineState;

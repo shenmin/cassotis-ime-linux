@@ -113,6 +113,7 @@ bool statesEqual(const CassotisEngineState &left,
                right.candidate_page_key_scheme &&
            left.one_key_completion_key == right.one_key_completion_key &&
            left.second_third_candidate_keys == right.second_third_candidate_keys &&
+           left.select_character_keys == right.select_character_keys &&
            left.debug_mode == right.debug_mode &&
            std::memcmp(&left.shortcuts, &right.shortcuts,
                        sizeof(left.shortcuts)) == 0;

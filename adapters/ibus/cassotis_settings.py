@@ -55,6 +55,7 @@ STATE_KEYS = BASE_STATE_KEYS + SHORTCUT_STATE_KEYS + (
     "auto_english", "punctuation_ascii_symbols",
     "candidate_layout",
     "second_third_candidate_keys",
+    "select_character_keys",
 )
 
 SCHEME_NAMES = (
@@ -98,6 +99,7 @@ PAGE_KEY_PREVIEWS = (
 
 COMPLETION_KEYS = ("Tab", "`")
 SECOND_THIRD_KEYS = ("关闭", "; / '（分号 / 单引号）")
+SELECT_CHARACTER_KEYS = ("关闭", "[ / ]（首字 / 尾字）")
 CANDIDATE_LAYOUTS = ("自动", "固定竖排", "固定横排")
 
 CONTROL_TIMEOUT_SECONDS = 35
@@ -184,6 +186,7 @@ DEFAULT_STATE = {
     "candidate_page_key_scheme": 0,
     "one_key_completion_key": 0,
     "second_third_candidate_keys": 0,
+    "select_character_keys": 0,
     "candidate_page_size": 9,
     "candidate_layout": 0,
     "debug_mode": 0,
@@ -200,8 +203,8 @@ DEFAULT_STATE = {
     "shortcut_disabled_mask": 0,
 }
 
-PAGE_DEFAULT_KEYS = (
-    (
+PAGE_DEFAULT_KEYS = {
+    "general": (
         "input_mode",
         "dictionary_variant",
         "pinyin_scheme",
@@ -211,18 +214,18 @@ PAGE_DEFAULT_KEYS = (
         "auto_english",
         "punctuation_ascii_symbols",
     ),
-    ("candidate_page_size", "candidate_layout"),
-    ("fuzzy_pinyin_enabled", "fuzzy_pinyin_rules"),
-    (
+    "appearance": ("candidate_page_size", "candidate_layout"),
+    "fuzzy": ("fuzzy_pinyin_enabled", "fuzzy_pinyin_rules"),
+    "keys": (
         "candidate_page_key_scheme",
         "one_key_completion_key",
         "second_third_candidate_keys",
-        *SHORTCUT_STATE_KEYS,
-        "shortcut_disabled_mask",
+        "select_character_keys",
     ),
-    (),  # User-authored content is not a preference to reset.
-    ("debug_mode",),
-)
+    "shortcuts": (*SHORTCUT_STATE_KEYS, "shortcut_disabled_mask"),
+    "phrases": (),  # User-authored content is not a preference to reset.
+    "advanced": ("debug_mode",),
+}
 
 
 class ControlError(RuntimeError):
@@ -369,6 +372,10 @@ def validate_state(state):
         raise ControlError("一键补全按键超出范围")
     if not 0 <= state["second_third_candidate_keys"] < len(SECOND_THIRD_KEYS):
         raise ControlError("二三候选快捷键超出范围")
+    if not 0 <= state["select_character_keys"] < len(SELECT_CHARACTER_KEYS):
+        raise ControlError("取首尾字快捷键超出范围")
+    if state["candidate_page_key_scheme"] == 1 and state["select_character_keys"]:
+        raise ControlError("方括号用于候选翻页时，不能同时用于取首尾字")
     if not 3 <= state["candidate_page_size"] <= 9:
         raise ControlError("每页候选数必须为 3 到 9")
     if not 0 <= state["candidate_layout"] < len(CANDIDATE_LAYOUTS):
@@ -487,26 +494,23 @@ class SettingsWindow(Gtk.ApplicationWindow):
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.add(root)
-        self.notebook = Gtk.Notebook()
-        root.pack_start(self.notebook, True, True, 0)
-        self.notebook.append_page(
-            self._build_general_page(), Gtk.Label(label="常规")
-        )
-        self.notebook.append_page(
-            self._build_appearance_page(), Gtk.Label(label="外观")
-        )
-        self.notebook.append_page(
-            self._build_fuzzy_page(), Gtk.Label(label="模糊拼音")
-        )
-        self.notebook.append_page(
-            self._build_shortcuts_page(), Gtk.Label(label="快捷键")
-        )
-        self.notebook.append_page(
-            self._build_phrases_page(), Gtk.Label(label="自定义短语")
-        )
-        self.notebook.append_page(
-            self._build_advanced_page(), Gtk.Label(label="高级")
-        )
+        self.page_area = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        root.pack_start(self.page_area, True, True, 0)
+        self.pages = Gtk.Stack()
+        sidebar = Gtk.StackSidebar()
+        sidebar.set_stack(self.pages)
+        self.page_area.pack_start(sidebar, False, False, 0)
+        self.page_area.pack_start(self.pages, True, True, 0)
+        for name, title, build in (
+            ("general", "常规", self._build_general_page),
+            ("appearance", "外观", self._build_appearance_page),
+            ("fuzzy", "模糊拼音", self._build_fuzzy_page),
+            ("keys", "按键", self._build_keys_page),
+            ("shortcuts", "快捷键", self._build_shortcuts_page),
+            ("phrases", "自定义短语", self._build_phrases_page),
+            ("advanced", "高级", self._build_advanced_page),
+        ):
+            self.pages.add_titled(build(), name, title)
 
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         footer.set_border_width(12)
@@ -624,17 +628,17 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.auto_english = Gtk.CheckButton(label="识别英文单词，空格上屏")
         self.auto_english.set_halign(Gtk.Align.START)
         self._add_row(general, 2, "英文单词", self.auto_english)
+        self.full_width = Gtk.CheckButton(label="使用全角字符")
+        self.full_width.set_halign(Gtk.Align.START)
+        self._add_row(general, 3, "字符宽度", self.full_width)
 
-        typography = self._new_section("字符与标点")
+        typography = self._new_section("标点")
         content.pack_start(typography, False, False, 0)
         self.punctuation = self._combo(("中文标点", "英文标点"))
         self._add_row(typography, 0, "标点", self.punctuation)
-        self.full_width = Gtk.CheckButton(label="使用全角字符")
-        self.full_width.set_halign(Gtk.Align.START)
-        self._add_row(typography, 1, "字符宽度", self.full_width)
         self.decimal_period = Gtk.CheckButton(label="数字后句号使用小数点")
         self.decimal_period.set_halign(Gtk.Align.START)
-        self._add_row(typography, 2, "小数点", self.decimal_period)
+        self._add_row(typography, 1, "小数点", self.decimal_period)
         self.ascii_symbols = Gtk.Entry()
         self.ascii_symbols.set_tooltip_text("列出的标点在中文标点、半角字符模式下使用半角")
         self.ascii_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -648,7 +652,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         buttons.pack_start(preset, False, False, 0)
         buttons.pack_start(clear, False, False, 0)
         self.ascii_box.pack_start(buttons, False, False, 0)
-        self._add_row(typography, 3, "半角标点", self.ascii_box)
+        self._add_row(typography, 2, "半角标点", self.ascii_box)
         self.punctuation.connect("changed", self._update_ascii_sensitivity)
         self.full_width.connect("toggled", self._update_ascii_sensitivity)
         return page
@@ -694,7 +698,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.fuzzy_checks.append(check)
         return page
 
-    def _build_shortcuts_page(self):
+    def _build_keys_page(self):
         page, content = self._new_page()
         paging = self._new_section("候选翻页")
         content.pack_start(paging, False, False, 0)
@@ -708,18 +712,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.page_next.set_xalign(0)
         self._add_row(paging, 2, "下一页", self.page_next)
 
-        completion = self._new_section("一键补全")
-        content.pack_start(completion, False, False, 0)
-        self.completion_key = self._combo(COMPLETION_KEYS)
-        self.completion_key.connect("changed", self._completion_key_changed)
-        self._add_row(completion, 0, "快捷键", self.completion_key)
-        hint = Gtk.Label(
-            label="输入至少两个完整音节后，根据词库与本地语言模型提供补全。Tab 用作一键补全时，不能同时选择 Tab/Shift+Tab 翻页。"
-        )
-        hint.set_xalign(0)
-        hint.set_line_wrap(True)
-        self._add_row(completion, 1, "说明", hint)
-
         selection = self._new_section("二三候选")
         content.pack_start(selection, False, False, 0)
         self.second_third_keys = self._combo(SECOND_THIRD_KEYS)
@@ -729,6 +721,26 @@ class SettingsWindow(Gtk.ApplicationWindow):
             xalign=0, wrap=True)
         self._add_row(selection, 1, "说明", selection_hint)
 
+        character = self._new_section("以词取字")
+        content.pack_start(character, False, False, 0)
+        self.character_keys = self._combo(SELECT_CHARACTER_KEYS)
+        self._add_row(character, 0, "快捷键", self.character_keys)
+        self._add_row(character, 1, "说明", Gtk.Label(
+            label="输入拼音时，用 [ 或 ] 上屏当前候选的首字或尾字。使用方括号翻页时不可用。",
+            xalign=0, wrap=True))
+
+        completion = self._new_section("一键补全")
+        content.pack_start(completion, False, False, 0)
+        self.completion_key = self._combo(COMPLETION_KEYS)
+        self.completion_key.connect("changed", self._completion_key_changed)
+        self._add_row(completion, 0, "快捷键", self.completion_key)
+        self._add_row(completion, 1, "说明", Gtk.Label(
+            label="输入至少两个完整音节后可提供补全。Tab 用作一键补全时，不能同时用于翻页。",
+            xalign=0, wrap=True))
+        return page
+
+    def _build_shortcuts_page(self):
+        page, content = self._new_page()
         shortcuts = self._new_section("功能快捷键")
         content.pack_start(shortcuts, False, False, 0)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -932,7 +944,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
     def _build_advanced_page(self):
         page, content = self._new_page()
         diagnostics = self._new_section("诊断")
-        content.pack_start(diagnostics, False, False, 0)
         self.debug_mode = Gtk.CheckButton(label="在候选注释中显示调试信息")
         self.debug_mode.set_halign(Gtk.Align.START)
         self._add_row(diagnostics, 0, "调试模式", self.debug_mode)
@@ -962,6 +973,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         warning.set_xalign(0)
         warning.set_line_wrap(True)
         self._add_row(data, 2, "说明", warning)
+        content.pack_start(diagnostics, False, False, 0)
         return page
 
     def _update_fuzzy_sensitivity(self, _widget=None):
@@ -975,6 +987,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if self.page_keys.get_active() == 3 and self.completion_key.get_active() == 0:
             self.completion_key.set_active(1)
         index = self.page_keys.get_active()
+        self.character_keys.set_sensitive(index != 1)
+        if index == 1:
+            self.character_keys.set_active(0)
         if 0 <= index < len(PAGE_KEY_PREVIEWS):
             previous, next_key = PAGE_KEY_PREVIEWS[index]
             self.page_previous.set_text(previous)
@@ -1024,6 +1039,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         )
         self.debug_mode.set_active(bool(state["debug_mode"]))
         self._set_combo_value(self.second_third_keys, state["second_third_candidate_keys"])
+        self._set_combo_value(self.character_keys, state["select_character_keys"])
         for index, (prefix, _caption) in enumerate(SHORTCUTS):
             modifier, key, enabled = self.shortcut_widgets[prefix]
             self._set_combo_value(
@@ -1067,6 +1083,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             "candidate_page_key_scheme": self._combo_value(self.page_keys),
             "one_key_completion_key": self._combo_value(self.completion_key),
             "second_third_candidate_keys": self._combo_value(self.second_third_keys),
+            "select_character_keys": self._combo_value(self.character_keys),
             "candidate_page_size": self._combo_value(
                 self.candidate_page_size
             ),
@@ -1090,7 +1107,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         return merge_visible_state(self.loaded_state, changes)
 
     def _set_busy(self, busy, message):
-        self.notebook.set_sensitive(not busy)
+        self.page_area.set_sensitive(not busy)
         self.defaults_button.set_sensitive(not busy)
         self.apply_button.set_sensitive(not busy)
         self.ok_button.set_sensitive(not busy)
@@ -1182,15 +1199,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
         )
 
     def _restore_defaults(self, _button):
-        page_index = self.notebook.get_current_page()
-        if not 0 <= page_index < len(PAGE_DEFAULT_KEYS):
-            return
-        keys = PAGE_DEFAULT_KEYS[page_index]
+        keys = PAGE_DEFAULT_KEYS.get(self.pages.get_visible_child_name(), ())
         if not keys:
             self.status.set_text("当前页没有可恢复的跨平台设置")
             return
-        tab = self.notebook.get_nth_page(page_index)
-        caption = self.notebook.get_tab_label_text(tab)
+        caption = self.pages.child_get_property(self.pages.get_visible_child(), "title")
         dialog = Gtk.MessageDialog(
             transient_for=self,
             modal=True,

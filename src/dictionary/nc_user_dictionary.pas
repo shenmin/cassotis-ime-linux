@@ -125,12 +125,16 @@ begin
         FConnection.Exec('CREATE TABLE IF NOT EXISTS dict_user_stats (' +
         'pinyin TEXT NOT NULL, text TEXT NOT NULL, ' +
         'commit_count INTEGER DEFAULT 0, last_used INTEGER DEFAULT 0, ' +
+        'previous_used INTEGER DEFAULT 0, ' +
         'PRIMARY KEY(pinyin, text));') and
         FConnection.Exec('CREATE INDEX IF NOT EXISTS ' +
         'idx_dict_user_stats_pinyin ON dict_user_stats(pinyin);') and
         FConnection.Exec('CREATE TABLE IF NOT EXISTS dict_user_query_latest (' +
         'query_pinyin TEXT NOT NULL PRIMARY KEY, text TEXT NOT NULL, ' +
         'last_used INTEGER DEFAULT 0);');
+    if Result and not FConnection.Exec('SELECT previous_used FROM dict_user_stats LIMIT 0;') then
+        Result := FConnection.Exec('ALTER TABLE dict_user_stats ADD COLUMN previous_used INTEGER DEFAULT 0;')
+            or FConnection.Exec('SELECT previous_used FROM dict_user_stats LIMIT 0;');
     if not Result then
         FErrorMessage := FConnection.Errmsg;
 end;
@@ -335,6 +339,7 @@ const
         'VALUES (?1, ?2, 1, strftime(''%s'',''now'')) ' +
         'ON CONFLICT(pinyin, text) DO UPDATE SET ' +
         'commit_count = commit_count + 1, ' +
+        'previous_used = dict_user_stats.last_used, ' +
         'last_used = excluded.last_used;';
     c_upsert_latest = 'INSERT INTO dict_user_query_latest ' +
         '(query_pinyin, text, last_used) ' +
@@ -431,6 +436,7 @@ const
         '''setting.candidate_page_key_scheme'', ' +
         '''setting.one_key_completion_key'', ' +
         '''setting.second_third_candidate_keys'', ' +
+        '''setting.select_character_keys'', ' +
         '''setting.debug_mode'', ' +
         '''setting.shortcut_disabled_mask'', ' +
         '''setting.shortcut.input_mode.key'', ' +
@@ -540,6 +546,10 @@ begin
                 (setting_value >= Ord(Low(TncSecondThirdCandidateKeys))) and
                 (setting_value <= Ord(High(TncSecondThirdCandidateKeys))) then
                 state.second_third_candidate_keys := TncSecondThirdCandidateKeys(setting_value)
+            else if (key_name = 'setting.select_character_keys') and
+                (setting_value >= Ord(Low(TncSelectCharacterKeys))) and
+                (setting_value <= Ord(High(TncSelectCharacterKeys))) then
+                state.select_character_keys := TncSelectCharacterKeys(setting_value)
             else if (key_name = 'setting.shortcut_disabled_mask') and
                 (setting_value >= 0) and (setting_value <= 31) then
             begin
@@ -583,6 +593,8 @@ begin
         state.candidate_page_key_scheme :=
             nc_resolve_candidate_page_key_scheme(
             state.candidate_page_key_scheme, state.one_key_completion_key);
+        state.select_character_keys := nc_resolve_select_character_keys(
+            state.select_character_keys, state.candidate_page_key_scheme);
         nc_normalize_shortcut_config(state.shortcuts);
         FErrorMessage := '';
         Result := True;
@@ -648,6 +660,9 @@ begin
         ExecutePairStatement(c_upsert_setting,
         'setting.second_third_candidate_keys', UTF8Decode(IntToStr(
         Ord(state.second_third_candidate_keys)))) and
+        ExecutePairStatement(c_upsert_setting, 'setting.select_character_keys',
+        UTF8Decode(IntToStr(Ord(nc_resolve_select_character_keys(
+        state.select_character_keys, state.candidate_page_key_scheme))))) and
         ExecutePairStatement(c_upsert_setting, 'setting.debug_mode',
         UTF8Decode(IntToStr(Ord(state.debug_mode)))) and
         ExecutePairStatement(c_upsert_setting, 'setting.shortcut_disabled_mask',

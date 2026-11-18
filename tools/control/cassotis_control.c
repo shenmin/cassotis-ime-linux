@@ -100,6 +100,7 @@ static void print_state(const CassotisEngineState *state)
     g_print("punctuation_ascii_symbols=%s\n", state->punctuation_ascii_symbols);
     g_print("candidate_layout=%u\n", (guint)state->candidate_layout);
     g_print("second_third_candidate_keys=%u\n", (guint)state->second_third_candidate_keys);
+    g_print("select_character_keys=%u\n", (guint)state->select_character_keys);
 }
 
 static void print_usage(const gchar *program_name)
@@ -111,7 +112,7 @@ static void print_usage(const gchar *program_name)
         "       [PAGE_KEYS COMPLETION_KEY [PAGE_SIZE DEBUG] "
         "INPUT_KEY INPUT_MOD PUNCT_KEY PUNCT_MOD "
         "DICT_KEY DICT_MOD WIDTH_KEY WIDTH_MOD SETTINGS_KEY SETTINGS_MOD "
-        "[DISABLED_MASK [DECIMAL_PERIOD [AUTO_ENGLISH ASCII_SYMBOLS [LAYOUT [SECOND_THIRD_KEYS]]]]]]\n"
+        "[DISABLED_MASK [DECIMAL_PERIOD [AUTO_ENGLISH ASCII_SYMBOLS [LAYOUT [SECOND_THIRD_KEYS [SELECT_CHARACTER_KEYS]]]]]]]\n"
         "  %s ping\n"
         "  %s clear-user-dictionary\n"
         "  %s shutdown\n",
@@ -186,7 +187,7 @@ int main(int argc, char **argv)
             print_state(&state);
     } else if ((g_strcmp0(argv[1], "set-state") == 0 || preferences) &&
                (argc == 9 || argc == 21 || argc == 23 || argc == 24 ||
-                argc == 25 || argc == 27 || argc == 28 || argc == 29)) {
+                argc == 25 || argc == 27 || argc == 28 || argc == 29 || argc == 30)) {
         cassotis_engine_state_init_defaults(&state);
         if (!cassotis_client_get_state(&client, &state, &error))
             goto done;
@@ -305,7 +306,7 @@ int main(int argc, char **argv)
             }
             state.candidate_layout = (CassotisCandidateLayout)layout;
         }
-        if (argc == 29) {
+        if (argc >= 29) {
             guint32 selection_keys;
             if (!parse_uint(argv[28], CASSOTIS_SECOND_THIRD_SEMICOLON_QUOTE,
                             &selection_keys)) {
@@ -315,6 +316,17 @@ int main(int argc, char **argv)
             }
             state.second_third_candidate_keys = (CassotisSecondThirdCandidateKeys)selection_keys;
         }
+        if (argc == 30) {
+            guint32 keys;
+            if (!parse_uint(argv[29], CASSOTIS_SELECT_CHARACTER_BRACKETS, &keys)) {
+                g_set_error_literal(&error, cassotis_client_error_quark(), 1,
+                                    "character selection keys must be 0..1");
+                goto done;
+            }
+            state.select_character_keys = (CassotisSelectCharacterKeys)keys;
+        }
+        if (state.candidate_page_key_scheme == CASSOTIS_PAGE_KEYS_BRACKETS)
+            state.select_character_keys = CASSOTIS_SELECT_CHARACTER_NONE;
         if (preferences) {
             phrases = read_phrases(&error);
             if (phrases == NULL)

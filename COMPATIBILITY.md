@@ -16,6 +16,28 @@ preserved. This verifies the installer fix, not full Fedora input-framework or
 application compatibility. It does not repair directory attributes damaged by
 an older installer; see the [system-install warning](README.md#system-installation).
 
+## v2.8.0 Validation
+
+On 2026-11-18 (UTC+8), both Ubuntu 26.04.1 architectures passed the four
+full-corpus suites with the v2.8.0 dictionaries and the unmodified model
+weights. See [measurements](BENCHMARK.md) / [中文](BENCHMARK.CN.md).
+
+| Architecture | Core tests | Process-cold first / maximum key (ms) | Blocked-model first / maximum key (ms) | Idle RSS (MiB) |
+| --- | ---: | ---: | ---: | ---: |
+| x86_64 | 1,029 | 4.633 / 29.855 | 4.366 / 26.235 | 285.9 |
+| aarch64 | 1,029 | 4.501 / 77.920 | 4.620 / 25.711 | 291.8 |
+
+Cold trials used new production processes and 41 keys, without flushing OS
+file caches. Idle RSS is the separate engine lifecycle test, not peak memory.
+
+Coverage includes migration of older user statistics without fabricating a
+second selection, the two-hour preference window, simplified and traditional
+candidate replay, and optional first/last-character selection in IBus and
+Fcitx 5. Native model tests cover score stability when recent output rows are
+reused or evicted. Settings and input were exercised in isolated sessions;
+desktop focus, visual positioning and individual applications were not all
+manually retested.
+
 ## v2.7.0 Validation
 
 The 2026-11-11 (UTC+8) validation uses the v2.7.0 engine, updated shared

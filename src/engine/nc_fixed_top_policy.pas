@@ -20,11 +20,12 @@ type
     end;
 
 const
-    c_fixed_top: array[0..34] of TFixedTopEntry = (
+    c_fixed_top: array[0..36] of TFixedTopEntry = (
         (pinyin:'en'; simplified:#$55EF; traditional:#$55EF),
         (pinyin:'ba'; simplified:#$5427; traditional:#$5427),
         (pinyin:'e'; simplified:#$5443; traditional:#$5443),
         (pinyin:'o'; simplified:#$54E6; traditional:#$54E6),
+        (pinyin:'oo'; simplified:#$54E6#$54E6; traditional:#$54E6#$54E6),
         (pinyin:'ai'; simplified:#$5509; traditional:#$5509),
         (pinyin:'ha'; simplified:#$54C8; traditional:#$54C8),
         (pinyin:'xi'; simplified:#$563B; traditional:#$563B),
@@ -43,6 +44,12 @@ const
         (pinyin:'qing'; simplified:#$8BF7; traditional:#$8ACB),
         (pinyin:'you'; simplified:#$6709; traditional:#$6709),
         (pinyin:'zheshi'; simplified:#$8FD9#$662F; traditional:#$9019#$662F),
+        // 只讨 before 指套 and 制陶 (the user, 2026-11-16: "只讨>指套>制陶"). No
+        // weight gives it: without a context the short-word choice took 制陶 first
+        // at every weight tried (只讨 1000, 制陶 10), from the LM and the general
+        // text (制陶 1,213, 指套 229, 只讨 13 occurrences). 指套 weighs more than
+        // 制陶 in the lexicon, so the page goes on 指套 制陶.
+        (pinyin:'zhitao'; simplified:#$53EA#$8BA8; traditional:#$53EA#$8A0E),
         (pinyin:'zai'; simplified:#$5728; traditional:#$5728),
         (pinyin:'wo'; simplified:#$6211; traditional:#$6211),
         (pinyin:'ni'; simplified:#$4F60; traditional:#$4F60),

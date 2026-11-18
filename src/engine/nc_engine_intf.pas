@@ -1162,6 +1162,8 @@ type
             const query_key: string): string;
         function get_base_exact_choice_weight_bonus(const query_key: string;
             const candidate_text: string): Integer;
+        function is_recent_repeated_exact_choice(const query_key: string;
+            const candidate_text: string): Boolean;
         function normalize_learned_prefix_exact_scores(const query_key: string;
             var candidates: TncCandidateList): Boolean;
         procedure clear_session_learning_after_user_removal;
@@ -3750,6 +3752,19 @@ begin
     end;
     // Ordinal, as on Windows: a locale collation reorders equal scores.
     Result := CompareStr(left.text, right.text);
+end;
+
+function TncEngine.is_recent_repeated_exact_choice(const query_key: string;
+    const candidate_text: string): Boolean;
+begin
+    // A word of the key the user has just chosen twice goes first for a while,
+    // whatever its weight (the user, 2026-11-15: 五笔 stayed third behind 无比
+    // and 务必, whose weights the bounded learning above could never pass).
+    // Single characters keep the order of their own page.
+    Result := (m_dictionary <> nil) and (Trim(candidate_text) <> '') and
+        is_full_pinyin_key(query_key) and
+        (get_candidate_text_unit_count(Trim(candidate_text)) >= 2) and
+        m_dictionary.is_recent_repeated_query_choice(query_key, Trim(candidate_text));
 end;
 
 function TncEngine.normalize_learned_prefix_exact_scores(const query_key: string;
@@ -6467,6 +6482,25 @@ begin
     if m_lookup_segment_path_context_bonus_cache <> nil then
     begin
         m_lookup_segment_path_context_bonus_cache.Clear;
+    end;
+end;
+
+// One Han character (a surrogate pair counts as one).
+function is_single_han_char_text(const text: string): Boolean;
+var
+    code: Integer;
+begin
+    Result := False;
+    if Length(text) = 1 then
+    begin
+        code := Ord(text[1]);
+        Result := ((code >= $3400) and (code <= $9FFF)) or
+            ((code >= $F900) and (code <= $FAFF));
+    end
+    else if Length(text) = 2 then
+    begin
+        Result := (Ord(text[1]) >= $D800) and (Ord(text[1]) <= $DBFF) and
+            (Ord(text[2]) >= $DC00) and (Ord(text[2]) <= $DFFF);
     end;
 end;
 
@@ -9661,6 +9695,10 @@ begin
     else if capital then
         // Typed with Shift: nobody writes pinyin that way.
         offer(True)
+    else if (raw = 'oo') and (shown_reading = #$54E6#$54E6) then
+        // The fixed Chinese interjection wins over counted English "oo",
+        // including an earlier raw commit. Manual selection still works.
+        offer(False)
     else if reading_is_user and not learned then
         // The user's own word for this input.
     else if learned and not complete then
@@ -21920,6 +21958,13 @@ var
             if not is_complete_exact_local(candidates[idx_local]) then
             begin
                 Continue;
+            end;
+            // A word the user has just chosen twice leads (is_recent_repeated_exact_choice).
+            if is_recent_repeated_exact_choice(normalize_pinyin_text(lookup_text),
+                candidates[idx_local].text) then
+            begin
+                best_idx_local := idx_local;
+                Break;
             end;
 
             rank_local := get_exact_rank_local(candidates[idx_local]);
@@ -138519,10 +138564,17 @@ end;
 // uses each). The first sixteen characters of the page take the places they
 // hold; words and partials on the page keep theirs. It needs no token of its
 // own: the context's last token is the one the next call runs from anyway, and
-// the graph run reads every character's score off that one row.
+// the graph run reads every character's score off that one row. In the
+// traditional variant the model reads a character as its simplified form, so
+// one further down the page that is the other form of a character of the
+// sixteen has that one's score: it is ordered with them and takes its own
+// place among theirs (隻 of zhi, read as 只; 製 as 制). Not a form Taiwan does
+// not write (裏 of 裡, 説 of 說): it would stand behind its twin as well.
 function TncEngine.order_single_chars_by_lm(const context, query: string): Boolean;
 const
     c_single_char_lm_count = 16;
+    // The most characters one call asks about (nc_lm_score_next_query).
+    c_single_char_lm_max = 64;
     // 0.25 * ln(10) / 100: a weight 100 higher is worth 0.58 nats.
     c_single_char_weight_nats = 0.0057565;
     // A character outside the model's vocabulary follows those it can read.
@@ -138537,10 +138589,11 @@ var
     moved: TncCandidateList;
     moved_paths: TArray<string>;
     key, text, head, tail: string;
-    idx, count, tail_length, best, other: Integer;
+    idx, count, window, tail_length, best, other: Integer;
     used: TArray<Boolean>;
-    known: Boolean;
+    known, traditional: Boolean;
     value: Single;
+    window_texts, window_forms: TArray<string>;
 
     function asked_index(const asked_text: string): Integer;
     begin
@@ -138548,6 +138601,21 @@ var
         while (Result < Length(m_single_char_lm_texts)) and
             (m_single_char_lm_texts[Result] <> asked_text) do
             Inc(Result);
+    end;
+
+    function form_of_window_char(const candidate_text: string): Boolean;
+    var
+        at: Integer;
+        form: string;
+    begin
+        Result := False;
+        if Length(candidate_text) <> 1 then
+            Exit;
+        form := nc_traditional_to_simplified(candidate_text);
+        for at := 0 to High(window_texts) do
+            if (window_forms[at] = form) and (Length(window_texts[at]) = 1) and
+                nc_traditional_forms_of_one(candidate_text[1], window_texts[at][1]) then
+                Exit(True);
     end;
 
 begin
@@ -138563,15 +138631,30 @@ begin
         (m_dictionary.get_context_query_choice_bonus(context, query,
         Trim(m_candidates[0].text)) > 0)) then
         Exit;
+    traditional := m_config.dictionary_variant = dv_traditional;
     count := 0;
-    SetLength(slots, c_single_char_lm_count);
-    SetLength(texts, c_single_char_lm_count);
+    window := 0;
+    SetLength(slots, c_single_char_lm_max);
+    SetLength(texts, c_single_char_lm_max);
     for idx := 0 to High(m_candidates) do
     begin
-        if count >= c_single_char_lm_count then Break;
+        if (count >= c_single_char_lm_max) or
+            ((window >= c_single_char_lm_count) and not traditional) then
+            Break;
         text := Trim(m_candidates[idx].text);
         if (text = '') or (Trim(m_candidates[idx].comment) <> '') or
             (get_candidate_text_unit_count(text) <> 1) then
+            Continue;
+        if window < c_single_char_lm_count then
+        begin
+            if traditional then
+            begin
+                window_texts := window_texts + [text];
+                window_forms := window_forms + [nc_traditional_to_simplified(text)];
+            end;
+            Inc(window);
+        end
+        else if not form_of_window_char(text) then
             Continue;
         slots[count] := idx;
         texts[count] := text;
@@ -139959,13 +140042,20 @@ var
     end;
 
     // A draft as the LM scores it as a clause of its own: with a comma behind
-    // it, or a question mark where it ends in mei (c_question_end).
-    function as_clause(const text: string): string;
+    // it, or a question mark where it ends in 没 read mei (c_question_end) by
+    // the syllables of its reading. 没 read mo ends a word (淹没, 沉没) and keeps
+    // the comma. Whether 没 stands as a word of its own is no test: the
+    // dictionary holds the questions themselves as words (了没, 吃了没, 来了没).
+    function as_clause(const text: string; const reading_index: Integer): string;
+    var syllables_local: TArray<string>;
     begin
-        if Copy(text, Length(text), 1) = variant_char($6CA1, $6C92) then
-            Result := text + c_question_end
-        else
-            Result := text + c_clause_end;
+        Result := text + c_clause_end;
+        if (Copy(text, Length(text), 1) <> variant_char($6CA1, $6C92)) or
+            (reading_index < 0) or (reading_index >= Length(readings)) then Exit;
+        syllables_local := readings[reading_index];
+        if (Length(syllables_local) = Length(text)) and
+            (syllables_local[High(syllables_local)] = 'mei') then
+            Result := text + c_question_end;
     end;
 
     // The lowest word frequency score among the words of a text, its longest
@@ -140301,7 +140391,7 @@ begin
             SetLength(ended, 2 * Length(drafts));
             for index := 0 to High(drafts) do
             begin
-                ended[index] := as_clause(drafts[index]);
+                ended[index] := as_clause(drafts[index], draft_readings[index]);
                 ended[Length(drafts) + index] := drafts[index];
             end;
             // And, where the model reads the next characters' scores, the
@@ -140422,6 +140512,15 @@ begin
                     (scores[order[0]] - scores[best_index] <= c_rare_first_margin) and
                     rests_on_rarer_word(drafts[order[0]], drafts[best_index]) then
                     put_first(best_index);
+                // The page's own phrase goes back first where the corpus
+                // transitions hold its path for the input and not the
+                // choice's, and the choice does not lead it without the
+                // comma: the comma alone put the choice first (合并到,
+                // which ends no clause, under 何病倒 for "hebingdao").
+                if top_complete and (drafts[0] = top_text) and (order[0] <> 0) and
+                    vouched[0] and not vouched[order[0]] and
+                    (plain_scores[0] >= plain_scores[order[0]]) then
+                    put_first(0);
             end
             else
                 scored := 0;
@@ -140464,7 +140563,7 @@ begin
         if judged then
         begin
             try
-                if m_char_lm.score_texts(lm_context, [as_clause(corrected)], 1, 128,
+                if m_char_lm.score_texts(lm_context, [as_clause(corrected, chosen_reading)], 1, 128,
                     corrected_scores) = 1 then
                 begin
                     if context_free then
@@ -154773,6 +154872,14 @@ begin
 
     Inc(m_session_commit_serial);
 
+    // A single character learns by the dictionary's recent repeated choice
+    // alone (is_recent_repeated_query_choice), which ends two hours after the
+    // last choice: the session keeps no count of it.
+    if is_single_han_char_text(text_key) then
+    begin
+        Exit;
+    end;
+
     if m_session_text_counts.TryGetValue(text_key, count) then
     begin
         Inc(count);
@@ -154819,7 +154926,8 @@ var
     current_serial: Int64;
 begin
     key := build_session_query_choice_key(normalize_pinyin_text(query_key), text);
-    if (key = '') or (m_session_query_choice_counts = nil) or (m_session_query_choice_order = nil) then
+    if (key = '') or (m_session_query_choice_counts = nil) or (m_session_query_choice_order = nil) or
+        is_single_han_char_text(Trim(text)) then
     begin
         Exit;
     end;
@@ -155056,7 +155164,8 @@ var
     persist_choice: Boolean;
 begin
     if (Trim(context_text) = '') or (Trim(query_key) = '') or (Trim(text) = '') or
-        (m_session_context_query_choice_counts = nil) or (m_session_context_query_choice_order = nil) then
+        (m_session_context_query_choice_counts = nil) or (m_session_context_query_choice_order = nil) or
+        is_single_han_char_text(Trim(text)) then
     begin
         Exit;
     end;
@@ -155385,6 +155494,7 @@ end;
 
 function TncEngine.process_key(const key_code: Word; const key_state: TncKeyState): Boolean;
 var
+    last_character: Boolean;
     key_char: Char;
     display_key_char: Char;
     index: Integer;
@@ -156772,6 +156882,28 @@ begin
             if get_selected_candidate(candidate, True) then
             begin
                 Exit(apply_candidate_selection(candidate, index, True, True));
+            end;
+        end;
+        Exit(True);
+    end;
+
+    // [ and ] commit the first and the last character of the selected
+    // candidate and end the composition, the rest of the input with it (off by
+    // default; the bracket paging scheme keeps the keys). The character does
+    // not read the input, so the commit teaches nothing: it takes the path of
+    // a quick-input commit, which learns no choice, path or adjacent pair.
+    if (m_composition_text <> '') and (m_quick_input.kind = qik_none) and
+        nc_select_character_key_side(m_config.select_character_keys,
+        m_config.candidate_page_key_scheme, key_code, key_state, last_character) then
+    begin
+        if (not m_raw_input_selected) and get_selected_candidate(candidate, True) then
+        begin
+            commit_text := nc_select_character_of_text(candidate.text, last_character);
+            if commit_text <> '' then
+            begin
+                set_pending_commit(commit_text, '', False, '', False, '', False,
+                    False, '', True);
+                m_quick_input.pending_commit := True;
             end;
         end;
         Exit(True);
@@ -159561,6 +159693,8 @@ var
             low_frequency_medical_exact: Boolean;
             nocontext_exact_priority: Integer;
             context_exact_priority: Integer;
+            // The user has just chosen it twice (is_recent_repeated_exact_choice).
+            recent_choice: Boolean;
         end;
     var
         exact_results: TncCandidateList;
@@ -160911,6 +161045,7 @@ var
             item.actual_full_exact := candidate_is_actual_full_exact_local(
                 candidate_value);
             item.user_full_exact := False;
+            item.recent_choice := False;
             item.decisive_transition_override := False;
             item.transition_evidence := 0;
             item.low_frequency_medical_exact := False;
@@ -161094,6 +161229,8 @@ var
                         end;
                         item.rank_score := local_direct_exact_rank;
                     end;
+                    item.recent_choice := is_recent_repeated_exact_choice(
+                        normalized_pinyin, local_text);
 
                     if local_exact_user then
                     begin
@@ -161157,6 +161294,11 @@ var
             function compare_items(const left,
                 right: TShortExactRankItem): Integer;
     begin
+        if left.recent_choice <> right.recent_choice then
+        begin
+            if left.recent_choice then Exit(-1);
+            Exit(1);
+        end;
         if left.user_full_exact <> right.user_full_exact then
         begin
             if left.user_full_exact then
@@ -189014,6 +189156,7 @@ end;
 
 function TncEngine.should_handle_key(const key_code: Word; const key_state: TncKeyState): Boolean;
 var
+    last_character: Boolean;
     key_char: Char;
     display_key_char: Char;
     punct_char: Char;
@@ -189073,6 +189216,15 @@ begin
         nc_second_third_candidate_key_index(
         m_config.second_third_candidate_keys, key_code, key_state,
         selection_index) then
+    begin
+        Result := True;
+        Exit;
+    end;
+
+    if (m_composition_text <> '') and (m_quick_input.kind = qik_none) and
+        nc_select_character_key_side(m_config.select_character_keys,
+        m_config.candidate_page_key_scheme, key_code, key_state,
+        last_character) then
     begin
         Result := True;
         Exit;

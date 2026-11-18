@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.8.0 - Unreleased
+
+- Optionally commit the first or last character of the highlighted candidate
+  with `[` or `]`. Bracket paging takes precedence; extraction does not train
+  the user dictionary.
+- The GTK settings sidebar separates candidate keys from function shortcuts.
+  Restoring defaults on either page leaves the other page's bindings intact.
+- Repeated exact-key selections can temporarily lead subsequent queries. A
+  different choice cancels this preference; a one-off single character does
+  not become the default.
+- Use the pronunciation of sentence-final 没/沒 to distinguish questions
+  from statements and prefer the dictionary's 哦哦 for lowercase `oo`.
+- Preserve short phrases supported by both corpus paths and the language
+  model. Include traditional variants outside the initial scoring window,
+  and reuse already-computed next-character scores during single-syllable input.
+- Update the simplified and traditional dictionaries to Cassotis Lexicon
+  v2.8.0, including everyday and air-travel expressions and traditional
+  character usage frequencies. The neural model weights are unchanged.
+
 ## 2.7.0 - 2026-11-11
 
 - Align the engine and dictionaries with Cassotis IME and Cassotis Lexicon v2.7.0.
