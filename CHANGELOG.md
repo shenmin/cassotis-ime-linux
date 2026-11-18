@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.8.0 - Unreleased
+## 2.8.0 - 2026-11-18
 
 - Optionally commit the first or last character of the highlighted candidate
   with `[` or `]`. Bracket paging takes precedence; extraction does not train
