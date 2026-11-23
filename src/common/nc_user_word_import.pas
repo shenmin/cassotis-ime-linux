@@ -18,6 +18,9 @@ type
 function nc_parse_user_word_import(const content: string;
     out entries: TncUserWordImportEntries; out skipped: Integer): Boolean;
 function nc_read_user_word_import_file(const path: string; out content: string): Boolean;
+function nc_format_user_word_line(const entry: TncUserWordImportEntry; out line: string): Boolean;
+function nc_write_user_word_export_file(const path: string; const entries: TncUserWordImportEntries;
+    out written: Integer): Boolean;
 
 implementation
 
@@ -185,6 +188,80 @@ begin
     except
         content := '';
     end;
+end;
+
+function nc_format_user_word_line(const entry: TncUserWordImportEntry; out line: string): Boolean;
+var parsed: TncUserWordImportEntries; skipped: Integer;
+begin
+    line := '';
+    if (entry.text = '') or (entry.pinyin = '') or (entry.count <= 0) then Exit(False);
+    line := entry.text + ',' + entry.pinyin + ',' + IntToStr(entry.count);
+    Result := nc_parse_user_word_import(line, parsed, skipped) and (Length(parsed) = 1) and
+        (parsed[0].text = entry.text) and (parsed[0].pinyin = entry.pinyin) and
+        (parsed[0].count = entry.count);
+    if not Result then line := '';
+end;
+
+function nc_write_user_word_export_file(const path: string; const entries: TncUserWordImportEntries;
+    out written: Integer): Boolean;
+var
+    dest, temp: UTF8String;
+    guid: TGUID;
+    entry: TncUserWordImportEntry;
+    line, extension: string;
+    stream: THandleStream;
+    fd: THandle;
+    count: Integer;
+    {$ifdef UNIX}info: Stat;{$endif}
+    procedure emit(const data: RawByteString);
+    begin
+        if stream.Position + Length(data) > 16 * 1024 * 1024 then
+            raise EStreamError.Create('Export exceeds import size limit');
+        if data <> '' then stream.WriteBuffer(data[1], Length(data));
+    end;
+begin
+    Result := False;
+    written := 0;
+    if (path = '') or (Pos(#0, path) <> 0) or (CreateGUID(guid) <> 0) then Exit;
+    extension := LowerCase(ExtractFileExt(path));
+    if (extension <> '.csv') and (extension <> '.tsv') and (extension <> '.txt') then Exit;
+    dest := UTF8Encode(path);
+    {$ifdef UNIX}
+    if (fpLStat(dest, info) = 0) and not FPS_ISREG(info.st_mode) then Exit;
+    {$endif}
+    temp := ExtractFilePath(dest) + '.cassotis-words-' + UTF8Encode(GUIDToString(guid));
+    {$ifdef UNIX}
+    fd := fpOpen(temp, O_WRONLY or O_CREAT or O_EXCL, &600);
+    {$else}
+    fd := FileCreate(temp);
+    {$endif}
+    if fd = THandle(-1) then Exit;
+    try
+        try
+            stream := THandleStream.Create(fd);
+            try
+                emit(UTF8Encode(UnicodeString(#$FEFF)));
+                emit(UTF8Encode('# Cassotis IME user words, ' + FormatDateTime('yyyy-mm-dd hh:nn', Now) +
+                    ': text,pinyin,count' + #13#10));
+                count := 0;
+                for entry in entries do
+                    if nc_format_user_word_line(entry, line) then
+                    begin
+                        emit(UTF8Encode(line + #13#10));
+                        Inc(count);
+                    end;
+            finally
+                stream.Free;
+            end;
+        finally
+            FileClose(fd);
+        end;
+        Result := RenameFile(temp, dest);
+        if Result then written := count;
+    except
+        Result := False;
+    end;
+    if not Result then DeleteFile(temp);
 end;
 
 end.

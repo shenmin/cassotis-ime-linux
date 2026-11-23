@@ -28,7 +28,7 @@
 
 Cassotis IME for Linux (言泉输入法 Linux 版) is an experimental Chinese Pinyin input method for Linux desktops. Native IBus and Fcitx 5 adapters connect to a shared Free Pascal engine service ported from [Cassotis IME for Windows](https://github.com/shenmin/cassotis-ime), paired with dictionaries built from [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon). Candidate ranking runs locally on the CPU using an in-house character-level language model. There are no ads, bundled programs, or telemetry: dictionaries, settings, and user learning data remain on the local machine.
 
-Version 2.8.0 aligns with Cassotis IME for Windows and Cassotis Lexicon v2.8.0. Release highlights are summarized in the [version history](#version-history) below, full change notes are in the [changelog](CHANGELOG.md), and prebuilt packages are published under [Releases](https://github.com/shenmin/cassotis-ime-linux/releases).
+Version 2.9.0 aligns with Cassotis IME for Windows and Cassotis Lexicon v2.9.0. Release highlights are summarized in the [version history](#version-history) below, full change notes are in the [changelog](CHANGELOG.md), and prebuilt packages are published under [Releases](https://github.com/shenmin/cassotis-ime-linux/releases).
 
 Current goals:
 - Track each Windows engine release and verify cross-platform parity on shared benchmarks.
@@ -54,7 +54,7 @@ The Chinese name **言泉** (*Yanquan*, "Spring of Words") echoes the imagery of
 - **Second/third selection keys.** Optional `;` and `'` shortcuts select the second and third visible candidates (disabled by default). In Double Pinyin layouts that use `;` as a final key, syllable input takes precedence. See [Selection Keys](CONFIGURATION.md#secondthird-selection-keys).
 - **Dictionaries and learning.** Simplified and traditional base dictionaries are kept separate from the user dictionary. Learned entries adapt to the active simplified or traditional mode via OpenCC; highlight a learned candidate and press `Ctrl+Delete` to delete it.
 - **Document-local adaptation.** Surrounding text exposed by the input framework temporarily boosts terms and continuations recurring in the active document. Context state stays in memory, is isolated per input context, and is never written to disk.
-- **Personal word frequencies.** Advanced settings can import personal word-frequency exports in CSV, TSV, or plain-text format, applying the same validation rules as normal candidate learning across both frameworks. See [Importing Word Frequencies](CONFIGURATION.md#importing-word-frequencies) for supported formats and precautions.
+- **Learned words.** In Advanced, import personal typing frequencies, export learned words, or search by text or pinyin and forget selected readings without penalizing the base dictionary. IBus and Fcitx 5 use the same user database. See [Personal word frequencies](CONFIGURATION.md#importing-word-frequencies).
 - **Quick input.** Supports `ufh` symbols, `uxh` numbered markers, `usx` mathematical symbols, `ujt` arrows, `udw` units, `ubd` Chinese punctuation, and `urq`/`usj`/`uxq` for the current date, time, and weekday; `i123.45` and `v123.45` format Chinese numerals and uppercase currency amounts. Double Pinyin enters these modes with `Shift+U/I/V`. See [Quick Input](CONFIGURATION.md#quick-input).
 - **Chinese punctuation.** In Chinese punctuation with half-width input, a period typed immediately after digits outputs a decimal point, and symbols kept half-width can be customized in Settings; the default Markdown preset keeps ``-#*+_=`~[]<>|@`` half-width while commas, periods, parentheses, and quotation marks stay Chinese.
 - **Settings.** In the GTK sidebar, **Keys** configures paging, candidate selection and completion. **Shortcuts** configures actions such as switching input mode; each can be disabled without losing its binding.
@@ -81,7 +81,7 @@ Download the `.deb` matching your system architecture, verify its SHA-256 checks
 
 ```bash
 arch="$(dpkg --print-architecture)"  # amd64 or arm64
-package="cassotis-ime_2.8.0_${arch}.deb"
+package="cassotis-ime_2.9.0_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -102,10 +102,10 @@ Download the portable archive matching `uname -m` (`x86_64` or `aarch64`) and ve
 
 ```bash
 arch="$(uname -m)"  # x86_64 or aarch64
-archive="cassotis-ime-linux-2.8.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-2.9.0-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-2.8.0-${arch}"
+cd "cassotis-ime-linux-2.9.0-${arch}"
 ./install.sh --user --check &&
 ./install.sh --user
 ```
@@ -187,18 +187,19 @@ Base dictionaries are schema-24 SQLite databases built from [Cassotis Lexicon](h
 - base word lists: `dict_unihan_sc.txt`, `dict_unihan_tc.txt`, `dict_clean_sc.txt`, `dict_clean_tc.txt`
 - corpus-derived statistical tables: word-transition priors, completion priors, general-corpus word frequencies, conversational word frequencies, and the precomputed short-word promotion table
 
-The v2.8.0 dictionaries contain 266,839 simplified and 269,930 traditional reading records (including 23,919 and 24,182 single-character records; polyphonic entries store one record per reading). General word-frequency tables cover 204,521 simplified and 206,666 traditional surface forms, and conversational frequency tables cover 108,403 and 109,284 forms. Both dictionaries include curated classical poetry verses and audited polyphonic readings, with Taiwan traditional character standards applied consistently across traditional word lists and ranking tables. User learning data is stored in `~/.local/share/cassotis-ime/user_dict.db`; at startup, the engine prefers base dictionaries paired with the running installation over leftover copies from other install paths. Database schema details and path-override environment variables are documented in [docs/DICTIONARY.md](docs/DICTIONARY.md).
+The v2.9.0 dictionaries contain 269,924 simplified and 272,681 traditional reading records (including 24,163 and 24,353 single-character records; polyphonic entries store one record per reading). General word-frequency tables cover 207,342 simplified and 209,226 traditional surface forms, and conversational frequency tables cover 110,903 and 111,591 forms. Both dictionaries include curated classical poetry verses and audited polyphonic readings, with Taiwan traditional character standards applied consistently across traditional word lists and ranking tables. User learning data is stored in `~/.local/share/cassotis-ime/user_dict.db`; at startup, the engine prefers base dictionaries paired with the running installation over leftover copies from other install paths. Database schema details and path-override environment variables are documented in [docs/DICTIONARY.md](docs/DICTIONARY.md).
 
 ## Models and Ranking
 
 ### Unified Character Language Model
 - **Architecture and scope.** A single in-house ~150M-parameter character-level autoregressive language model (11 layers, 1,024 hidden size, 12,017-character vocabulary, static INT8 quantization) handles neural scoring across the input pipeline: long-sentence reranking and Pinyin-conditioned homophone repair, short-word and contextual single-character disambiguation, out-of-dictionary short-phrase assembly, English-vs-Pinyin disambiguation, background one-key completion reranking, and long-sentence `Tab` continuation. Model weights match Cassotis IME for Windows; obsolete model files from earlier releases are removed automatically on upgrade.
 - **Training data.** Trained on independent Chinese general-text and fiction corpora for both standard autoregressive scoring and Pinyin-conditioned repair. Starting in v2.7.0, training continued on the 10% subset of the public LCCC dialogue corpus closest to everyday chat, then weight-averaged 50/50 with the prior checkpoint to improve conversational phrasing without regressing fiction and general prose. All benchmark test sets are strictly excluded from training data.
+- **Sentence preferences.** The character model learned from Qwen3.5-9B-Base's offline comparisons of longer texts. The beginning of each text stayed anchored to the preceding model. No teacher model or additional runtime is needed.
 - **Batch-invariant deterministic inference.** Fixed static quantization ranges paired with a custom attention operator ensure that any text sequence produces bit-identical scores regardless of batch layout or prior cache state. Typing a long sentence key by key yields the exact same candidates as decoding the complete Pinyin string at once.
 - **Memory footprint.** In v2.0.0 tests, resident memory (RSS) of `cassotis-engine` settled at ~311 MiB on `x86_64` and ~320 MiB on `aarch64` after model load and 5 seconds of idle time, compared with ~437 MiB in v1.0.0 (which carried the separate neural models of Windows v1.31.0). These figures are historical post-idle RSS measurements rather than benchmark peak RSS.
 
 ### Decision Models and Lexicon Signals
-- Six lightweight gradient-boosted decision tree (GBDT) models combine language-model scores with lexical statistics for final selection: long-sentence selection, context-free short-word selection, contextual short-word selection, context-detail scoring, one-key completion, and `Tab` continuation. All six models are compiled directly into the engine with the exact Windows parameters, adding no extra ONNX files or inference sessions.
+- Seven lightweight gradient-boosted decision trees combine language-model scores with lexical evidence. They rank long sentences, decide whether to apply a homophone correction, rank short words with and without context, score context details, and select one-key completions and Tab continuations. The trees are compiled into the engine and require no additional inference sessions.
 - Three compact structural rankers guide lattice pruning during long-sentence search and pre-rank the complete-sentence candidate pool.
 - Corpus-derived SQLite tables provide lexical priors alongside neural scores: word transitions, completion priors, a precomputed short-word promotion table, and word frequencies from both general prose and everyday conversation.
 
@@ -219,10 +220,10 @@ The v2.8.0 dictionaries contain 266,839 simplified and 269,930 traditional readi
 
 ## Benchmarks
 
-The `v2.8.0` rows report native measurements of the current engine and dictionaries, while earlier rows retain their original release measurements; see [Compatibility](COMPATIBILITY.md) for the scope of framework and packaging checks. Since v2.0.0, corpus benchmarks run with wall-clock search, language-model, and completion timeouts disabled: accuracy and latency are recorded from the same completed query using 8 model threads, while deterministic search budgets remain unchanged.
+The `v2.9.0` rows report native measurements of the current engine and dictionaries, while earlier rows retain their original release measurements; see [Compatibility](COMPATIBILITY.md) for the scope of framework and packaging checks. Since v2.0.0, corpus benchmarks run with wall-clock search, language-model, and completion timeouts disabled: accuracy and latency are recorded from the same completed query using 8 model threads, while deterministic search budgets remain unchanged.
 Test methodology, corpus provenance, and scoring rules are detailed in [BENCHMARK.md](BENCHMARK.md) ([Chinese](BENCHMARK.CN.md)). Benchmark cases match Cassotis IME for Windows, sampled from the developer's novel [**Elegance in Timelessness** (永恒的舞动)](https://www.qidian.com/book/1037259117/) and strictly excluded from all training data.
 
-v2.8.0 was measured on 2026-11-18 (UTC+8) on 8-vCPU Ubuntu 26.04.1 VMs: x86_64 with 16 GiB RAM on Intel Core i5-12600K and aarch64 with 8 GiB on Apple silicon. v2.7.0 was measured on the same hosts on 2026-11-11; latency across dates is not a controlled A/B comparison. Versions 2.1.0 through 2.8.0 share the audited corpus. Earlier releases used an 11,728-case contested subset and are not paired case for case. Latencies are in milliseconds.
+v2.9.0 was measured on 2026-11-23 and 2026-11-24 (UTC+8) on 8-vCPU Ubuntu 26.04.1 VMs: x86_64 with 16 GiB RAM on Intel Core i5-12600K and aarch64 with 8 GiB on Apple silicon. v2.8.0 was measured on the same hosts on 2026-11-18; latency across dates is not a controlled A/B comparison. Versions 2.1.0 through 2.9.0 share the audited corpus. Earlier releases used an 11,728-case contested subset and are not paired case for case. Latencies are in milliseconds.
 
 Installed builds retain the production 100 ms foreground and 120 ms background timeouts. Deadline-free benchmark scores do not imply identical output under production timeouts (for instance, an earlier timed `x86_64` long-sentence run recorded 37 fewer Top1 and 36 fewer Top2 hits). Complete breakdowns, timing definitions, and historical timed runs are documented in [BENCHMARK.md](BENCHMARK.md).
 
@@ -230,6 +231,8 @@ Installed builds retain the production 100 ms foreground and 120 ms background t
 
 | Version | Architecture | Top1 | Top2 | Mean (ms) | P50 (ms) | P95 (ms) | Max (ms) |
 |---|---|---:|---:|---:|---:|---:|---:|
+| `v2.9.0` | x86_64 | 13869/16300 (85.09%) | 14789/16300 (90.73%) | 165.707 | 157 | 287 | 751 |
+| `v2.9.0` | aarch64 | 13869/16300 (85.09%) | 14789/16300 (90.73%) | 119.239 | 112 | 209 | 601 |
 | `v2.8.0` | x86_64 | 13750/16300 (84.36%) | 14695/16300 (90.15%) | 166.836 | 160 | 286 | 656 |
 | `v2.8.0` | aarch64 | 13744/16300 (84.32%) | 14694/16300 (90.15%) | 125.647 | 117 | 223 | 603 |
 | `v2.7.0` | x86_64 | 13739/16300 (84.29%) | 14685/16300 (90.09%) | 167.765 | 161 | 287 | 671 |
@@ -257,6 +260,8 @@ From v2.0.0 onward, accuracy and latency come from the same deadline-free run; v
 
 | Version | Architecture | Top1 | Top2 | Contested Top1 | Contested Top2 | Mean (ms) | P50 (ms) | P95 (ms) | Max (ms) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `v2.9.0` | x86_64 | 63500/65000 (97.69%) | 64563/65000 (99.33%) | 10534/11685 (90.15%) | 11313/11685 (96.82%) | 8.721 | 6 | 24 | 78 |
+| `v2.9.0` | aarch64 | 63500/65000 (97.69%) | 64563/65000 (99.33%) | 10534/11685 (90.15%) | 11313/11685 (96.82%) | 7.979 | 6 | 21 | 50 |
 | `v2.8.0` | x86_64 | 63502/65000 (97.70%) | 64565/65000 (99.33%) | 10546/11685 (90.25%) | 11315/11685 (96.83%) | 8.549 | 5 | 24 | 76 |
 | `v2.8.0` | aarch64 | 63503/65000 (97.70%) | 64561/65000 (99.32%) | 10546/11685 (90.25%) | 11314/11685 (96.82%) | 7.526 | 5 | 20 | 53 |
 | `v2.7.0` | x86_64 | 63502/65000 (97.70%) | 64564/65000 (99.33%) | 10545/11685 (90.24%) | 11315/11685 (96.83%) | 8.830 | 5 | 24 | 77 |
@@ -284,6 +289,8 @@ The table reports queries with preceding context. The contested subset contains 
 
 | Version | Architecture | Completion hits | Average saved keys | Keystroke stability | Key P95 (ms) | Settled P95 (ms) |
 | --- | --- | --- | --- | --- | --- | --- |
+| `v2.9.0` | x86_64 | 10561/12831 (82.31%) | 2.642 | 2178/2234 (97.49%) | 2.072 | 54.375 |
+| `v2.9.0` | aarch64 | 10561/12831 (82.31%) | 2.642 | 2178/2234 (97.49%) | 2.071 | 33.011 |
 | `v2.8.0` | x86_64 | 10506/12831 (81.88%) | 2.634 | 2141/2202 (97.23%) | 2.066 | 52.584 |
 | `v2.8.0` | aarch64 | 10505/12831 (81.87%) | 2.634 | 2139/2200 (97.23%) | 2.014 | 34.210 |
 | `v2.7.0` | x86_64 | 10506/12831 (81.88%) | 2.635 | 2141/2202 (97.23%) | 2.066 | 53.422 |
@@ -309,6 +316,8 @@ The 65,000 short-word cases expand into 12,831 completion opportunities. Since v
 
 | Version | Architecture | Local continuation hits | Predictive coverage | Total saved keys | P95 (ms) |
 | --- | --- | --- | --- | --- | --- |
+| `v2.9.0` | x86_64 | 4012/16300 (24.61%) | 16217/16300 (99.49%) | 9836 | 294 |
+| `v2.9.0` | aarch64 | 4012/16300 (24.61%) | 16217/16300 (99.49%) | 9836 | 204 |
 | `v2.8.0` | x86_64 | 3974/16300 (24.38%) | 16231/16300 (99.58%) | 9804 | 285 |
 | `v2.8.0` | aarch64 | 3974/16300 (24.38%) | 16233/16300 (99.59%) | 9827 | 216 |
 | `v2.7.0` | x86_64 | 3979/16300 (24.41%) | 16232/16300 (99.58%) | 9814 | 286 |
@@ -386,6 +395,8 @@ Major milestones of the Linux port (corresponding Cassotis IME for Windows versi
 **v2.7.0 (Windows v2.7.0): Conversational fine-tuning and broader input coverage.** Continued language-model training on everyday dialogue data, refit all six GBDT decision policies, and incorporated conversational word frequencies to protect common context-free defaults. Extended out-of-dictionary phrase assembly and repair to Traditional Chinese and Double Pinyin, enabled contextual language-model ordering for single-character candidates, and added the Zhineng ABC Double Pinyin layout.
 
 **v2.8.0 (Windows v2.8.0): Recent choices and character selection.** Selecting the same word twice within two hours can put it first for that spelling for the next two hours. Optional bracket keys let you commit just the first or last character of the highlighted candidate. This version also refines short-phrase ranking, the reading of sentence-final 没/沒, and contextual ordering of traditional variants.
+
+**v2.9.0: Long-sentence correction and learned-word management.** A learned gate compares a proposed correction with the original sentence; short-word ranking gives everyday conversation more weight. Advanced settings add export, search and removal of learned words.
 
 ## License
 Program source code is licensed under GPL-3.0-only. Bundled Cassotis Lexicon database artifacts are licensed under CC BY-SA 4.0. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md), including [lexicon attribution](docs/LEXICON_ATTRIBUTION.md).

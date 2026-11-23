@@ -14,6 +14,7 @@
 // it does not find among them (CharLmMemo).
 #if defined(__aarch64__)
 #include "nc_fast_gelu_compat.h"
+#include "nc_layer_norm_compat.h"
 #endif
 
 namespace {
@@ -1028,6 +1029,7 @@ extern "C" CASSOTIS_EXPORT void* nc_lm_create(
         ConfigureSessionOptions(options, intra_threads);
 #if defined(__aarch64__)
         options.Add(cassotis::CharacterMathDomain());
+        options.Add(cassotis::CharacterNormDomain());
 #endif
         nc_trie_attention::Register(options);
         const std::u16string path = std::u16string(directory) + u"/char_lm.onnx";

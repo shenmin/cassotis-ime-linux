@@ -225,6 +225,23 @@ import is one transaction; database errors roll it back. The result reports both
 parsed and imported rows. It takes effect in IBus and Fcitx 5 and survives an
 engine restart. Complete any pending composition before importing.
 
+Imported counts do not count as recent manual selections: importing cannot
+start the two-hour preference for a repeatedly selected word.
+
+### Exporting And Removing Learned Words
+
+In **Advanced**, choose **Export user words** (导出用户词库) to save the
+eligible learned words as UTF-8 CSV with a BOM. Each row has the word,
+full pinyin and count. The same format can be imported again. This is a
+word list, not a full database backup: single-character recency, context
+history, completion feedback and custom phrases are not exported.
+
+Choose **Manage user words** (管理用户词) to search by word or the start of
+its pinyin. Select one or more rows and confirm deletion. This forgets
+the selected word and reading, including its counts and associated choices;
+it neither deletes a base dictionary entry nor penalizes it. Both input
+frameworks see the change.
+
 Default paths follow the XDG base-directory specification:
 
 ```text

@@ -45,6 +45,13 @@ Its custom attention operator is part of this project's source code.
 The model was trained on separately licensed corpora; no training documents
 are distributed with it. Inference does not transmit typed text.
 
+The model architecture and training code come from
+[nc-GPT](https://github.com/shenmin/nc-gpt) (Apache-2.0). For v2.9.0,
+[Qwen3.5-9B-Base](https://huggingface.co/Qwen/Qwen3.5-9B-Base)
+(Apache-2.0) served as an offline teacher for sentence and continuation
+preferences. Neither its weights nor its tokenizer are distributed or needed
+at runtime; the package still contains one character language model.
+
 The model also uses everyday conversation from LCCC (Wang et al.,
 "A Large-Scale Chinese Short-Text Conversation Dataset", NLPCC 2020;
 https://github.com/thu-coai/CDial-GPT), released under the MIT License,

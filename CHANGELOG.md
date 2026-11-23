@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.9.0 - 2026-11-24
+
+- Refresh the shared character language model and its seven decision trees.
+  A learned gate now decides whether each proposed long-sentence correction
+  is better than keeping the original. The same model also ranks short
+  words, one-key completions and Tab continuations.
+  ARM64 attention and layer normalization now follow the same rounding
+  order as x86_64 before the model quantizes its activations.
+- Give conversational usage more weight when choosing a short word without
+  preceding text, while retaining the checks on general frequency and dictionary weight.
+- Export learned words, search them by text or pinyin prefix, and forget
+  selected readings without penalizing base words. Imported counts no longer
+  activate the two-hour preference reserved for repeated manual selections.
+- Update both dictionaries to Cassotis Lexicon v2.9.0, including everyday
+  expressions, additional readings and revisions to common-word ordering.
+
 ## 2.8.0 - 2026-11-18
 
 - Optionally commit the first or last character of the highlighted candidate

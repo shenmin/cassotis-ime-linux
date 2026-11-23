@@ -596,19 +596,19 @@ gboolean cassotis_client_ping(CassotisClient *client, GError **error)
     return success;
 }
 
-gboolean cassotis_client_import_user_words(CassotisClient *client, const gchar *path,
-    guint *entries, guint *imported, GError **error)
+gboolean cassotis_client_word_file(CassotisClient *client, CassotisMessageType type,
+    const gchar *path, guint *entries, guint *affected, GError **error)
 {
     guint64 request_id = client->next_request_id++;
-    GByteArray *request = cassotis_protocol_build_import_request(request_id, path);
+    GByteArray *request = cassotis_protocol_build_word_file_request(type, request_id, path);
     GByteArray *response = NULL;
     struct timeval timeout = {120, 0};
     gchar *text, *end;
     guint64 first, second;
     gboolean success;
-    *entries = *imported = 0;
+    *entries = *affected = 0;
     if (request == NULL) {
-        g_set_error_literal(error, cassotis_client_error_quark(), 1, "invalid import path");
+        g_set_error_literal(error, cassotis_client_error_quark(), 1, "invalid word file request");
         return FALSE;
     }
     if (!ensure_connected(client, error)) {
@@ -618,9 +618,9 @@ gboolean cassotis_client_import_user_words(CassotisClient *client, const gchar *
     /* Bulk learning is an explicit settings operation, not a keystroke timeout. */
     if (setsockopt(client->socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0) {
         g_byte_array_unref(request);
-        return set_errno_error(error, "import timeout");
+        return set_errno_error(error, "word file timeout");
     }
-    success = exchange(client, request, CASSOTIS_MESSAGE_IMPORT_USER_WORDS,
+    success = exchange(client, request, type,
                        request_id, 0, 0, &response, error);
     timeout.tv_sec = CASSOTIS_RECEIVE_TIMEOUT_MS / 1000;
     timeout.tv_usec = (CASSOTIS_RECEIVE_TIMEOUT_MS % 1000) * 1000;
@@ -636,13 +636,13 @@ gboolean cassotis_client_import_user_words(CassotisClient *client, const gchar *
         gchar *start = end + 1;
         second = g_ascii_strtoull(start, &end, 10);
         success = end != start && end == text + response->len && second <= first;
-        if (success) { *entries = first; *imported = second; }
+        if (success) { *entries = first; *affected = second; }
     }
     g_free(text);
     g_byte_array_unref(response);
     if (!success) {
         close_socket(client);
-        g_set_error_literal(error, cassotis_client_error_quark(), 1, "invalid import response");
+        g_set_error_literal(error, cassotis_client_error_quark(), 1, "invalid word file response");
     }
     return success;
 }

@@ -1,10 +1,10 @@
 # Dictionary And Ranking Boundary
 
-Cassotis IME for Linux v2.8.0 uses the v2.8.0 releases of
+Cassotis IME for Linux v2.9.0 uses the v2.9.0 releases of
 [Cassotis IME](https://github.com/shenmin/cassotis-ime) and
 [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon).
-The frozen releases are [v2.8.0](https://github.com/shenmin/cassotis-ime/releases/tag/v2.8.0)
-(engine) and [v2.8.0](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.8.0)
+The frozen releases are [v2.9.0](https://github.com/shenmin/cassotis-ime/releases/tag/v2.9.0)
+(engine) and [v2.9.0](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.9.0)
 (lexicon).
 Base dictionaries are read-only. Learning, preferences, and completion feedback
 are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
@@ -13,16 +13,16 @@ are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
 
 - Current schema: `24`; minimum readable schema: `18`.
 - Simplified database SHA-256:
-  `f7c599f92282034d3d4af95ca27e6dbb9e5708d0265471a8d273c335a4faa904`.
+  `49e041fb320865f66a3ae79d6f19c60e6f1a9d5d90ee2e56b14cf0d43aef1865`.
 - Traditional database SHA-256:
-  `e1263f9d3810c2b53b5eb710ce15de8170b1b2a43be1dfc8a0fce0d4d115dac9`.
-- Simplified base: 266,839 rows, including 23,919 single-character rows and
-  242,920 multi-character rows.
-- Traditional base: 269,930 rows, including 24,182 single-character rows and
-  245,748 multi-character rows.
-- Simplified/traditional short-query promotion rows: 1,563 / 1,818.
-- Simplified/traditional word-frequency rows: 204,521 / 206,666.
-- Simplified/traditional conversation-frequency rows: 108,403 / 109,284.
+  `b2d2cd8ed808b121e5e68bb1d8268095c0e1cc7412ed1e530aa1f8b291dc28e9`.
+- Simplified base: 269,924 rows, including 24,163 single-character rows and
+  245,761 multi-character rows.
+- Traditional base: 272,681 rows, including 24,353 single-character rows and
+  248,328 multi-character rows.
+- Simplified/traditional short-query promotion rows: 1,621 / 1,876.
+- Simplified/traditional word-frequency rows: 207,342 / 209,226.
+- Simplified/traditional conversation-frequency rows: 110,903 / 111,591.
 - Simplified/traditional LM-transition rows: 904,762 / 833,694.
 - Simplified/traditional completion-competition rows: 42,453 / 42,448.
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379.
@@ -34,7 +34,7 @@ not counts of unique words. The schema version is stored in
 `meta(key = 'schema_version')`. SQLite text is UTF-8.
 
 Older supported schemas remain readable with their available optional signals;
-they do not provide the complete v2.8.0 behavior. Release dictionaries must
+they do not provide the complete v2.9.0 behavior. Release dictionaries must
 include nonempty short-query promotion, word-frequency and conversation-frequency tables as well as
 all other required data. Staging rejects missing tables or active journals.
 Promotion entries are checked against the corresponding words and base weights
@@ -112,6 +112,12 @@ The previous and last use of an exact key/word pair distinguish recent
 repeated choices from lifetime frequency. Existing user databases gain the
 previous-use column in place. A historical total alone is not evidence of
 two recent selections.
+
+An import retains the counts but places the last use outside the recent-choice
+window and clears the previous-use timestamp. Export returns a deduplicated
+list of multi-character, full-pinyin entries in the active script. Forgetting
+a displayed row removes its learned spellings for that reading and associated
+preferences, without changing the base tables or writing a ranking penalty.
 
 Only candidates backed by removable persistent user data carry the deletable
 flag. Ordinary base entries and unlearned generated or partially composed

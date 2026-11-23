@@ -67,6 +67,8 @@ Message ordinals are wire ABI and must not be reordered.
 | 18 | `get_preferences` | Empty request; full preferences response |
 | 19 | `set_preferences` | Full preferences request; empty response |
 | 20 | `import_user_words` | Absolute file path request; import counts response |
+| 21 | `export_user_words` | Absolute output file path; exported row count |
+| 22 | `forget_user_words` | Absolute selection file path; selected and removed counts |
 
 `create_context`, `destroy_context`, `reset_context`,
 `clear_user_dictionary`, and `poll_result` have empty payloads. Structured
@@ -95,6 +97,15 @@ the ordinary 3.5-second request timeout. It must not retry automatically: a lost
 acknowledgement does not prove that the transaction failed, and importing again
 adds the frequencies again. Older engines reject ordinal 20; upgrade the
 service and control client together.
+
+The two newer operations use the same path encoding and extended response
+timeout. Export writes a private UTF-8 file atomically, with a BOM and CRLF
+line endings; the two response counts both equal the number of written rows.
+The destination must be a regular file or a new path ending in `.csv`, `.tsv`
+or `.txt`. Forget reads the selected word/reading pairs, rejects a malformed
+selection, and removes matches in one transaction without adding penalties.
+Repeating a deletion reports zero removed. Older servers reject these requests
+without changing their database.
 
 ## Payload Primitives
 

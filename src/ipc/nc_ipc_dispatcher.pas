@@ -258,12 +258,12 @@ begin
                     Exit;
                 FShutdownRequested := True;
             end;
-        imt_import_user_words:
+        imt_import_user_words, imt_export_user_words, imt_forget_user_words:
             begin
                 import_path := nc_payload_as_string(request.payload);
                 path_bytes := nc_utf8_payload(import_path);
                 if (Length(request.payload) = 0) or (Length(request.payload) > 4096) or
-                    (Pos(#0, import_path) > 0) or (import_path[1] <> '/') or
+                    (import_path = '') or (Pos(#0, import_path) > 0) or (import_path[1] <> '/') or
                     (Length(path_bytes) <> Length(request.payload)) or
                     not CompareMem(@path_bytes[0], @request.payload[0], Length(path_bytes)) then
                 begin
@@ -271,11 +271,21 @@ begin
                         'Expected an absolute UTF-8 file path');
                     Exit;
                 end;
-                if FEngine.ImportUserWords(import_path, import_entries, import_count) then
+                case request.message_type of
+                    imt_import_user_words: operation_succeeded :=
+                        FEngine.ImportUserWords(import_path, import_entries, import_count);
+                    imt_forget_user_words: operation_succeeded :=
+                        FEngine.ForgetUserWords(import_path, import_entries, import_count);
+                    else begin
+                        operation_succeeded := FEngine.ExportUserWords(import_path, import_count);
+                        import_entries := import_count;
+                    end;
+                end;
+                if operation_succeeded then
                     response.payload := nc_utf8_payload(IntToStr(import_entries) + #9 + IntToStr(import_count))
                 else
                     SetErrorResponse(request, response, c_ipc_dispatch_error_operation_failed,
-                        'Unable to import word frequencies; check the file format and user database');
+                        'Unable to process learned words; check the file and user database');
             end;
         imt_clear_user_dictionary:
             begin

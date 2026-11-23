@@ -24,6 +24,10 @@
 //
 // The earlier tokens are read where they lie and not copied: the caller keeps
 // them in one buffer per layer and appends the new ones (CharLmKeys).
+#if defined(__aarch64__)
+#include "nc_trie_attention_arm64.h"
+#endif
+
 namespace nc_trie_attention {
 
 constexpr const char* kDomain = "cassotis";
@@ -146,6 +150,12 @@ inline void AttendHead(void* data, size_t head) {
             fresh[0], fresh[1], p.seen, p.seen_start, 0, p.rows, dim, scale, p.longest, weights.data(),
             p.out + head * dim, width);
     else
+#elif defined(__aarch64__)
+    if (p.vector && dim == 64)
+        arm64::Attend64(p.qkv + head * dim, 3 * width, past_keys, past_values, p.past_count,
+            fresh[0], fresh[1], p.seen, p.seen_start, 0, p.rows, scale, weights.data(),
+            p.out + head * dim, width);
+    else
 #endif
         AttendHeadPlain(p.qkv + head * dim, 3 * width, past_keys, past_values, p.past_count,
             fresh[0], fresh[1], p.seen, p.seen_start, 0, p.rows, dim, scale, weights.data(),
@@ -161,7 +171,11 @@ struct Kernel {
         if (heads <= 0) throw std::runtime_error("TrieAttention: num_heads must be positive");
         // CASSOTIS_LM_PLAIN_ATTENTION=1 selects the plain code on any processor (tests).
         const char* plain = std::getenv("CASSOTIS_LM_PLAIN_ATTENTION");
+#if defined(__aarch64__)
+        vector = !(plain && std::strcmp(plain, "1") == 0);
+#else
         vector = CpuHasAvx2Fma() && !(plain && std::strcmp(plain, "1") == 0);
+#endif
     }
 
     OrtStatusPtr ComputeV2(OrtKernelContext* raw) {

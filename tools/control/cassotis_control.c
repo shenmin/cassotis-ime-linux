@@ -119,7 +119,7 @@ static void print_usage(const gchar *program_name)
         program_name, program_name, program_name, program_name,
         program_name);
     g_printerr("  %s get-preferences\n"
-               "  %s import-user-words FILE\n"
+               "  %s import-user-words|export-user-words|forget-user-words FILE\n"
                "  %s set-preferences (same arguments as set-state; phrase JSON on stdin)\n",
                program_name, program_name, program_name);
 }
@@ -349,13 +349,18 @@ int main(int argc, char **argv)
         success = cassotis_client_ping(&client, &error);
         if (success)
             g_print("ping=ok\n");
-    } else if (g_strcmp0(argv[1], "import-user-words") == 0 && argc == 3) {
-        guint entries = 0, imported = 0;
+    } else if (argc == 3 && (g_str_equal(argv[1], "import-user-words") ||
+               g_str_equal(argv[1], "export-user-words") || g_str_equal(argv[1], "forget-user-words"))) {
+        guint entries = 0, affected = 0;
+        CassotisMessageType type = g_str_equal(argv[1], "import-user-words") ? CASSOTIS_MESSAGE_IMPORT_USER_WORDS :
+            g_str_equal(argv[1], "export-user-words") ? CASSOTIS_MESSAGE_EXPORT_USER_WORDS : CASSOTIS_MESSAGE_FORGET_USER_WORDS;
+        const gchar *label = type == CASSOTIS_MESSAGE_IMPORT_USER_WORDS ? "imported" :
+            type == CASSOTIS_MESSAGE_EXPORT_USER_WORDS ? "exported" : "removed";
         gchar *path = g_canonicalize_filename(argv[2], NULL);
-        success = cassotis_client_import_user_words(&client, path, &entries, &imported, &error);
+        success = cassotis_client_word_file(&client, type, path, &entries, &affected, &error);
         g_free(path);
         if (success)
-            g_print("entries=%u\nimported=%u\n", entries, imported);
+            g_print("entries=%u\n%s=%u\n", entries, label, affected);
     } else if (g_strcmp0(argv[1], "clear-user-dictionary") == 0 &&
                argc == 2) {
         success = cassotis_client_clear_user_dictionary(&client, &error);

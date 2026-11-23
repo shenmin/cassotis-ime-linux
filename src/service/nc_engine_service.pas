@@ -13,6 +13,7 @@ uses
     nc_engine_intf,
     nc_dictionary_sqlite,
     nc_user_dictionary,
+    nc_user_word_import,
     nc_lm_repair_host,
     nc_local_completion_host,
     nc_char_lm,
@@ -88,6 +89,8 @@ type
         function SetState(const state: TncEngineState): Boolean; override;
         function ClearUserDictionary: Boolean; override;
         function ImportUserWords(const path: string; out entries, imported: Integer): Boolean; override;
+        function ExportUserWords(const path: string; out count: Integer): Boolean; override;
+        function ForgetUserWords(const path: string; out entries, removed: Integer): Boolean; override;
         function ProcessKey(const context_id: QWord; const generation_id: QWord;
             const key_event: TncKeyEvent): TncEngineResult; override;
         function PollResult(const context_id: QWord;
@@ -835,6 +838,30 @@ begin
     Result := (FEngine <> nil) and FEngine.import_user_words(path, entries, imported);
     if not Result then Exit;
     // Every context and pending result was built against the previous learning.
+    FContexts.ClearCompositions;
+    FLoadedContextId := c_invalid_context_id;
+    FEngine.Reset;
+end;
+
+function TncEngineService.ExportUserWords(const path: string; out count: Integer): Boolean;
+begin
+    count := 0;
+    Result := (FEngine <> nil) and FEngine.export_user_words(path, count);
+end;
+
+function TncEngineService.ForgetUserWords(const path: string; out entries, removed: Integer): Boolean;
+var
+    content: string;
+    words: TncUserWordImportEntries;
+    skipped: Integer;
+begin
+    entries := 0;
+    removed := 0;
+    if (FEngine = nil) or not nc_read_user_word_import_file(path, content) or
+        not nc_parse_user_word_import(content, words, skipped) or (skipped <> 0) then Exit(False);
+    entries := Length(words);
+    Result := (entries > 0) and FEngine.forget_user_words(words, removed);
+    if not Result or (removed = 0) then Exit;
     FContexts.ClearCompositions;
     FLoadedContextId := c_invalid_context_id;
     FEngine.Reset;

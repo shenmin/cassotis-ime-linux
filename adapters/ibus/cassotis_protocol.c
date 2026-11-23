@@ -209,15 +209,18 @@ static GByteArray *new_payload_with_schema(guint16 schema)
     return payload;
 }
 
-GByteArray *cassotis_protocol_build_import_request(guint64 request_id, const gchar *path)
+GByteArray *cassotis_protocol_build_word_file_request(CassotisMessageType type,
+    guint64 request_id, const gchar *path)
 {
     GByteArray *payload;
-    if (path == NULL || path[0] != '/' || strlen(path) > 4096 ||
+    if ((type != CASSOTIS_MESSAGE_IMPORT_USER_WORDS && type != CASSOTIS_MESSAGE_EXPORT_USER_WORDS &&
+         type != CASSOTIS_MESSAGE_FORGET_USER_WORDS) ||
+        path == NULL || path[0] != '/' || strlen(path) > 4096 ||
         !g_utf8_validate(path, -1, NULL))
         return NULL;
     payload = g_byte_array_new();
     g_byte_array_append(payload, (const guint8 *)path, strlen(path));
-    return build_frame(CASSOTIS_MESSAGE_IMPORT_USER_WORDS, request_id, 0, 0, payload);
+    return build_frame(type, request_id, 0, 0, payload);
 }
 
 GByteArray *cassotis_protocol_build_empty_request(
@@ -550,7 +553,7 @@ gboolean cassotis_protocol_parse_header(const guint8 *data,
     header->generation_id = read_u64_at(data, 32);
     header->payload_length = read_u32_at(data, 40);
     if (header->message_type == CASSOTIS_MESSAGE_INVALID ||
-        header->message_type > CASSOTIS_MESSAGE_IMPORT_USER_WORDS ||
+        header->message_type > CASSOTIS_MESSAGE_FORGET_USER_WORDS ||
         (header->flags & ~(CASSOTIS_IPC_FLAG_RESPONSE |
                            CASSOTIS_IPC_FLAG_ERROR)) != 0 ||
         header->payload_length > CASSOTIS_IPC_MAX_PAYLOAD) {

@@ -17,7 +17,27 @@ Both benchmarks are derived from the developer's own novel,
 (Chinese title: **永恒的舞动**). Benchmark cases are kept separate from the
 corresponding model-training data.
 
-## Frozen v2.8.0 Baseline
+## Frozen v2.9.0 Baseline
+
+The [engine](https://github.com/shenmin/cassotis-ime/releases/tag/v2.9.0)
+and [lexicon](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.9.0)
+are frozen at v2.9.0. The case files and measurement method are unchanged:
+16,300 long sentences, 65,000 short inputs and 12,831 eligible short
+completions. Candidate accuracy and latency describe the same completed
+queries. The shared character model, its seven decision trees, and both
+dictionaries are new. Personal learning is disabled for the corpus run.
+
+| Input | Simplified | Traditional |
+| --- | ---: | ---: |
+| Base reading records (including single characters) | 269,924 | 272,681 |
+| Single-character reading records | 24,163 | 24,353 |
+| General / conversational frequency records | 207,342 / 110,903 | 209,226 / 111,591 |
+| Short-promotion records | 1,621 | 1,876 |
+
+See [dictionary fingerprints](docs/DICTIONARY.md#dictionary-compatibility)
+and the [native measurements](#v290-native-measurements).
+
+## Previous v2.8.0 Baseline
 
 The [Windows engine](https://github.com/shenmin/cassotis-ime/releases/tag/v2.8.0)
 and [lexicon](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.8.0)
@@ -289,6 +309,53 @@ latency, and Linux process RSS/high-water marks. Memory events contain only
 the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
+
+## v2.9.0 Native Measurements
+
+Measured on 2026-11-23 and 2026-11-24 (UTC+8) on Ubuntu 26.04.1 VMs, each with eight vCPUs and eight model threads. All four suites ran sequentially on each machine. Accuracy and latency describe the same deadline-free queries, not interactive keystroke latency.
+
+### Candidate Selection
+
+| Architecture | Suite | Top1 | Top2 | Mean (ms) | P50 | P95 | Max |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | Long | 13869/16300 (85.09%) | 14789/16300 (90.73%) | 165.707 | 157 | 287 | 751 |
+| x86_64 | Short, no context | 61280/65000 (94.28%) | 63836/65000 (98.21%) | 4.900 | 4 | 12 | 60 |
+| x86_64 | Short, with context | 63500/65000 (97.69%) | 64563/65000 (99.33%) | 8.721 | 6 | 24 | 78 |
+| aarch64 | Long | 13869/16300 (85.09%) | 14789/16300 (90.73%) | 119.239 | 112 | 209 | 601 |
+| aarch64 | Short, no context | 61280/65000 (94.28%) | 63836/65000 (98.21%) | 4.955 | 4 | 12 | 42 |
+| aarch64 | Short, with context | 63500/65000 (97.69%) | 64563/65000 (99.33%) | 7.979 | 6 | 21 | 50 |
+
+| Architecture | Contested Top1, no context | Top2, no context | Top1, with context | Top2, with context |
+| --- | ---: | ---: | ---: | ---: |
+| x86_64 | 8930/11685 (76.42%) | 10720/11685 (91.74%) | 10534/11685 (90.15%) | 11313/11685 (96.82%) |
+| aarch64 | 8930/11685 (76.42%) | 10720/11685 (91.74%) | 10534/11685 (90.15%) | 11313/11685 (96.82%) |
+
+### Completion
+
+Short words: 65,000 inputs, 12,831 opportunities. Key P95 is foreground latency; the other latency columns include background evaluation.
+
+| Architecture | Hits | Saved keys | Average saved | Stable pairs | Mean (ms) | P50 | P95 | Max | Key P95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 10561/12831 (82.31%) | 27903 | 2.642 | 2178/2234 (97.49%) | 18.484 | 17.836 | 54.375 | 159.692 | 2.072 |
+| aarch64 | 10561/12831 (82.31%) | 27903 | 2.642 | 2178/2234 (97.49%) | 11.784 | 11.411 | 33.011 | 95.296 | 2.071 |
+
+Long sentences: predictive coverage is not precision, and a correct continuation need not finish the sentence.
+
+| Architecture | Hits | Predictive prompts | Saved keys | Mean (ms) | P50 | P95 | Max |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 4012/16300 (24.61%) | 16217/16300 (99.49%) | 9836 | 174.198 | 162 | 294 | 658 |
+| aarch64 | 4012/16300 (24.61%) | 16217/16300 (99.49%) | 9836 | 120.291 | 113 | 204 | 499 |
+
+### Change From v2.8.0
+
+Differences in hit counts on the same corpus; the last column is the change in total saved keys.
+
+| Architecture | Long Top1 | Long Top2 | Short Top1 with context | Short Top2 with context | Short completion | Long completion | Long saved keys |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | +119 | +94 | -2 | -2 | +55 | +38 | +32 |
+| aarch64 | +125 | +95 | -3 | +2 | +56 | +38 | +9 |
+
+Candidate-run peak RSS was 416.9 MiB on x86_64 and 399.2 MiB on aarch64; this is not idle memory.
 
 ## v2.8.0 Native Measurements
 

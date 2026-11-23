@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 
 import gi
@@ -458,6 +459,51 @@ def import_user_words(control_path, path):
     # turn a successful import into a retryable error or discard unsaved edits.
     return {"_operation_message":
             f"已导入 {imported} 个词（文件中共 {entries} 个），已立即生效"}
+
+
+def word_file_count(control_path, command, path, key):
+    output = run_control(control_path, [command, path], timeout=150)
+    try:
+        counts = dict(line.split("=", 1) for line in output.splitlines())
+        count, entries = int(counts[key]), int(counts["entries"])
+        if not 0 <= count <= entries or (key == "exported" and count != entries):
+            raise ValueError("invalid counts")
+        return count
+    except (ValueError, KeyError) as error:
+        raise ControlError("引擎未返回有效的词条数") from error
+
+
+def export_learned_words(control_path, path):
+    count = word_file_count(control_path, "export-user-words", path, "exported")
+    return {"_operation_message": f"已导出 {count} 个用户词"}
+
+
+def load_learned_words(control_path):
+    # Read a consistent snapshot from the running engine, not its live SQLite file.
+    with tempfile.TemporaryDirectory(prefix="cassotis-words-") as folder:
+        path = os.path.join(folder, "words.csv")
+        expected = word_file_count(control_path, "export-user-words", path, "exported")
+        with open(path, encoding="utf-8-sig") as stream:
+            rows = []
+            for line in stream:
+                if not line.strip() or line.startswith("#"):
+                    continue
+                word, pinyin, count = line.rstrip("\r\n").rsplit(",", 2)
+                rows.append((word, pinyin, int(count)))
+        if len(rows) != expected:
+            raise ControlError("用户词列表不完整")
+    return {"_learned_words": rows}
+
+
+def forget_learned_words(control_path, rows):
+    # The selected rows can contain personal words. Do not put them in argv.
+    with tempfile.TemporaryDirectory(prefix="cassotis-words-") as folder:
+        path = os.path.join(folder, "selected.csv")
+        with open(path, "x", encoding="utf-8") as stream:
+            for word, pinyin, count in rows:
+                stream.write(f"{word},{pinyin},{count}\n")
+        count = word_file_count(control_path, "forget-user-words", path, "removed")
+    return {"_operation_message": f"已删除 {count} 个用户词；基础词库不受影响"}
 
 
 def default_data_directory():
@@ -967,12 +1013,20 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.import_user_button.connect("clicked", self._import_user_words)
         actions.pack_start(self.import_user_button, False, False, 0)
         self._add_row(data, 1, "操作", actions)
+        manage = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.manage_words_button = Gtk.Button(label="管理用户词")
+        self.manage_words_button.connect("clicked", self._manage_learned_words)
+        manage.pack_start(self.manage_words_button, False, False, 0)
+        self.export_words_button = Gtk.Button(label="导出用户词库")
+        self.export_words_button.connect("clicked", self._export_learned_words)
+        manage.pack_start(self.export_words_button, False, False, 0)
+        self._add_row(data, 2, "已学词", manage)
         warning = Gtk.Label(
             label="清空操作会删除本地用户词、导入的输入频次和相关学习记录，且无法撤销。"
         )
         warning.set_xalign(0)
         warning.set_line_wrap(True)
-        self._add_row(data, 2, "说明", warning)
+        self._add_row(data, 3, "说明", warning)
         content.pack_start(diagnostics, False, False, 0)
         return page
 
@@ -1159,12 +1213,15 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self._set_busy(False, "")
         if error is None:
             success_message = state.pop("_operation_message", success_message)
+            learned_words = state.pop("_learned_words", None)
             if state:
                 self._show_state(state)
             if close_on_success:
                 self.close()
             else:
                 self.status.set_text(success_message)
+            if learned_words is not None:
+                self._show_learned_words(learned_words)
         else:
             self.status.set_text(f"{failure_prefix}：{error}")
         return GLib.SOURCE_REMOVE
@@ -1279,7 +1336,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             "知识,zhishi,120\n哪些,naxie,86\n输入法,shurufa\n\n"
             "批量导入也可能带来负面效果：人名、昵称、打错的词或不再使用的旧词，"
             "可能按导出的次数排到同音常用词前面。请先检查文件。\n\n"
-            "导入不能单独撤销：“清空用户词库”会同时删除导入记录和平时打字积累的学习记录。"
+            "导入后可在“管理用户词”中删除指定词条；清空词库会同时删除平时积累的学习记录。"
             "继续并选择文件吗？"
         )
         dialog.add_button("取消", Gtk.ResponseType.CANCEL)
@@ -1311,6 +1368,83 @@ class SettingsWindow(Gtk.ApplicationWindow):
             lambda: import_user_words(self.control_path, path),
             "正在导入输入频次，请稍候…", "输入频次已导入", "导入失败",
         )
+
+    def _export_learned_words(self, _button):
+        picker = Gtk.FileChooserDialog(title="导出用户词库", transient_for=self,
+                                       action=Gtk.FileChooserAction.SAVE)
+        picker.add_buttons("取消", Gtk.ResponseType.CANCEL, "导出", Gtk.ResponseType.ACCEPT)
+        picker.set_current_name("cassotis-user-words.csv")
+        picker.set_do_overwrite_confirmation(True)
+        response = picker.run()
+        path = picker.get_filename()
+        picker.destroy()
+        if response == Gtk.ResponseType.ACCEPT and path:
+            if not path.lower().endswith((".csv", ".tsv", ".txt")):
+                self.status.set_text("请使用 .csv、.tsv 或 .txt 文件名")
+                return
+            self._run_operation(lambda: export_learned_words(self.control_path, path),
+                                "正在导出用户词库…", "导出完成", "导出失败")
+
+    def _manage_learned_words(self, _button):
+        self._run_operation(lambda: load_learned_words(self.control_path),
+                            "正在读取用户词…", "已读取用户词", "读取失败")
+
+    def _show_learned_words(self, rows):
+        if not rows:
+            self.status.set_text("尚无可管理的用户词（至少两个字、完整拼音）")
+            return
+        dialog = Gtk.Dialog(title="管理用户词", transient_for=self, modal=True)
+        dialog.set_default_size(480, 380)
+        dialog.add_button("关闭", Gtk.ResponseType.CLOSE)
+        remove = dialog.add_button("删除所选词", Gtk.ResponseType.APPLY)
+        remove.set_sensitive(False)
+        area = dialog.get_content_area()
+        area.set_border_width(10)
+        area.set_spacing(8)
+        search = Gtk.SearchEntry()
+        search.set_placeholder_text("搜索词语或拼音前缀")
+        area.pack_start(search, False, False, 0)
+        model = Gtk.ListStore(str, str, int)
+        for row in rows:
+            model.append(row)
+        filtered = model.filter_new()
+
+        def matches(store, it, _data=None):
+            query = search.get_text().strip().lower()
+            return not query or query in store[it][0] or store[it][1].startswith(query)
+
+        filtered.set_visible_func(matches)
+        search.connect("search-changed", lambda *_: filtered.refilter())
+        tree = Gtk.TreeView(model=filtered)
+        for idx, title in enumerate(("词语", "拼音", "次数")):
+            tree.append_column(Gtk.TreeViewColumn(title, Gtk.CellRendererText(), text=idx))
+        selection = tree.get_selection()
+        selection.set_mode(Gtk.SelectionMode.MULTIPLE)
+        selection.connect("changed", lambda current: remove.set_sensitive(current.count_selected_rows() > 0))
+        scroll = Gtk.ScrolledWindow()
+        scroll.add(tree)
+        area.pack_start(scroll, True, True, 0)
+        dialog.show_all()
+        while dialog.run() == Gtk.ResponseType.APPLY:
+            selected_model, paths = selection.get_selected_rows()
+            selected = [tuple(selected_model[path]) for path in paths]
+            if not selected:
+                continue
+            confirm = Gtk.MessageDialog(transient_for=dialog, modal=True,
+                                        message_type=Gtk.MessageType.QUESTION,
+                                        buttons=Gtk.ButtonsType.NONE,
+                                        text=f"删除这 {len(selected)} 个词的学习记录？")
+            confirm.format_secondary_text("不会降低词库原有词条的排名，也不会删除其他读音的记录。")
+            confirm.add_buttons("取消", Gtk.ResponseType.CANCEL, "删除", Gtk.ResponseType.ACCEPT)
+            confirm.set_default_response(Gtk.ResponseType.CANCEL)
+            accepted = confirm.run() == Gtk.ResponseType.ACCEPT
+            confirm.destroy()
+            if accepted:
+                dialog.destroy()
+                self._run_operation(lambda: forget_learned_words(self.control_path, selected),
+                                    "正在删除所选词…", "已删除所选词", "删除失败")
+                return
+        dialog.destroy()
 
     def _on_destroy(self, _widget):
         self.closed = True
