@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.10.0
+## 2.10.0 - 2026-11-25
 
 - Add optional Wubi 86 and full-Pinyin mixed input for simplified Chinese.
   It supports code hints, eligible four-key automatic commits and completion
