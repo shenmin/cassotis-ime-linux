@@ -58,7 +58,9 @@ type
     );
     TncFuzzyPinyinRules = set of TncFuzzyPinyinRule;
 
-    TncCandidateSource = (cs_rule, cs_user, cs_quick_input);
+    // cs_wubi: an entry of the Wubi 86 code table (the Wubi/pinyin mixed
+    // scheme); it commits as typed and teaches nothing.
+    TncCandidateSource = (cs_rule, cs_user, cs_quick_input, cs_wubi);
     TncCandidateDisplayKind = (cdk_default, cdk_lm_compound, cdk_sentence_prefix);
     TncCandidateSelectionKind = (csk_digits, csk_letters, csk_unlabelled);
     TncInputMode = (im_chinese, im_english);
@@ -77,11 +79,16 @@ type
         cpks_minus_plus,
         cpks_brackets,
         cpks_comma_period,
-        cpks_shift_tab
+        cpks_shift_tab,
+        cpks_semicolon_quote
     );
     TncOneKeyCompletionKey = (ock_tab, ock_backtick);
-    TncSecondThirdCandidateKeys = (stck_none, stck_semicolon_quote);
-    TncSelectCharacterKeys = (sck_none, sck_brackets);
+    TncSecondThirdCandidateKeys = (stck_none, stck_semicolon_quote, stck_minus_plus,
+        stck_brackets, stck_comma_period);
+    TncSelectCharacterKeys = (sck_none, sck_brackets, sck_minus_plus,
+        sck_comma_period, sck_semicolon_quote);
+    TncCandidateKeyPair = (ckp_none, ckp_minus_plus, ckp_brackets,
+        ckp_comma_period, ckp_semicolon_quote);
     TncCandidateLayout = (cl_auto, cl_vertical, cl_horizontal);
     TncShortcutAction = (
         sa_input_mode_toggle,
@@ -118,6 +125,7 @@ type
         input_mode: TncInputMode;
         dictionary_variant: TncDictionaryVariant;
         pinyin_scheme: TncPinyinInputScheme;
+        wubi_mixed, wubi_context_order: Boolean;
         fuzzy_pinyin_enabled: Boolean;
         fuzzy_pinyin_rules: TncFuzzyPinyinRules;
         full_width_mode: Boolean;
@@ -165,6 +173,12 @@ type
         debug_mode: Boolean;
         dictionary_variant: TncDictionaryVariant;
         shortcuts: TncShortcutConfig;
+        // The Wubi/pinyin mixed scheme (Wubi 86 with full pinyin). The pinyin
+        // side is full pinyin and the variant simplified while it is on.
+        wubi_mixed: Boolean;
+        // In that scheme, a code's entries are ordered by the text before the
+        // input; off keeps the table's order.
+        wubi_context_order: Boolean;
     end;
 
     TncCandidate = record
@@ -201,7 +215,10 @@ type
         okcs_long_neural,
         okcs_document_copy,
         okcs_exact_tail_fallback,
-        okcs_custom_phrase
+        okcs_custom_phrase,
+        // A word of the Wubi table whose code goes on from the keys typed
+        // (the Wubi/pinyin mixed scheme). Appended last.
+        okcs_wubi
     );
 
     TncOneKeyCompletion = record
@@ -361,6 +378,7 @@ type
         selection_kind: TncCandidateSelectionKind;
         async_pending: Boolean;
         completion_is_exact_tail: Boolean;
+        first_has_wubi_hint: Boolean;
         raw_input_candidate: string;
         raw_input_selected: Boolean;
         commit_text: string;
@@ -466,6 +484,7 @@ begin
     value.handled := False;
     value.async_pending := False;
     value.completion_is_exact_tail := False;
+    value.first_has_wubi_hint := False;
     value.raw_input_candidate := '';
     value.raw_input_selected := False;
     value.commit_text := '';
@@ -486,6 +505,7 @@ begin
     value.input_mode := im_chinese;
     value.dictionary_variant := dv_simplified;
     value.pinyin_scheme := pis_full_pinyin;
+    value.wubi_context_order := True;
     value.fuzzy_pinyin_enabled := False;
     value.fuzzy_pinyin_rules := [];
     value.full_width_mode := False;
@@ -590,6 +610,8 @@ begin
         right_value.one_key_completion_key) and
         (left_value.second_third_candidate_keys = right_value.second_third_candidate_keys) and
         (left_value.select_character_keys = right_value.select_character_keys) and
+        (left_value.wubi_mixed = right_value.wubi_mixed) and
+        (left_value.wubi_context_order = right_value.wubi_context_order) and
         (left_value.debug_mode = right_value.debug_mode) and
         (left_value.shortcuts.signature = right_value.shortcuts.signature) and
         ShortcutEqual(left_value.shortcuts.input_mode_toggle,

@@ -150,8 +150,9 @@ Adapters retain the configured completion key label but omit the prediction
 arrow for this fallback. Bit 2 requests letter selection keys (numeric quick
 input); bit 3 requests an unlabelled candidate list. With neither set, selection
 uses digits. Setting both is invalid. Schema 2 adds bit 4, `raw_input_selected`,
-and a trailing `raw_input_candidate` string after the candidate array. Bits 5
-through 7 remain reserved. Decoders also accept schema 1 without that string
+and a trailing `raw_input_candidate` string after the candidate array. Bit 5
+indicates a Wubi code hint in the first candidate's annotation; it is display
+metadata, not committed text. Bits 6 and 7 remain reserved. Decoders also accept schema 1 without that string
 or bit, supplying empty/unselected raw input. Raw input may appear only on page
 zero; selecting an empty raw slot is invalid. It is not a numbered Chinese
 candidate and does not alter Chinese selection indexes or deletion permissions.
@@ -188,9 +189,9 @@ ends polling, whether the model accepted a completion or abstained. Adapters
 use a bounded polling interval and discard the request after focus loss,
 context reset, generation change, timeout, or transport failure.
 
-## Engine State Schema 10
+## Engine State Schema 11
 
-The current state payload is schema 10:
+The current state payload is schema 11:
 
 | Order | Type | Field |
 | ---: | --- | --- |
@@ -206,8 +207,9 @@ The current state payload is schema 10:
 | 10 | 5 x shortcut | mode, punctuation, dictionary, width, settings |
 | 11 | string | Half-width punctuation exceptions: unique ASCII punctuation, at most 32 characters |
 | 12 | `u8` | Candidate layout: 0 automatic, 1 fixed vertical, 2 fixed horizontal |
-| 13 | `u8` | Second/third selection keys: 0 off, 1 semicolon/apostrophe |
-| 14 | `u8` | First/last character from the selected candidate: 0 off, 1 square brackets |
+| 13 | `u8` | Second/third selection: 0 off, 1 semicolon/apostrophe, 2 minus/equal, 3 brackets, 4 comma/period |
+| 14 | `u8` | First/last character: 0 off, 1 brackets, 2 minus/equal, 3 comma/period, 4 semicolon/apostrophe |
+| 15 | `u8` | Bit 0: mixed Wubi 86/full Pinyin; bit 1: Wubi context order. Other bits reserved. |
 
 One shortcut is `u16 key_code`, `u8` Shift/Ctrl/Alt mask, and a `u8 disabled`
 boolean (0 or 1). A disabled shortcut retains its validated chord but neither
@@ -228,8 +230,11 @@ layout; older payloads default to automatic, and values outside 0..2 are rejecte
 Schema 9 appends the second/third selection setting; older payloads default
 to off and values outside 0..1 are rejected.
 Schema 10 appends the first/last character setting; it defaults to off for
-earlier payloads. Values outside 0..1 and the combination of bracket
-paging with bracket character selection are rejected by both codecs.
+earlier payloads. Schema 11 extends the selection enums and adds Wubi
+flags. Older frames select Pinyin with Wubi context ordering enabled for
+future use. Wubi requires simplified Chinese and full Pinyin. Duplicate
+physical punctuation pairs are invalid; the settings UI and controller
+resolve them in paging, second/third, first/last order before sending.
 Layout is presentation-only: it does not change engine ranking or reset a
 composition. Older schemas must not carry new
 flags or trailing data. Other payload types, except engine results, remain

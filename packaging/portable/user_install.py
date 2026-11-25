@@ -127,6 +127,7 @@ class Layout:
         if anchor == "data":
             return name in {
                 "cassotis-ime/dict_sc.db", "cassotis-ime/dict_tc.db",
+                "cassotis-ime/wubi86_table.txt",
                 "cassotis-ime/portable-install.json",
                 "cassotis-ime/.portable-install.lock",
                 "ibus/component/cassotis.xml", "fcitx5/addon/cassotis.conf",
@@ -368,7 +369,7 @@ def make_plan(files: dict[str, Path], layout: Layout, frameworks: list[str]) -> 
                 continue
             plan["home/.local/libexec/cassotis-ime/" + leaf] = Payload(
                 path, stat.S_IMODE(path.stat().st_mode) & 0o777)
-        elif name in (DATA + "dict_sc.db", DATA + "dict_tc.db"):
+        elif name in (DATA + "dict_sc.db", DATA + "dict_tc.db", DATA + "wubi86_table.txt"):
             plan["data/cassotis-ime/" + path.name] = Payload(path)
         elif name.startswith(DOCS):
             plan["data/doc/cassotis-ime/" + name[len(DOCS):]] = Payload(path)

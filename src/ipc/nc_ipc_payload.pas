@@ -16,7 +16,7 @@ const
     c_ipc_engine_state_shortcuts_schema_version = 3;
     c_ipc_engine_state_debug_schema_version = 4;
     c_ipc_engine_state_decimal_schema_version = 6;
-    c_ipc_engine_state_schema_version = 10;
+    c_ipc_engine_state_schema_version = 11;
     c_ipc_engine_result_schema_version = 2;
     c_ipc_payload_max_text_bytes = 1024 * 1024;
     c_ipc_payload_max_candidates = 256;
@@ -86,9 +86,10 @@ const
     c_engine_result_flag_letter_keys = $04;
     c_engine_result_flag_unlabelled = $08;
     c_engine_result_flag_raw_selected = $10;
+    c_engine_result_flag_first_wubi_hint = $20;
     c_engine_result_known_flags = c_engine_result_flag_async_pending or
         c_engine_result_flag_exact_tail or c_engine_result_flag_letter_keys or
-        c_engine_result_flag_unlabelled or c_engine_result_flag_raw_selected;
+        c_engine_result_flag_unlabelled or c_engine_result_flag_raw_selected or c_engine_result_flag_first_wubi_hint;
     c_shortcut_flag_shift = $01;
     c_shortcut_flag_control = $02;
     c_shortcut_flag_alt = $04;
@@ -703,6 +704,8 @@ begin
             result_flags := result_flags or c_engine_result_flag_exact_tail;
         if engine_result.raw_input_selected then
             result_flags := result_flags or c_engine_result_flag_raw_selected;
+        if engine_result.first_has_wubi_hint then
+            result_flags := result_flags or c_engine_result_flag_first_wubi_hint;
         case engine_result.selection_kind of
             csk_letters: result_flags := result_flags or c_engine_result_flag_letter_keys;
             csk_unlabelled: result_flags := result_flags or c_engine_result_flag_unlabelled;
@@ -789,6 +792,8 @@ begin
                 (result_flags and c_engine_result_flag_exact_tail) <> 0;
             engine_result.raw_input_selected :=
                 (result_flags and c_engine_result_flag_raw_selected) <> 0;
+            engine_result.first_has_wubi_hint :=
+                (result_flags and c_engine_result_flag_first_wubi_hint) <> 0;
             if (result_flags and c_engine_result_flag_letter_keys) <> 0 then
                 engine_result.selection_kind := csk_letters
             else if (result_flags and c_engine_result_flag_unlabelled) <> 0 then
@@ -950,6 +955,7 @@ begin
         writer.WriteByte(Ord(state.candidate_layout));
         writer.WriteByte(Ord(state.second_third_candidate_keys));
         writer.WriteByte(Ord(state.select_character_keys));
+        writer.WriteByte(Ord(state.wubi_mixed) or (Ord(state.wubi_context_order) shl 1));
         Result := writer.Finish;
     finally
         writer.Free;
@@ -972,6 +978,7 @@ var
     candidate_layout: Byte;
     second_third_candidate_keys: Byte;
     select_character_keys: Byte;
+    wubi_flags: Byte;
     reserved: Word;
     reserved_byte: Byte;
 begin
@@ -985,6 +992,7 @@ begin
         candidate_layout := Ord(state.candidate_layout);
         second_third_candidate_keys := Ord(state.second_third_candidate_keys);
         select_character_keys := Ord(sck_none);
+        wubi_flags := 2; // Older states use pinyin and enable contextual Wubi ordering.
         reserved := 0;
         reserved_byte := 0;
         Result := ReadPayloadHeaderVersion(reader, version) and
@@ -1020,6 +1028,21 @@ begin
             Result := reader.ReadByte(second_third_candidate_keys);
         if Result and (version >= 10) then
             Result := reader.ReadByte(select_character_keys);
+        if Result and (version >= 11) then
+            Result := reader.ReadByte(wubi_flags);
+        if Result and (version < 11) and ((candidate_page_key_scheme > Ord(cpks_shift_tab)) or
+            (second_third_candidate_keys > Ord(stck_semicolon_quote)) or
+            (select_character_keys > Ord(sck_brackets))) then
+        begin
+            reader.SetError('Invalid candidate key pair for legacy state payload');
+            Result := False;
+        end;
+        if Result and ((wubi_flags > 3) or (((wubi_flags and 1) <> 0) and
+            ((pinyin_scheme <> Ord(pis_full_pinyin)) or (dictionary_variant <> Ord(dv_simplified))))) then
+        begin
+            reader.SetError('State payload contains invalid Wubi settings');
+            Result := False;
+        end;
         if Result and (select_character_keys > Ord(High(TncSelectCharacterKeys))) then
         begin
             reader.SetError('State payload contains invalid character selection keys');
@@ -1119,6 +1142,8 @@ begin
             state.input_mode := TncInputMode(input_mode);
             state.dictionary_variant := TncDictionaryVariant(dictionary_variant);
             state.pinyin_scheme := TncPinyinInputScheme(pinyin_scheme);
+            state.wubi_mixed := (wubi_flags and 1) <> 0;
+            state.wubi_context_order := (wubi_flags and 2) <> 0;
             state.full_width_mode := (flags and c_state_flag_full_width) <> 0;
             state.punctuation_full_width :=
                 (flags and c_state_flag_punctuation_full_width) <> 0;
@@ -1146,8 +1171,10 @@ begin
                 reader.SetError('State payload contains conflicting page and completion keys');
                 Result := False;
             end
-            else if nc_select_character_keys_conflict_with_page_keys(
-                state.select_character_keys, state.candidate_page_key_scheme) then
+            else if (state.second_third_candidate_keys <> nc_resolve_second_third_candidate_keys(
+                state.second_third_candidate_keys, state.candidate_page_key_scheme)) or
+                (state.select_character_keys <> nc_resolve_select_character_keys(
+                state.select_character_keys, state.candidate_page_key_scheme, state.second_third_candidate_keys)) then
             begin
                 reader.SetError('State payload contains conflicting page and character keys');
                 Result := False;

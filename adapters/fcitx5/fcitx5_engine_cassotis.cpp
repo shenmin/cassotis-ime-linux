@@ -37,7 +37,8 @@ namespace {
 
 constexpr std::size_t kDefaultPageSize = 9;
 constexpr glong kSurroundingRadius = 2048;
-constexpr std::size_t kSchemeCount = CASSOTIS_PINYIN_ZHINENGABC + 1;
+constexpr std::size_t kWubiScheme = CASSOTIS_PINYIN_ZHINENGABC + 1;
+constexpr std::size_t kSchemeCount = kWubiScheme + 1;
 constexpr std::size_t kFuzzyRuleCount = CASSOTIS_FUZZY_RULE_COUNT;
 constexpr std::uint64_t kStatePollIntervalUsec = 500000;
 constexpr std::uint64_t kResultPollIntervalUsec = 25000;
@@ -49,12 +50,12 @@ constexpr guint32 kDefaultFuzzyRules =
     CASSOTIS_FUZZY_IN_ING;
 
 const std::array<const char *, kSchemeCount> kSchemeSymbols = {
-    "拼", "微", "鹤", "自", "搜", "紫", "加", "智",
+    "拼", "微", "鹤", "自", "搜", "紫", "加", "智", "五",
 };
 
 const std::array<const char *, kSchemeCount> kSchemeNames = {
     "全拼",       "微软双拼", "小鹤双拼", "自然码双拼",
-    "搜狗双拼",   "紫光双拼", "拼音加加双拼", "智能 ABC 双拼",
+    "搜狗双拼",   "紫光双拼", "拼音加加双拼", "智能 ABC 双拼", "五笔混输（86）",
 };
 
 const std::array<const char *, kFuzzyRuleCount> kFuzzyRuleNames = {
@@ -100,6 +101,8 @@ bool statesEqual(const CassotisEngineState &left,
     return left.input_mode == right.input_mode &&
            left.dictionary_variant == right.dictionary_variant &&
            left.pinyin_scheme == right.pinyin_scheme &&
+           left.wubi_mixed == right.wubi_mixed &&
+           left.wubi_context_order == right.wubi_context_order &&
            left.fuzzy_pinyin_enabled == right.fuzzy_pinyin_enabled &&
            left.fuzzy_pinyin_rules == right.fuzzy_pinyin_rules &&
            left.full_width_mode == right.full_width_mode &&
@@ -598,7 +601,8 @@ void CassotisFcitxState::renderResult(CassotisEngineResult *result) {
         }
         for (guint32 index = 0; index < result->candidate_count; ++index) {
             const auto &candidate = result->candidates[index];
-            std::string comment = candidate.comment ? candidate.comment : "";
+            const bool showComment = !engine_->state_.wubi_mixed || candidate.has_wubi_hint;
+            std::string comment = showComment && candidate.comment ? candidate.comment : "";
             if (engine_->state_.debug_mode &&
                 candidate.has_dictionary_weight) {
                 if (!comment.empty()) {
@@ -1111,7 +1115,7 @@ void CassotisFcitxEngine::updateStatus(
     widthAction_.setShortText(state_.full_width_mode ? "全" : "半");
     widthAction_.setLongText(state_.full_width_mode ? "全角字符" : "半角字符");
     const std::size_t scheme =
-        static_cast<std::size_t>(state_.pinyin_scheme);
+        state_.wubi_mixed ? kWubiScheme : static_cast<std::size_t>(state_.pinyin_scheme);
     if (scheme < kSchemeCount) {
         schemeAction_.setShortText(kSchemeSymbols[scheme]);
         schemeAction_.setLongText(kSchemeNames[scheme]);
@@ -1205,8 +1209,10 @@ void CassotisFcitxEngine::initializeActions() {
                     return;
                 }
                 auto changed = state_;
-                changed.pinyin_scheme =
+                changed.wubi_mixed = index == kWubiScheme;
+                changed.pinyin_scheme = changed.wubi_mixed ? CASSOTIS_PINYIN_FULL :
                     static_cast<CassotisPinyinScheme>(index);
+                if (changed.wubi_mixed) changed.dictionary_variant = CASSOTIS_DICTIONARY_SIMPLIFIED;
                 setState(changed, inputContext);
             });
         schemeMenu_.addAction(&action);

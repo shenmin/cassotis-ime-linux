@@ -424,6 +424,7 @@ function TncUserDictionary.LoadEngineState(out state: TncEngineState): Boolean;
 const
     c_query = 'SELECT key, value FROM meta WHERE key IN (' +
         '''setting.pinyin_scheme'', ''setting.dictionary_variant'', ' +
+        '''setting.wubi_mixed'', ''setting.wubi_context_order'', ' +
         '''setting.full_width_mode'', ' +
         '''setting.punctuation_full_width'', ' +
         '''setting.decimal_period_after_digit'', ' +
@@ -514,6 +515,10 @@ begin
                 Cardinal(setting_value)) then
                 state.fuzzy_pinyin_rules :=
                     nc_fuzzy_pinyin_rules_from_mask(Cardinal(setting_value))
+            else if key_name = 'setting.wubi_mixed' then
+                state.wubi_mixed := setting_value <> 0
+            else if key_name = 'setting.wubi_context_order' then
+                state.wubi_context_order := setting_value <> 0
             else if key_name = 'setting.full_width_mode' then
                 state.full_width_mode := setting_value <> 0
             else if key_name = 'setting.punctuation_full_width' then
@@ -593,8 +598,15 @@ begin
         state.candidate_page_key_scheme :=
             nc_resolve_candidate_page_key_scheme(
             state.candidate_page_key_scheme, state.one_key_completion_key);
+        state.second_third_candidate_keys := nc_resolve_second_third_candidate_keys(
+            state.second_third_candidate_keys, state.candidate_page_key_scheme);
         state.select_character_keys := nc_resolve_select_character_keys(
-            state.select_character_keys, state.candidate_page_key_scheme);
+            state.select_character_keys, state.candidate_page_key_scheme, state.second_third_candidate_keys);
+        if state.wubi_mixed then
+        begin
+            state.dictionary_variant := dv_simplified;
+            state.pinyin_scheme := pis_full_pinyin;
+        end;
         nc_normalize_shortcut_config(state.shortcuts);
         FErrorMessage := '';
         Result := True;
@@ -622,6 +634,10 @@ begin
     Result := ExecutePairStatement(c_upsert_setting,
         'setting.pinyin_scheme', UTF8Decode(IntToStr(
         Ord(state.pinyin_scheme)))) and
+        ExecutePairStatement(c_upsert_setting, 'setting.wubi_mixed',
+        UTF8Decode(IntToStr(Ord(state.wubi_mixed)))) and
+        ExecutePairStatement(c_upsert_setting, 'setting.wubi_context_order',
+        UTF8Decode(IntToStr(Ord(state.wubi_context_order)))) and
         ExecutePairStatement(c_upsert_setting,
         'setting.dictionary_variant', UTF8Decode(IntToStr(
         Ord(state.dictionary_variant)))) and
@@ -659,10 +675,11 @@ begin
         Ord(state.one_key_completion_key)))) and
         ExecutePairStatement(c_upsert_setting,
         'setting.second_third_candidate_keys', UTF8Decode(IntToStr(
-        Ord(state.second_third_candidate_keys)))) and
+        Ord(nc_resolve_second_third_candidate_keys(state.second_third_candidate_keys,
+        state.candidate_page_key_scheme))))) and
         ExecutePairStatement(c_upsert_setting, 'setting.select_character_keys',
         UTF8Decode(IntToStr(Ord(nc_resolve_select_character_keys(
-        state.select_character_keys, state.candidate_page_key_scheme))))) and
+        state.select_character_keys, state.candidate_page_key_scheme, state.second_third_candidate_keys))))) and
         ExecutePairStatement(c_upsert_setting, 'setting.debug_mode',
         UTF8Decode(IntToStr(Ord(state.debug_mode)))) and
         ExecutePairStatement(c_upsert_setting, 'setting.shortcut_disabled_mask',

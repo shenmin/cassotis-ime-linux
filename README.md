@@ -28,7 +28,7 @@
 
 Cassotis IME for Linux (言泉输入法 Linux 版) is an experimental Chinese Pinyin input method for Linux desktops. Native IBus and Fcitx 5 adapters connect to a shared Free Pascal engine service ported from [Cassotis IME for Windows](https://github.com/shenmin/cassotis-ime), paired with dictionaries built from [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon). Candidate ranking runs locally on the CPU using an in-house character-level language model. There are no ads, bundled programs, or telemetry: dictionaries, settings, and user learning data remain on the local machine.
 
-Version 2.9.0 aligns with Cassotis IME for Windows and Cassotis Lexicon v2.9.0. Release highlights are summarized in the [version history](#version-history) below, full change notes are in the [changelog](CHANGELOG.md), and prebuilt packages are published under [Releases](https://github.com/shenmin/cassotis-ime-linux/releases).
+Version 2.10.0 aligns with Cassotis IME for Windows and Cassotis Lexicon v2.10.0. Release highlights are summarized in the [version history](#version-history) below, full change notes are in the [changelog](CHANGELOG.md), and prebuilt packages are published under [Releases](https://github.com/shenmin/cassotis-ime-linux/releases).
 
 Current goals:
 - Track each Windows engine release and verify cross-platform parity on shared benchmarks.
@@ -50,12 +50,13 @@ The Chinese name **言泉** (*Yanquan*, "Spring of Words") echoes the imagery of
 - **Short words.** Competing exact-match candidates are ranked using language-model scores and general-corpus word frequencies, incorporating committed text before the cursor when available. Without context, general and conversational word-frequency signals prevent rare words from displacing common defaults solely on language-model score. With preceding context, single-syllable character candidates are also ordered by the language model.
 - **Traditional input.** Candidates and committed text use Taiwan traditional character forms. Internally, language-model scoring and background completion evaluate simplified equivalents so traditional character forms are not penalized during ranking.
 - **Short phrases.** Three- to five-syllable inputs absent from the dictionary (for example `jiuguize` → `旧规则`) are assembled from base dictionary words, ranked as complete clauses by the language model using preceding context, and checked for homophone errors. Non-top phrase selections are recorded in the user dictionary.
-- **Pinyin schemes.** Full Pinyin, initial-letter abbreviations (`jt` → `今天`), and seven Double Pinyin layouts (Microsoft, Xiaohe, Ziranma, Sogou, Ziguang, Pinyin Jiajia, and Zhineng ABC) share candidate ranking and user learning data. Eleven fuzzy-Pinyin pairs can be toggled individually. `lue`/`nue` are accepted for `lve`/`nve` and `jv`/`qv`/`xv` for `ju`/`qu`/`xu`; an apostrophe separates syllables unless the optional second/third selection keys are enabled.
-- **Second/third selection keys.** Optional `;` and `'` shortcuts select the second and third visible candidates (disabled by default). In Double Pinyin layouts that use `;` as a final key, syllable input takes precedence. See [Selection Keys](CONFIGURATION.md#secondthird-selection-keys).
+- **Pinyin schemes.** Full Pinyin, initial-letter abbreviations (`jt` → `今天`), and seven Double Pinyin layouts (Microsoft, Xiaohe, Ziranma, Sogou, Ziguang, Pinyin Jiajia, and Zhineng ABC) share candidate ranking and user learning data. Eleven fuzzy-Pinyin pairs can be toggled individually. `lue`/`nue` are accepted for `lve`/`nve` and `jv`/`qv`/`xv` for `ju`/`qu`/`xu`; an apostrophe separates syllables by default.
+- **Wubi 86 with full Pinyin.** Choose the optional mixed scheme to type either a Wubi code (`wq` → `你`) or a full-Pinyin word without switching. Ambiguous codes wait for selection; eligible unique four-key codes commit automatically. Available in simplified Chinese.
+- **Candidate shortcuts.** Assign different punctuation pairs to paging, second/third selection and extracting the first/last character. Settings lists only available pairs. See [Selection Keys](CONFIGURATION.md#secondthird-selection-keys).
 - **Dictionaries and learning.** Simplified and traditional base dictionaries are kept separate from the user dictionary. Learned entries adapt to the active simplified or traditional mode via OpenCC; highlight a learned candidate and press `Ctrl+Delete` to delete it.
 - **Document-local adaptation.** Surrounding text exposed by the input framework temporarily boosts terms and continuations recurring in the active document. Context state stays in memory, is isolated per input context, and is never written to disk.
 - **Learned words.** In Advanced, import personal typing frequencies, export learned words, or search by text or pinyin and forget selected readings without penalizing the base dictionary. IBus and Fcitx 5 use the same user database. See [Personal word frequencies](CONFIGURATION.md#importing-word-frequencies).
-- **Quick input.** Supports `ufh` symbols, `uxh` numbered markers, `usx` mathematical symbols, `ujt` arrows, `udw` units, `ubd` Chinese punctuation, and `urq`/`usj`/`uxq` for the current date, time, and weekday; `i123.45` and `v123.45` format Chinese numerals and uppercase currency amounts. Double Pinyin enters these modes with `Shift+U/I/V`. See [Quick Input](CONFIGURATION.md#quick-input).
+- **Quick input.** Supports `ufh` symbols, `uxh` numbered markers, `usx` mathematical symbols, `ujt` arrows, `udw` units, `ubd` Chinese punctuation, and `urq`/`usj`/`uxq` for the current date, time, and weekday; `i123.45` and `v123.45` format Chinese numerals and uppercase currency amounts. Double Pinyin and Wubi mixed input enter these modes with `Shift+U/I/V`. See [Quick Input](CONFIGURATION.md#quick-input).
 - **Chinese punctuation.** In Chinese punctuation with half-width input, a period typed immediately after digits outputs a decimal point, and symbols kept half-width can be customized in Settings; the default Markdown preset keeps ``-#*+_=`~[]<>|@`` half-width while commas, periods, parentheses, and quotation marks stay Chinese.
 - **Settings.** In the GTK sidebar, **Keys** configures paging, candidate selection and completion. **Shortcuts** configures actions such as switching input mode; each can be disabled without losing its binding.
 - **Custom phrases.** Map letter shortcuts to fixed phrases, addresses, or multiline text. Exact shortcut matches appear in the completion row and commit literally via the configured `Tab` or backtick key without altering numbered candidates or user-dictionary learning. Settings supports custom ordering and JSON import/export, with diagnostics under Advanced. See [Custom Phrases](CONFIGURATION.md#custom-phrases).
@@ -81,7 +82,7 @@ Download the `.deb` matching your system architecture, verify its SHA-256 checks
 
 ```bash
 arch="$(dpkg --print-architecture)"  # amd64 or arm64
-package="cassotis-ime_2.9.0_${arch}.deb"
+package="cassotis-ime_2.10.0_${arch}.deb"
 sha256sum "${package}"
 sudo apt install "./${package}"
 ```
@@ -102,10 +103,10 @@ Download the portable archive matching `uname -m` (`x86_64` or `aarch64`) and ve
 
 ```bash
 arch="$(uname -m)"  # x86_64 or aarch64
-archive="cassotis-ime-linux-2.9.0-${arch}.tar.gz"
+archive="cassotis-ime-linux-2.10.0-${arch}.tar.gz"
 sha256sum "${archive}"
 tar -xzf "${archive}"
-cd "cassotis-ime-linux-2.9.0-${arch}"
+cd "cassotis-ime-linux-2.10.0-${arch}"
 ./install.sh --user --check &&
 ./install.sh --user
 ```
@@ -187,7 +188,7 @@ Base dictionaries are schema-24 SQLite databases built from [Cassotis Lexicon](h
 - base word lists: `dict_unihan_sc.txt`, `dict_unihan_tc.txt`, `dict_clean_sc.txt`, `dict_clean_tc.txt`
 - corpus-derived statistical tables: word-transition priors, completion priors, general-corpus word frequencies, conversational word frequencies, and the precomputed short-word promotion table
 
-The v2.9.0 dictionaries contain 269,924 simplified and 272,681 traditional reading records (including 24,163 and 24,353 single-character records; polyphonic entries store one record per reading). General word-frequency tables cover 207,342 simplified and 209,226 traditional surface forms, and conversational frequency tables cover 110,903 and 111,591 forms. Both dictionaries include curated classical poetry verses and audited polyphonic readings, with Taiwan traditional character standards applied consistently across traditional word lists and ranking tables. User learning data is stored in `~/.local/share/cassotis-ime/user_dict.db`; at startup, the engine prefers base dictionaries paired with the running installation over leftover copies from other install paths. Database schema details and path-override environment variables are documented in [docs/DICTIONARY.md](docs/DICTIONARY.md).
+The v2.10.0 dictionaries contain 270,463 simplified and 273,220 traditional reading records (including 24,163 and 24,353 single-character records; polyphonic entries store one record per reading). General word-frequency tables cover 207,856 simplified and 209,740 traditional surface forms, and conversational frequency tables cover 111,390 and 112,078 forms. Both dictionaries include curated classical poetry verses and audited polyphonic readings, with Taiwan traditional character standards applied consistently across traditional word lists and ranking tables. User learning data is stored in `~/.local/share/cassotis-ime/user_dict.db`; at startup, the engine prefers base dictionaries paired with the running installation over leftover copies from other install paths. Database schema details and path-override environment variables are documented in [docs/DICTIONARY.md](docs/DICTIONARY.md).
 
 ## Models and Ranking
 
@@ -220,10 +221,10 @@ The v2.9.0 dictionaries contain 269,924 simplified and 272,681 traditional readi
 
 ## Benchmarks
 
-The `v2.9.0` rows report native measurements of the current engine and dictionaries, while earlier rows retain their original release measurements; see [Compatibility](COMPATIBILITY.md) for the scope of framework and packaging checks. Since v2.0.0, corpus benchmarks run with wall-clock search, language-model, and completion timeouts disabled: accuracy and latency are recorded from the same completed query using 8 model threads, while deterministic search budgets remain unchanged.
+The `v2.10.0` rows report native measurements of the current engine and dictionaries, while earlier rows retain their original release measurements; see [Compatibility](COMPATIBILITY.md) for the scope of framework and packaging checks. Since v2.0.0, corpus benchmarks run with wall-clock search, language-model, and completion timeouts disabled: accuracy and latency are recorded from the same completed query using 8 model threads, while deterministic search budgets remain unchanged.
 Test methodology, corpus provenance, and scoring rules are detailed in [BENCHMARK.md](BENCHMARK.md) ([Chinese](BENCHMARK.CN.md)). Benchmark cases match Cassotis IME for Windows, sampled from the developer's novel [**Elegance in Timelessness** (永恒的舞动)](https://www.qidian.com/book/1037259117/) and strictly excluded from all training data.
 
-v2.9.0 was measured on 2026-11-23 and 2026-11-24 (UTC+8) on 8-vCPU Ubuntu 26.04.1 VMs: x86_64 with 16 GiB RAM on Intel Core i5-12600K and aarch64 with 8 GiB on Apple silicon. v2.8.0 was measured on the same hosts on 2026-11-18; latency across dates is not a controlled A/B comparison. Versions 2.1.0 through 2.9.0 share the audited corpus. Earlier releases used an 11,728-case contested subset and are not paired case for case. Latencies are in milliseconds.
+v2.10.0 was measured on 2026-11-25 (UTC+8) on two 8-vCPU Ubuntu 26.04.1 VMs: x86_64 with 16 GiB RAM on Intel Core i5-12600K and aarch64 with 8 GiB on Apple silicon. v2.9.0 used the same machines and cases; latencies across dates are not controlled A/B comparisons. Releases since v2.1.0 share the audited corpus; older releases used an 11,728-case contested subset. These are Pinyin results with Wubi disabled. Latencies are in milliseconds.
 
 Installed builds retain the production 100 ms foreground and 120 ms background timeouts. Deadline-free benchmark scores do not imply identical output under production timeouts (for instance, an earlier timed `x86_64` long-sentence run recorded 37 fewer Top1 and 36 fewer Top2 hits). Complete breakdowns, timing definitions, and historical timed runs are documented in [BENCHMARK.md](BENCHMARK.md).
 
@@ -231,6 +232,8 @@ Installed builds retain the production 100 ms foreground and 120 ms background t
 
 | Version | Architecture | Top1 | Top2 | Mean (ms) | P50 (ms) | P95 (ms) | Max (ms) |
 |---|---|---:|---:|---:|---:|---:|---:|
+| `v2.10.0` | x86_64 | 13871/16300 (85.10%) | 14790/16300 (90.74%) | 176.873 | 170 | 302 | 777 |
+| `v2.10.0` | aarch64 | 13871/16300 (85.10%) | 14790/16300 (90.74%) | 119.707 | 112 | 209 | 610 |
 | `v2.9.0` | x86_64 | 13869/16300 (85.09%) | 14789/16300 (90.73%) | 165.707 | 157 | 287 | 751 |
 | `v2.9.0` | aarch64 | 13869/16300 (85.09%) | 14789/16300 (90.73%) | 119.239 | 112 | 209 | 601 |
 | `v2.8.0` | x86_64 | 13750/16300 (84.36%) | 14695/16300 (90.15%) | 166.836 | 160 | 286 | 656 |
@@ -260,6 +263,8 @@ From v2.0.0 onward, accuracy and latency come from the same deadline-free run; v
 
 | Version | Architecture | Top1 | Top2 | Contested Top1 | Contested Top2 | Mean (ms) | P50 (ms) | P95 (ms) | Max (ms) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `v2.10.0` | x86_64 | 63500/65000 (97.69%) | 64563/65000 (99.33%) | 10534/11685 (90.15%) | 11313/11685 (96.82%) | 8.657 | 5 | 24 | 73 |
+| `v2.10.0` | aarch64 | 63500/65000 (97.69%) | 64563/65000 (99.33%) | 10534/11685 (90.15%) | 11313/11685 (96.82%) | 7.649 | 5 | 20 | 48 |
 | `v2.9.0` | x86_64 | 63500/65000 (97.69%) | 64563/65000 (99.33%) | 10534/11685 (90.15%) | 11313/11685 (96.82%) | 8.721 | 6 | 24 | 78 |
 | `v2.9.0` | aarch64 | 63500/65000 (97.69%) | 64563/65000 (99.33%) | 10534/11685 (90.15%) | 11313/11685 (96.82%) | 7.979 | 6 | 21 | 50 |
 | `v2.8.0` | x86_64 | 63502/65000 (97.70%) | 64565/65000 (99.33%) | 10546/11685 (90.25%) | 11315/11685 (96.83%) | 8.549 | 5 | 24 | 76 |
@@ -289,6 +294,8 @@ The table reports queries with preceding context. The contested subset contains 
 
 | Version | Architecture | Completion hits | Average saved keys | Keystroke stability | Key P95 (ms) | Settled P95 (ms) |
 | --- | --- | --- | --- | --- | --- | --- |
+| `v2.10.0` | x86_64 | 10561/12831 (82.31%) | 2.642 | 2178/2234 (97.49%) | 2.029 | 56.014 |
+| `v2.10.0` | aarch64 | 10561/12831 (82.31%) | 2.642 | 2178/2234 (97.49%) | 2.049 | 33.774 |
 | `v2.9.0` | x86_64 | 10561/12831 (82.31%) | 2.642 | 2178/2234 (97.49%) | 2.072 | 54.375 |
 | `v2.9.0` | aarch64 | 10561/12831 (82.31%) | 2.642 | 2178/2234 (97.49%) | 2.071 | 33.011 |
 | `v2.8.0` | x86_64 | 10506/12831 (81.88%) | 2.634 | 2141/2202 (97.23%) | 2.066 | 52.584 |
@@ -316,6 +323,8 @@ The 65,000 short-word cases expand into 12,831 completion opportunities. Since v
 
 | Version | Architecture | Local continuation hits | Predictive coverage | Total saved keys | P95 (ms) |
 | --- | --- | --- | --- | --- | --- |
+| `v2.10.0` | x86_64 | 4012/16300 (24.61%) | 16217/16300 (99.49%) | 9836 | 294 |
+| `v2.10.0` | aarch64 | 4012/16300 (24.61%) | 16217/16300 (99.49%) | 9836 | 202 |
 | `v2.9.0` | x86_64 | 4012/16300 (24.61%) | 16217/16300 (99.49%) | 9836 | 294 |
 | `v2.9.0` | aarch64 | 4012/16300 (24.61%) | 16217/16300 (99.49%) | 9836 | 204 |
 | `v2.8.0` | x86_64 | 3974/16300 (24.38%) | 16231/16300 (99.58%) | 9804 | 285 |
@@ -345,14 +354,14 @@ Each test case omits the final four complete syllables of a sentence and evaluat
 Settings are managed by the shared engine service so IBus and Fcitx 5 stay in sync. Launch **Cassotis IME Settings** from your desktop application menu or the input framework's Cassotis menu.
 
 Key configuration options:
-- Input mode (Simplified Chinese, Traditional Chinese, English) and Full/Double Pinyin layout
+- Input mode (Simplified Chinese, Traditional Chinese, English) and Full/Double Pinyin layout or Wubi 86 mixed input
 - Individual toggles for 11 fuzzy-Pinyin pairs
 - Punctuation style and full-width / half-width character mode
 - Automatic decimal point when `.` follows digits
 - English recognition in Chinese mode (enabled by default)
 - Half-width symbol passthrough set in Chinese punctuation mode (Markdown preset by default)
 - Candidate panel orientation: automatic, fixed vertical, or fixed horizontal
-- Optional `;` and `'` shortcuts for the second and third candidates; optional [first/last character keys](CONFIGURATION.md#first-or-last-character) (`[` and `]`). Both options are off by default.
+- Optional shortcut pairs for selecting the second/third candidate and for taking the [first/last character](CONFIGURATION.md#first-or-last-character); both are disabled by default.
 - Page size, paging keys, completion trigger key, and individually toggleable function shortcuts
 
 User files follow the XDG Base Directory specification: user dictionary at `~/.local/share/cassotis-ime/user_dict.db` and engine socket at `$XDG_RUNTIME_DIR/cassotis-ime/engine.sock`. See [CONFIGURATION.md](CONFIGURATION.md) for the complete reference.
@@ -397,6 +406,8 @@ Major milestones of the Linux port (corresponding Cassotis IME for Windows versi
 **v2.8.0 (Windows v2.8.0): Recent choices and character selection.** Selecting the same word twice within two hours can put it first for that spelling for the next two hours. Optional bracket keys let you commit just the first or last character of the highlighted candidate. This version also refines short-phrase ranking, the reading of sentence-final 没/沒, and contextual ordering of traditional variants.
 
 **v2.9.0: Long-sentence correction and learned-word management.** A learned gate compares a proposed correction with the original sentence; short-word ranking gives everyday conversation more weight. Advanced settings add export, search and removal of learned words.
+
+**v2.10.0: Wubi 86 mixed input.** Wubi and full Pinyin can be typed in the same scheme. Candidate shortcuts are independently configurable, and both Pinyin dictionaries have been updated.
 
 ## License
 Program source code is licensed under GPL-3.0-only. Bundled Cassotis Lexicon database artifacts are licensed under CC BY-SA 4.0. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md), including [lexicon attribution](docs/LEXICON_ATTRIBUTION.md).

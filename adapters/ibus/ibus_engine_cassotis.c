@@ -150,6 +150,8 @@ static gboolean refresh_engine_state(CassotisIbusEngine *self)
               self->state.dictionary_variant !=
                   observed_state.dictionary_variant ||
               self->state.pinyin_scheme != observed_state.pinyin_scheme ||
+              self->state.wubi_mixed != observed_state.wubi_mixed ||
+              self->state.wubi_context_order != observed_state.wubi_context_order ||
               self->state.fuzzy_pinyin_enabled !=
                   observed_state.fuzzy_pinyin_enabled ||
               self->state.fuzzy_pinyin_rules !=
@@ -302,11 +304,14 @@ static gchar *candidate_display_text(const CassotisEngineState *state,
     const gchar *candidate_text =
         candidate->text != NULL ? candidate->text : "";
 
+    const gchar *hint = candidate->has_wubi_hint && candidate->comment
+                            ? candidate->comment : "";
+    const gchar *gap = *hint ? "  " : "";
     if (state->debug_mode && candidate->has_dictionary_weight) {
-        return g_strdup_printf("%s\n%d", candidate_text,
+        return g_strdup_printf("%s%s%s\n%d", candidate_text, gap, hint,
                                candidate->dictionary_weight);
     }
-    return g_strdup(candidate_text);
+    return g_strconcat(candidate_text, gap, hint, NULL);
 }
 
 static IBusLookupTable *build_lookup_table(const CassotisEngineState *state,
@@ -954,9 +959,11 @@ static void cassotis_property_activate(IBusEngine *engine,
         scheme = g_ascii_strtoull(
             property_name + strlen(CASSOTIS_PROP_SCHEME_PREFIX), &end, 10);
         if (end == NULL || *end != '\0' ||
-            scheme > CASSOTIS_PINYIN_ZHINENGABC)
+            scheme > CASSOTIS_PINYIN_ZHINENGABC + 1U)
             return;
-        state.pinyin_scheme = (CassotisPinyinScheme)scheme;
+        state.wubi_mixed = scheme == CASSOTIS_PINYIN_ZHINENGABC + 1U;
+        state.pinyin_scheme = state.wubi_mixed ? CASSOTIS_PINYIN_FULL : (CassotisPinyinScheme)scheme;
+        if (state.wubi_mixed) state.dictionary_variant = CASSOTIS_DICTIONARY_SIMPLIFIED;
     } else {
         return;
     }

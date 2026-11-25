@@ -57,6 +57,7 @@ STATE_KEYS = BASE_STATE_KEYS + SHORTCUT_STATE_KEYS + (
     "candidate_layout",
     "second_third_candidate_keys",
     "select_character_keys",
+    "wubi_mixed", "wubi_context_order",
 )
 
 SCHEME_NAMES = (
@@ -69,6 +70,7 @@ SCHEME_NAMES = (
     "拼音加加双拼",
     "智能 ABC 双拼",
 )
+WUBI_SCHEME = len(SCHEME_NAMES)
 
 FUZZY_RULES = (
     "z / zh",
@@ -89,6 +91,7 @@ PAGE_KEY_SCHEMES = (
     "[ / ]（方括号）",
     ", / .（逗号 / 句号）",
     "Shift+Tab / Tab",
+    "; / '（分号 / 单引号）",
 )
 
 PAGE_KEY_PREVIEWS = (
@@ -96,11 +99,16 @@ PAGE_KEY_PREVIEWS = (
     ("[", "]"),
     (",", "."),
     ("Shift+Tab", "Tab"),
+    (";", "'"),
 )
 
 COMPLETION_KEYS = ("Tab", "`")
-SECOND_THIRD_KEYS = ("关闭", "; / '（分号 / 单引号）")
-SELECT_CHARACTER_KEYS = ("关闭", "[ / ]（首字 / 尾字）")
+# Values are stable protocol IDs, not the indexes of the filtered GTK lists.
+PAGE_PAIRS = ("-=", "[]", ",.", None, ";'")
+SECOND_PAIRS = (None, ";'", "-=", "[]", ",.")
+CHARACTER_PAIRS = (None, "[]", "-=", ",.", ";'")
+SECOND_THIRD_KEYS = tuple(" / ".join(pair) if pair else "关闭" for pair in SECOND_PAIRS)
+SELECT_CHARACTER_KEYS = tuple(" / ".join(pair) if pair else "关闭" for pair in CHARACTER_PAIRS)
 CANDIDATE_LAYOUTS = ("自动", "固定竖排", "固定横排")
 
 CONTROL_TIMEOUT_SECONDS = 35
@@ -176,6 +184,8 @@ DEFAULT_STATE = {
     "input_mode": 0,
     "dictionary_variant": 0,
     "pinyin_scheme": 0,
+    "wubi_mixed": 0,
+    "wubi_context_order": 1,
     "fuzzy_pinyin_enabled": 0,
     "fuzzy_pinyin_rules": 0,
     "full_width_mode": 0,
@@ -209,6 +219,7 @@ PAGE_DEFAULT_KEYS = {
         "input_mode",
         "dictionary_variant",
         "pinyin_scheme",
+        "wubi_mixed", "wubi_context_order",
         "full_width_mode",
         "punctuation_full_width",
         "decimal_period_after_digit",
@@ -354,6 +365,10 @@ def validate_state(state):
         raise ControlError("词库模式超出范围")
     if not 0 <= state["pinyin_scheme"] < len(SCHEME_NAMES):
         raise ControlError("拼音方案超出范围")
+    if state["wubi_mixed"] not in (0, 1) or state["wubi_context_order"] not in (0, 1):
+        raise ControlError("五笔设置值无效")
+    if state["wubi_mixed"] and (state["pinyin_scheme"] or state["dictionary_variant"]):
+        raise ControlError("五笔混输需要简体词库和全拼")
     if state["fuzzy_pinyin_enabled"] not in (0, 1):
         raise ControlError("模糊音开关超出范围")
     if state["fuzzy_pinyin_rules"] & ~((1 << len(FUZZY_RULES)) - 1):
@@ -375,8 +390,11 @@ def validate_state(state):
         raise ControlError("二三候选快捷键超出范围")
     if not 0 <= state["select_character_keys"] < len(SELECT_CHARACTER_KEYS):
         raise ControlError("取首尾字快捷键超出范围")
-    if state["candidate_page_key_scheme"] == 1 and state["select_character_keys"]:
-        raise ControlError("方括号用于候选翻页时，不能同时用于取首尾字")
+    taken = [pair for pair in (PAGE_PAIRS[state["candidate_page_key_scheme"]],
+                               SECOND_PAIRS[state["second_third_candidate_keys"]],
+                               CHARACTER_PAIRS[state["select_character_keys"]]) if pair]
+    if len(set(taken)) != len(taken):
+        raise ControlError("翻页、二三候选和以词取字不能同时使用同一对按键")
     if not 3 <= state["candidate_page_size"] <= 9:
         raise ControlError("每页候选数必须为 3 到 9")
     if not 0 <= state["candidate_layout"] < len(CANDIDATE_LAYOUTS):
@@ -669,8 +687,12 @@ class SettingsWindow(Gtk.ApplicationWindow):
             ("简体中文输入", "繁体中文输入", "英文输入")
         )
         self._add_row(general, 0, "输入模式", self.input_mode)
-        self.pinyin_scheme = self._combo(SCHEME_NAMES)
-        self._add_row(general, 1, "拼音方案", self.pinyin_scheme)
+        self.pinyin_scheme = self._combo((*SCHEME_NAMES, "五笔混输（86）"))
+        self._add_row(general, 1, "输入方案", self.pinyin_scheme)
+        self.wubi_order = Gtk.CheckButton(label="结合前文调整五笔重码的首选")
+        self._add_row(general, 4, "五笔排序", self.wubi_order)
+        self.pinyin_scheme.connect("changed", self._scheme_changed)
+        self.input_mode.connect("changed", self._input_mode_changed)
         self.auto_english = Gtk.CheckButton(label="识别英文单词，空格上屏")
         self.auto_english.set_halign(Gtk.Align.START)
         self._add_row(general, 2, "英文单词", self.auto_english)
@@ -702,6 +724,16 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.punctuation.connect("changed", self._update_ascii_sensitivity)
         self.full_width.connect("toggled", self._update_ascii_sensitivity)
         return page
+
+    def _scheme_changed(self, *_args):
+        mixed = self._combo_value(self.pinyin_scheme) == WUBI_SCHEME
+        self.wubi_order.set_sensitive(mixed)
+        if mixed and self._combo_value(self.input_mode) == 1:
+            self._set_combo_value(self.input_mode, 0)
+
+    def _input_mode_changed(self, *_args):
+        if self._combo_value(self.input_mode) == 1 and self._combo_value(self.pinyin_scheme) == WUBI_SCHEME:
+            self._set_combo_value(self.pinyin_scheme, 0)
 
     def _update_ascii_sensitivity(self, *_args):
         self.ascii_box.set_sensitive(self._combo_value(self.punctuation) == 0
@@ -761,9 +793,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
         selection = self._new_section("二三候选")
         content.pack_start(selection, False, False, 0)
         self.second_third_keys = self._combo(SECOND_THIRD_KEYS)
+        self.second_third_keys.connect("changed", self._candidate_keys_changed)
         self._add_row(selection, 0, "快捷键", self.second_third_keys)
         selection_hint = Gtk.Label(
-            label="用分号、单引号选择当前页的第二、第三候选。双拼编码中的分号优先；启用后单引号不再分隔音节。",
+            label="选择当前页的第二、第三候选。翻页使用的按键不在列表中。",
             xalign=0, wrap=True)
         self._add_row(selection, 1, "说明", selection_hint)
 
@@ -772,7 +805,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.character_keys = self._combo(SELECT_CHARACTER_KEYS)
         self._add_row(character, 0, "快捷键", self.character_keys)
         self._add_row(character, 1, "说明", Gtk.Label(
-            label="输入拼音时，用 [ 或 ] 上屏当前候选的首字或尾字。使用方括号翻页时不可用。",
+            label="上屏当前候选的首字或尾字。翻页和二三候选使用的按键不在列表中。",
             xalign=0, wrap=True))
 
         completion = self._new_section("一键补全")
@@ -1034,20 +1067,39 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.fuzzy_grid.set_sensitive(self.fuzzy_enabled.get_active())
 
     def _completion_key_changed(self, _widget=None):
-        if self.completion_key.get_active() == 0 and self.page_keys.get_active() == 3:
-            self.page_keys.set_active(0)
+        self._candidate_keys_changed()
 
     def _page_keys_changed(self, _widget=None):
-        if self.page_keys.get_active() == 3 and self.completion_key.get_active() == 0:
-            self.completion_key.set_active(1)
-        index = self.page_keys.get_active()
-        self.character_keys.set_sensitive(index != 1)
-        if index == 1:
-            self.character_keys.set_active(0)
-        if 0 <= index < len(PAGE_KEY_PREVIEWS):
-            previous, next_key = PAGE_KEY_PREVIEWS[index]
+        self._candidate_keys_changed()
+
+    def _candidate_keys_changed(self, *_args):
+        if getattr(self, "_updating_keys", False):
+            return
+        self._updating_keys = True
+        try:
+            def refill(combo, captions, allowed):
+                selected = self._combo_value(combo)
+                combo.remove_all()
+                for index in allowed:
+                    combo.append(str(index), captions[index])
+                self._set_combo_value(combo, selected)
+                return self._combo_value(combo)
+
+            page = refill(self.page_keys, PAGE_KEY_SCHEMES,
+                          [i for i in (0, 1, 2, 4, 3)
+                           if i != 3 or self._combo_value(self.completion_key) == 1])
+            used = {PAGE_PAIRS[page]} - {None}
+            pick = refill(self.second_third_keys, SECOND_THIRD_KEYS,
+                          [i for i, pair in enumerate(SECOND_PAIRS) if pair not in used])
+            if pick:
+                used.add(SECOND_PAIRS[pick])
+            refill(self.character_keys, SELECT_CHARACTER_KEYS,
+                   [i for i, pair in enumerate(CHARACTER_PAIRS) if pair not in used])
+            previous, next_key = PAGE_KEY_PREVIEWS[page]
             self.page_previous.set_text(previous)
             self.page_next.set_text(next_key)
+        finally:
+            self._updating_keys = False
 
     @staticmethod
     def _set_combo_value(combo, value):
@@ -1069,7 +1121,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self._set_combo_value(
                 self.input_mode, self.current_dictionary_variant
             )
-        self._set_combo_value(self.pinyin_scheme, state["pinyin_scheme"])
+        self._set_combo_value(self.pinyin_scheme, WUBI_SCHEME if state["wubi_mixed"] else state["pinyin_scheme"])
+        self.wubi_order.set_active(bool(state["wubi_context_order"]))
+        self._scheme_changed()
         self.fuzzy_enabled.set_active(bool(state["fuzzy_pinyin_enabled"]))
         for index, check in enumerate(self.fuzzy_checks):
             check.set_active(bool(state["fuzzy_pinyin_rules"] & (1 << index)))
@@ -1086,11 +1140,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
         )
         self._set_combo_value(self.candidate_layout, state["candidate_layout"])
         self._set_combo_value(
-            self.page_keys, state["candidate_page_key_scheme"]
-        )
-        self._set_combo_value(
             self.completion_key, state["one_key_completion_key"]
         )
+        self._candidate_keys_changed()
+        self._set_combo_value(self.page_keys, state["candidate_page_key_scheme"])
         self.debug_mode.set_active(bool(state["debug_mode"]))
         self._set_combo_value(self.second_third_keys, state["second_third_candidate_keys"])
         self._set_combo_value(self.character_keys, state["select_character_keys"])
@@ -1122,10 +1175,13 @@ class SettingsWindow(Gtk.ApplicationWindow):
         else:
             input_mode = 1
             dictionary_variant = self.current_dictionary_variant
+        scheme = self._combo_value(self.pinyin_scheme)
         changes = {
             "input_mode": input_mode,
-            "dictionary_variant": dictionary_variant,
-            "pinyin_scheme": self._combo_value(self.pinyin_scheme),
+            "dictionary_variant": 0 if scheme == WUBI_SCHEME else dictionary_variant,
+            "pinyin_scheme": 0 if scheme == WUBI_SCHEME else scheme,
+            "wubi_mixed": int(scheme == WUBI_SCHEME),
+            "wubi_context_order": int(self.wubi_order.get_active()),
             "fuzzy_pinyin_enabled": int(self.fuzzy_enabled.get_active()),
             "fuzzy_pinyin_rules": mask,
             "full_width_mode": int(self.full_width.get_active()),

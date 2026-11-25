@@ -12,6 +12,11 @@ Source-specific attribution and license metadata are maintained by that
 project. The attribution snapshot bundled with this release is available in
 [docs/LEXICON_ATTRIBUTION.md](docs/LEXICON_ATTRIBUTION.md).
 
+The separate Wubi 86 code table is derived from SUN Haifeng's tables
+(BSD-3-Clause). The copyright and license are included in
+`third_party/wubi_haifeng/LICENSE` in the source tree and
+`third-party/wubi_haifeng/LICENSE` in the installed documentation.
+
 The program links to platform libraries supplied by the target Linux
 distribution, including Free Pascal runtime components, SQLite, OpenCC, GLib, IBus,
 Fcitx 5, GTK, and PyGObject. Their respective licenses remain unchanged.

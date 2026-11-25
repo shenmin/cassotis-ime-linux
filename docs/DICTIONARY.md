@@ -1,10 +1,10 @@
 # Dictionary And Ranking Boundary
 
-Cassotis IME for Linux v2.9.0 uses the v2.9.0 releases of
+Cassotis IME for Linux v2.10.0 uses the v2.10.0 releases of
 [Cassotis IME](https://github.com/shenmin/cassotis-ime) and
 [Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon).
-The frozen releases are [v2.9.0](https://github.com/shenmin/cassotis-ime/releases/tag/v2.9.0)
-(engine) and [v2.9.0](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.9.0)
+The frozen releases are [v2.10.0](https://github.com/shenmin/cassotis-ime/releases/tag/v2.10.0)
+(engine) and [v2.10.0](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.10.0)
 (lexicon).
 Base dictionaries are read-only. Learning, preferences, and completion feedback
 are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
@@ -13,28 +13,30 @@ are stored separately in a per-user SQLite database shared by IBus and Fcitx 5.
 
 - Current schema: `24`; minimum readable schema: `18`.
 - Simplified database SHA-256:
-  `49e041fb320865f66a3ae79d6f19c60e6f1a9d5d90ee2e56b14cf0d43aef1865`.
+  `fe5391db08b2c4e98daa5e7f87088fe2e7965f24a7cf3ef3ccb8349c2495bf21`.
 - Traditional database SHA-256:
-  `b2d2cd8ed808b121e5e68bb1d8268095c0e1cc7412ed1e530aa1f8b291dc28e9`.
-- Simplified base: 269,924 rows, including 24,163 single-character rows and
-  245,761 multi-character rows.
-- Traditional base: 272,681 rows, including 24,353 single-character rows and
-  248,328 multi-character rows.
-- Simplified/traditional short-query promotion rows: 1,621 / 1,876.
-- Simplified/traditional word-frequency rows: 207,342 / 209,226.
-- Simplified/traditional conversation-frequency rows: 110,903 / 111,591.
+  `0ead7dd4525126c0a575424ce234ba215320c04d057f8d9aaf19843557344ff2`.
+- Simplified base: 270,463 rows, including 24,163 single-character rows and
+  246,300 multi-character rows.
+- Traditional base: 273,220 rows, including 24,353 single-character rows and
+  248,867 multi-character rows.
+- Simplified/traditional short-query promotion rows: 1,627 / 1,882.
+- Simplified/traditional word-frequency rows: 207,856 / 209,740.
+- Simplified/traditional conversation-frequency rows: 111,390 / 112,078.
 - Simplified/traditional LM-transition rows: 904,762 / 833,694.
 - Simplified/traditional completion-competition rows: 42,453 / 42,448.
 - Simplified/traditional completion pair-audit rows: 4,379 / 4,379.
 - Simplified long-completion recall: 103,407 rows, including 41,244 visible paths.
 - Traditional long-completion recall: 98,276 rows, including 38,302 visible paths.
 
+The separate `wubi86_table.txt` contains 129,839 code entries; it is not a SQLite table and is not counted above. It is loaded only for the Wubi 86 mixed scheme. Set `CASSOTIS_WUBI_TABLE` to override its path. Its SHA-256 is `71232d0e77edf7a5765866110cefb42322885e213d2c38aac810013d53c05ae4`.
+
 These are database row counts, including distinct readings of the same text,
 not counts of unique words. The schema version is stored in
 `meta(key = 'schema_version')`. SQLite text is UTF-8.
 
 Older supported schemas remain readable with their available optional signals;
-they do not provide the complete v2.9.0 behavior. Release dictionaries must
+they do not provide the complete v2.10.0 behavior. Release dictionaries must
 include nonempty short-query promotion, word-frequency and conversation-frequency tables as well as
 all other required data. Staging rejects missing tables or active journals.
 Promotion entries are checked against the corresponding words and base weights

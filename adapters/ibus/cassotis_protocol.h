@@ -124,7 +124,8 @@ typedef enum {
     CASSOTIS_PAGE_KEYS_MINUS_PLUS = 0,
     CASSOTIS_PAGE_KEYS_BRACKETS = 1,
     CASSOTIS_PAGE_KEYS_COMMA_PERIOD = 2,
-    CASSOTIS_PAGE_KEYS_SHIFT_TAB = 3
+    CASSOTIS_PAGE_KEYS_SHIFT_TAB = 3,
+    CASSOTIS_PAGE_KEYS_SEMICOLON_QUOTE = 4
 } CassotisCandidatePageKeyScheme;
 
 typedef enum {
@@ -134,12 +135,16 @@ typedef enum {
 
 typedef enum {
     CASSOTIS_SECOND_THIRD_NONE = 0,
-    CASSOTIS_SECOND_THIRD_SEMICOLON_QUOTE = 1
+    CASSOTIS_SECOND_THIRD_SEMICOLON_QUOTE = 1,
+    CASSOTIS_SECOND_THIRD_MINUS_PLUS, CASSOTIS_SECOND_THIRD_BRACKETS,
+    CASSOTIS_SECOND_THIRD_COMMA_PERIOD
 } CassotisSecondThirdCandidateKeys;
 
 typedef enum {
     CASSOTIS_SELECT_CHARACTER_NONE = 0,
-    CASSOTIS_SELECT_CHARACTER_BRACKETS = 1
+    CASSOTIS_SELECT_CHARACTER_BRACKETS = 1,
+    CASSOTIS_SELECT_CHARACTER_MINUS_PLUS, CASSOTIS_SELECT_CHARACTER_COMMA_PERIOD,
+    CASSOTIS_SELECT_CHARACTER_SEMICOLON_QUOTE
 } CassotisSelectCharacterKeys;
 
 /* Wire values must match TncCandidateLayout in nc_types. */
@@ -197,6 +202,7 @@ typedef struct {
     CassotisInputMode input_mode;
     CassotisDictionaryVariant dictionary_variant;
     CassotisPinyinScheme pinyin_scheme;
+    gboolean wubi_mixed, wubi_context_order;
     gboolean fuzzy_pinyin_enabled;
     guint32 fuzzy_pinyin_rules;
     gboolean full_width_mode;
@@ -220,6 +226,7 @@ typedef struct {
     gint32 score;
     gint32 dictionary_weight;
     gboolean has_dictionary_weight;
+    gboolean has_wubi_hint;
     gboolean deletable;
 } CassotisCandidate;
 
@@ -290,6 +297,7 @@ GByteArray *cassotis_protocol_build_set_state_request(
     const CassotisEngineState *state);
 
 void cassotis_engine_state_init_defaults(CassotisEngineState *state);
+void cassotis_resolve_candidate_keys(CassotisEngineState *state);
 
 gboolean cassotis_protocol_parse_header(
     const guint8 *data,

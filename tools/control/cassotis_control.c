@@ -101,6 +101,8 @@ static void print_state(const CassotisEngineState *state)
     g_print("candidate_layout=%u\n", (guint)state->candidate_layout);
     g_print("second_third_candidate_keys=%u\n", (guint)state->second_third_candidate_keys);
     g_print("select_character_keys=%u\n", (guint)state->select_character_keys);
+    g_print("wubi_mixed=%u\n", (guint)state->wubi_mixed);
+    g_print("wubi_context_order=%u\n", (guint)state->wubi_context_order);
 }
 
 static void print_usage(const gchar *program_name)
@@ -112,7 +114,7 @@ static void print_usage(const gchar *program_name)
         "       [PAGE_KEYS COMPLETION_KEY [PAGE_SIZE DEBUG] "
         "INPUT_KEY INPUT_MOD PUNCT_KEY PUNCT_MOD "
         "DICT_KEY DICT_MOD WIDTH_KEY WIDTH_MOD SETTINGS_KEY SETTINGS_MOD "
-        "[DISABLED_MASK [DECIMAL_PERIOD [AUTO_ENGLISH ASCII_SYMBOLS [LAYOUT [SECOND_THIRD_KEYS [SELECT_CHARACTER_KEYS]]]]]]]\n"
+        "[DISABLED_MASK [DECIMAL_PERIOD [AUTO_ENGLISH ASCII_SYMBOLS [LAYOUT [SECOND_THIRD_KEYS [SELECT_CHARACTER_KEYS [WUBI_MIXED WUBI_CONTEXT_ORDER]]]]]]]]\n"
         "  %s ping\n"
         "  %s clear-user-dictionary\n"
         "  %s shutdown\n",
@@ -187,7 +189,7 @@ int main(int argc, char **argv)
             print_state(&state);
     } else if ((g_strcmp0(argv[1], "set-state") == 0 || preferences) &&
                (argc == 9 || argc == 21 || argc == 23 || argc == 24 ||
-                argc == 25 || argc == 27 || argc == 28 || argc == 29 || argc == 30)) {
+                argc == 25 || argc == 27 || argc == 28 || argc == 29 || argc == 30 || argc == 32)) {
         cassotis_engine_state_init_defaults(&state);
         if (!cassotis_client_get_state(&client, &state, &error))
             goto done;
@@ -199,7 +201,7 @@ int main(int argc, char **argv)
             if (index == 2)
                 maximum = CASSOTIS_PINYIN_ZHINENGABC;
             else if (index == 7)
-                maximum = CASSOTIS_PAGE_KEYS_SHIFT_TAB;
+                maximum = CASSOTIS_PAGE_KEYS_SEMICOLON_QUOTE;
             else if (extended_state && index == 9)
                 maximum = 9U;
             else if (extended_state && index >= 11 &&
@@ -308,25 +310,37 @@ int main(int argc, char **argv)
         }
         if (argc >= 29) {
             guint32 selection_keys;
-            if (!parse_uint(argv[28], CASSOTIS_SECOND_THIRD_SEMICOLON_QUOTE,
+            if (!parse_uint(argv[28], CASSOTIS_SECOND_THIRD_COMMA_PERIOD,
                             &selection_keys)) {
                 g_set_error_literal(&error, cassotis_client_error_quark(), 1,
-                                    "candidate selection keys must be 0..1");
+                                    "candidate selection keys must be 0..4");
                 goto done;
             }
             state.second_third_candidate_keys = (CassotisSecondThirdCandidateKeys)selection_keys;
         }
-        if (argc == 30) {
+        if (argc >= 30) {
             guint32 keys;
-            if (!parse_uint(argv[29], CASSOTIS_SELECT_CHARACTER_BRACKETS, &keys)) {
+            if (!parse_uint(argv[29], CASSOTIS_SELECT_CHARACTER_SEMICOLON_QUOTE, &keys)) {
                 g_set_error_literal(&error, cassotis_client_error_quark(), 1,
-                                    "character selection keys must be 0..1");
+                                    "character selection keys must be 0..4");
                 goto done;
             }
             state.select_character_keys = (CassotisSelectCharacterKeys)keys;
         }
-        if (state.candidate_page_key_scheme == CASSOTIS_PAGE_KEYS_BRACKETS)
-            state.select_character_keys = CASSOTIS_SELECT_CHARACTER_NONE;
+        if (argc == 32) {
+            guint32 mixed, ordered;
+            if (!parse_uint(argv[30], 1, &mixed) || !parse_uint(argv[31], 1, &ordered)) {
+                g_set_error_literal(&error, cassotis_client_error_quark(), 1, "invalid Wubi settings");
+                goto done;
+            }
+            state.wubi_mixed = mixed;
+            state.wubi_context_order = ordered;
+        }
+        if (state.wubi_mixed) {
+            state.pinyin_scheme = CASSOTIS_PINYIN_FULL;
+            state.dictionary_variant = CASSOTIS_DICTIONARY_SIMPLIFIED;
+        }
+        cassotis_resolve_candidate_keys(&state);
         if (preferences) {
             phrases = read_phrases(&error);
             if (phrases == NULL)

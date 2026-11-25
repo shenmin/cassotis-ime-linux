@@ -9,7 +9,7 @@
 #define CASSOTIS_ENGINE_STATE_SHORTCUTS_SCHEMA 3U
 #define CASSOTIS_ENGINE_STATE_DEBUG_SCHEMA 4U
 #define CASSOTIS_ENGINE_STATE_DECIMAL_SCHEMA 6U
-#define CASSOTIS_ENGINE_STATE_SCHEMA 10U
+#define CASSOTIS_ENGINE_STATE_SCHEMA 11U
 #define CASSOTIS_MIN_PAGE_SIZE 3U
 #define CASSOTIS_DEFAULT_PAGE_SIZE 9U
 #define CASSOTIS_MAX_PAGE_SIZE 9U
@@ -32,10 +32,11 @@
 #define CASSOTIS_ENGINE_RESULT_FLAG_LETTER_KEYS 0x04U
 #define CASSOTIS_ENGINE_RESULT_FLAG_UNLABELLED 0x08U
 #define CASSOTIS_ENGINE_RESULT_FLAG_RAW_SELECTED 0x10U
+#define CASSOTIS_ENGINE_RESULT_FLAG_FIRST_WUBI_HINT 0x20U
 #define CASSOTIS_ENGINE_RESULT_KNOWN_FLAGS \
     (CASSOTIS_ENGINE_RESULT_FLAG_ASYNC_PENDING | CASSOTIS_ENGINE_RESULT_FLAG_EXACT_TAIL | \
      CASSOTIS_ENGINE_RESULT_FLAG_LETTER_KEYS | CASSOTIS_ENGINE_RESULT_FLAG_UNLABELLED | \
-     CASSOTIS_ENGINE_RESULT_FLAG_RAW_SELECTED)
+     CASSOTIS_ENGINE_RESULT_FLAG_RAW_SELECTED | CASSOTIS_ENGINE_RESULT_FLAG_FIRST_WUBI_HINT)
 #define CASSOTIS_SHORTCUT_KNOWN_MODIFIERS                               \
     (CASSOTIS_MODIFIER_SHIFT | CASSOTIS_MODIFIER_CONTROL |             \
      CASSOTIS_MODIFIER_ALT)
@@ -56,6 +57,7 @@ void cassotis_engine_state_init_defaults(CassotisEngineState *state)
     state->input_mode = CASSOTIS_INPUT_CHINESE;
     state->dictionary_variant = CASSOTIS_DICTIONARY_SIMPLIFIED;
     state->pinyin_scheme = CASSOTIS_PINYIN_FULL;
+    state->wubi_context_order = TRUE;
     state->punctuation_full_width = TRUE;
     state->decimal_period_after_digit = TRUE;
     state->auto_english = TRUE;
@@ -323,6 +325,7 @@ GByteArray *cassotis_protocol_build_set_state_request(
     append_u8(payload, (guint8)state->candidate_layout);
     append_u8(payload, (guint8)state->second_third_candidate_keys);
     append_u8(payload, (guint8)state->select_character_keys);
+    append_u8(payload, (state->wubi_mixed ? 1U : 0U) | (state->wubi_context_order ? 2U : 0U));
     return build_frame(CASSOTIS_MESSAGE_SET_STATE, request_id, 0, 0,
                        payload);
 }
@@ -657,7 +660,7 @@ gboolean cassotis_protocol_decode_engine_result(
             !reader_string(&reader, &candidate->text) ||
             !reader_string(&reader, &candidate->comment))
             goto fail;
-        if (source > 2 ||
+        if (source > 3 ||
             display_kind > CASSOTIS_CANDIDATE_SENTENCE_PREFIX ||
             has_weight > 1 || deletable > 1) {
             g_set_error(reader.error, cassotis_protocol_error_quark(), 1,
@@ -668,6 +671,8 @@ gboolean cassotis_protocol_decode_engine_result(
             goto fail;
         }
         candidate->has_dictionary_weight = has_weight != 0;
+        candidate->has_wubi_hint = source == 3 ||
+            (index == 0 && (result_flags & CASSOTIS_ENGINE_RESULT_FLAG_FIRST_WUBI_HINT) != 0);
         candidate->deletable = deletable != 0;
     }
     if (schema >= 2 && !reader_string(&reader, &result->raw_input_candidate))
@@ -685,6 +690,23 @@ gboolean cassotis_protocol_decode_engine_result(
 fail:
     cassotis_engine_result_clear(result);
     return FALSE;
+}
+
+/* Physical key pair IDs in the order - =, [ ], , ., ; ', or zero for none. */
+void cassotis_resolve_candidate_keys(CassotisEngineState *state)
+{
+    static const guint8 page[] = {1, 2, 3, 0, 4};
+    static const guint8 pick[] = {0, 4, 1, 2, 3};
+    static const guint8 character[] = {0, 2, 1, 3, 4};
+    if ((guint)state->candidate_page_key_scheme >= G_N_ELEMENTS(page) ||
+        (guint)state->second_third_candidate_keys >= G_N_ELEMENTS(pick) ||
+        (guint)state->select_character_keys >= G_N_ELEMENTS(character)) return;
+    guint8 paging = page[state->candidate_page_key_scheme];
+    if (paging && pick[state->second_third_candidate_keys] == paging)
+        state->second_third_candidate_keys = CASSOTIS_SECOND_THIRD_NONE;
+    guint8 chars = character[state->select_character_keys];
+    if (chars && (chars == paging || chars == pick[state->second_third_candidate_keys]))
+        state->select_character_keys = CASSOTIS_SELECT_CHARACTER_NONE;
 }
 
 gboolean cassotis_protocol_decode_engine_state(
@@ -706,6 +728,7 @@ gboolean cassotis_protocol_decode_engine_state(
     guint8 candidate_layout = CASSOTIS_LAYOUT_AUTO;
     guint8 second_third_candidate_keys = CASSOTIS_SECOND_THIRD_NONE;
     guint8 select_character_keys = CASSOTIS_SELECT_CHARACTER_NONE;
+    guint8 wubi_flags = 2;
     guint8 reserved_byte;
     guint16 reserved;
 
@@ -763,6 +786,8 @@ gboolean cassotis_protocol_decode_engine_state(
         return FALSE;
     if (schema >= 10 && !reader_u8(&reader, &select_character_keys))
         return FALSE;
+    if (schema >= 11 && !reader_u8(&reader, &wubi_flags))
+        return FALSE;
     if (input_mode > CASSOTIS_INPUT_ENGLISH ||
         dictionary_variant > CASSOTIS_DICTIONARY_TRADITIONAL ||
         pinyin_scheme > CASSOTIS_PINYIN_ZHINENGABC ||
@@ -778,11 +803,14 @@ gboolean cassotis_protocol_decode_engine_state(
         candidate_page_size < CASSOTIS_MIN_PAGE_SIZE ||
         candidate_page_size > CASSOTIS_MAX_PAGE_SIZE ||
         candidate_layout > CASSOTIS_LAYOUT_HORIZONTAL ||
-        second_third_candidate_keys > CASSOTIS_SECOND_THIRD_SEMICOLON_QUOTE ||
-        select_character_keys > CASSOTIS_SELECT_CHARACTER_BRACKETS ||
-        (select_character_keys == CASSOTIS_SELECT_CHARACTER_BRACKETS &&
-         candidate_page_key_scheme == CASSOTIS_PAGE_KEYS_BRACKETS) ||
-        candidate_page_key_scheme > CASSOTIS_PAGE_KEYS_SHIFT_TAB ||
+        (schema < 11 && (candidate_page_key_scheme > CASSOTIS_PAGE_KEYS_SHIFT_TAB ||
+                         second_third_candidate_keys > CASSOTIS_SECOND_THIRD_SEMICOLON_QUOTE ||
+                         select_character_keys > CASSOTIS_SELECT_CHARACTER_BRACKETS)) ||
+        second_third_candidate_keys > CASSOTIS_SECOND_THIRD_COMMA_PERIOD ||
+        select_character_keys > CASSOTIS_SELECT_CHARACTER_SEMICOLON_QUOTE ||
+        candidate_page_key_scheme > CASSOTIS_PAGE_KEYS_SEMICOLON_QUOTE ||
+        wubi_flags > 3 || ((wubi_flags & 1) &&
+        (dictionary_variant != CASSOTIS_DICTIONARY_SIMPLIFIED || pinyin_scheme != CASSOTIS_PINYIN_FULL)) ||
         one_key_completion_key > CASSOTIS_COMPLETION_BACKTICK ||
         (candidate_page_key_scheme == CASSOTIS_PAGE_KEYS_SHIFT_TAB &&
          one_key_completion_key == CASSOTIS_COMPLETION_TAB) ||
@@ -793,6 +821,8 @@ gboolean cassotis_protocol_decode_engine_state(
     state->dictionary_variant =
         (CassotisDictionaryVariant)dictionary_variant;
     state->pinyin_scheme = (CassotisPinyinScheme)pinyin_scheme;
+    state->wubi_mixed = (wubi_flags & 1) != 0;
+    state->wubi_context_order = (wubi_flags & 2) != 0;
     state->fuzzy_pinyin_enabled =
         (flags & CASSOTIS_STATE_FLAG_FUZZY_PINYIN_ENABLED) != 0;
     state->fuzzy_pinyin_rules = fuzzy_rules;
@@ -814,6 +844,10 @@ gboolean cassotis_protocol_decode_engine_state(
         (CassotisOneKeyCompletionKey)one_key_completion_key;
     state->debug_mode =
         (flags & CASSOTIS_STATE_FLAG_DEBUG_MODE) != 0;
+    cassotis_resolve_candidate_keys(state);
+    if (state->select_character_keys != select_character_keys ||
+        state->second_third_candidate_keys != second_third_candidate_keys)
+        return set_reader_error(&reader, "conflicting candidate key pairs");
     return TRUE;
 }
 

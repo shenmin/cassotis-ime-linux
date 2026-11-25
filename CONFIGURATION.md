@@ -13,6 +13,8 @@ property menu.
 | --- | --- | --- | --- |
 | Input mode | Simplified Chinese, Traditional Chinese, English | Simplified Chinese | Selects Chinese/English input and the active base dictionary. |
 | Pinyin scheme | Full Pinyin; Microsoft, Xiaohe, Ziranma, Sogou, Ziguang, Pinyin Jiajia, or Zhineng ABC shuangpin | Full Pinyin | Changes only keyboard decoding; all schemes share recall, ranking, learning, and completion. |
+| Wubi 86 mixed input | Optional scheme; simplified Chinese | Off | Type a Wubi code or full Pinyin in the same composition. |
+| Wubi context ordering | On, off | On | Use preceding text to order ambiguous Wubi candidates; turn off to keep table order. |
 | Punctuation | Chinese, English | Chinese | Chooses full-width Chinese punctuation mapping or literal English punctuation. |
 | Character width | Half width, full width | Half width | Converts printable ASCII characters when full-width mode is enabled. |
 | Decimal period after digits | On, off | On | In Chinese punctuation mode, a period immediately after directly typed digits produces `.` instead of `。`. |
@@ -47,9 +49,9 @@ original spelling unchanged.
 
 ## Quick Input
 
-In full pinyin, type a command directly. In any of the seven shuangpin schemes,
-start with `Shift+U`, `Shift+I` or `Shift+V` so normal double-pinyin codes
-remain available.
+In full Pinyin, type a command directly. In double Pinyin or Wubi mixed input,
+start with `Shift+U`, `Shift+I` or `Shift+V` to leave lowercase letters
+available for ordinary input codes.
 
 | Command | Content |
 | --- | --- |
@@ -111,7 +113,11 @@ match. Prefix, jianpin, and arbitrary sentence-path recall are not expanded.
 
 ## Paging And Completion
 
-Candidate paging supports `-/+`, `[/]`, `,/.`, or `Shift+Tab/Tab`. One-key
+Paging, second/third selection, and first/last character extraction can each
+use one of four physical pairs: minus/equal, brackets, comma/period, or
+semicolon/apostrophe. A pair has one owner: paging takes precedence, then
+second/third selection, then character extraction. Settings removes pairs
+already assigned above. Paging also supports `Shift+Tab/Tab`. One-key
 completion supports either `Tab` or the backtick key. `Tab` cannot be assigned
 to both paging and completion; the settings application resolves that conflict
 before applying the state.
@@ -124,23 +130,33 @@ their order. Ordinary candidate selection remains available while the model work
 
 ## Second/Third Selection Keys
 
-The **Keys** page offers optional `;` / `'` selection of the second/third
-candidate on the current page. The default is off. With this option enabled,
+The **Keys** page can assign a pair to the second/third candidate on the
+current page. The default is off. With semicolon/apostrophe assigned,
 an apostrophe during Chinese composition selects a candidate instead of
-separating syllables; leave it off if you use explicit separators. In Double
+separating syllables; choose another pair if you use explicit separators. In Double
 Pinyin, a semicolon that completes a valid pair still enters its final.
 If that candidate does not exist, the key leaves the composition unchanged.
 Outside composition and in U/I/V quick input, normal key handling is retained.
 
 ## First Or Last Character
 
-In **Keys**, enable the optional bracket keys to commit just one character
-of the highlighted Chinese candidate: `[` takes its first character, `]` its
+In **Keys**, assign a free pair to commit just one character
+of the highlighted Chinese candidate: with brackets, `[` takes its first character, `]` its
 last. For example, with 你好 highlighted, the keys commit 你 and 好 respectively.
 The rest of the composition is discarded; this does not teach the user
 dictionary either the word or the extracted character. The setting is off by
 default and unavailable when the brackets are assigned to candidate paging.
 Outside a Chinese candidate list the brackets retain their usual behavior.
+
+## Wubi 86 Mixed Input
+
+Choose **五笔混输（86）** under General. Enter `wq` and press Space for 你,
+or type ordinary full Pinyin. An eligible unique four-key code commits
+automatically unless it can still be read as full Pinyin. Ambiguous codes
+wait for selection. The completion row may offer a longer Wubi code after
+two or three keys. Wubi selections update the current text context, not
+Pinyin learning. The simplified/traditional shortcut does not change the
+Wubi table. Choosing traditional Chinese in Settings switches to full Pinyin.
 
 ## Custom Phrases
 

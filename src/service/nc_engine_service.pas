@@ -255,6 +255,9 @@ begin
     config.input_mode := state.input_mode;
     config.dictionary_variant := state.dictionary_variant;
     config.pinyin_input_scheme := state.pinyin_scheme;
+    config.wubi_mixed := state.wubi_mixed;
+    config.wubi_context_order := state.wubi_context_order;
+    nc_normalize_wubi_mixed_config(config);
     config.fuzzy_pinyin_enabled := state.fuzzy_pinyin_enabled;
     config.fuzzy_pinyin_rules := state.fuzzy_pinyin_rules;
     config.full_width_mode := state.full_width_mode;
@@ -267,9 +270,10 @@ begin
     config.candidate_page_key_scheme :=
         state.candidate_page_key_scheme;
     config.one_key_completion_key := state.one_key_completion_key;
-    config.second_third_candidate_keys := state.second_third_candidate_keys;
+    config.second_third_candidate_keys := nc_resolve_second_third_candidate_keys(
+        state.second_third_candidate_keys, state.candidate_page_key_scheme);
     config.select_character_keys := nc_resolve_select_character_keys(
-        state.select_character_keys, state.candidate_page_key_scheme);
+        state.select_character_keys, state.candidate_page_key_scheme, config.second_third_candidate_keys);
     config.debug_mode := state.debug_mode;
     config.shortcuts := state.shortcuts;
 end;
@@ -281,6 +285,8 @@ begin
     Result :=
         (old_state.dictionary_variant <> new_state.dictionary_variant) or
         (old_state.pinyin_scheme <> new_state.pinyin_scheme) or
+        (old_state.wubi_mixed <> new_state.wubi_mixed) or
+        (old_state.wubi_context_order <> new_state.wubi_context_order) or
         (old_state.fuzzy_pinyin_enabled <>
         new_state.fuzzy_pinyin_enabled) or
         (old_state.fuzzy_pinyin_rules <> new_state.fuzzy_pinyin_rules) or
@@ -338,6 +344,8 @@ begin
     next_state.input_mode := engine_config.input_mode;
     next_state.dictionary_variant := engine_config.dictionary_variant;
     next_state.pinyin_scheme := engine_config.pinyin_input_scheme;
+    next_state.wubi_mixed := engine_config.wubi_mixed;
+    next_state.wubi_context_order := engine_config.wubi_context_order;
     next_state.fuzzy_pinyin_enabled := engine_config.fuzzy_pinyin_enabled;
     next_state.fuzzy_pinyin_rules := engine_config.fuzzy_pinyin_rules;
     next_state.full_width_mode := engine_config.full_width_mode;
@@ -559,6 +567,8 @@ end;
 
 procedure TncEngineService.PopulateResult(const context: TncEngineContext;
     var engine_result: TncEngineResult);
+var
+    code: string;
 begin
     if (context = nil) or (FEngine = nil) then
         Exit;
@@ -570,11 +580,26 @@ begin
         engine_result.selection_kind := csk_letters
     else if FEngine.candidate_selection_keys = '' then
         engine_result.selection_kind := csk_unlabelled;
-    engine_result.candidates := Copy(context.Candidates, 0,
-        Length(context.Candidates));
+    engine_result.candidates := context.Candidates;
+    engine_result.first_has_wubi_hint := False;
     engine_result.selected_index := context.SelectedIndex;
     engine_result.page_index := FEngine.get_page_index;
     engine_result.page_count := FEngine.get_page_count;
+    // Only the display copy carries the reverse code. Selection and learning
+    // still see the original text and comment held by the engine context.
+    if FState.wubi_mixed and (engine_result.page_index = 0) and
+        (Length(engine_result.candidates) > 0) and
+        (engine_result.candidates[0].source <> cs_wubi) and
+        (engine_result.candidates[0].comment = '') then
+    begin
+        code := FEngine.wubi_code_hint(engine_result.candidates[0].text);
+        if code <> '' then
+        begin
+            engine_result.candidates := Copy(context.Candidates, 0, Length(context.Candidates));
+            engine_result.candidates[0].comment := code;
+            engine_result.first_has_wubi_hint := True;
+        end;
+    end;
     engine_result.completion_text := context.CompletionText;
     engine_result.completion_is_exact_tail := context.CompletionIsExactTail;
     if engine_result.page_index = 0 then
@@ -763,8 +788,12 @@ begin
         (Ord(state.second_third_candidate_keys) > Ord(High(TncSecondThirdCandidateKeys))) then
         Exit(False);
     if (Ord(state.select_character_keys) > Ord(High(TncSelectCharacterKeys))) or
-        nc_select_character_keys_conflict_with_page_keys(state.select_character_keys,
-            state.candidate_page_key_scheme) then
+        (nc_resolve_second_third_candidate_keys(state.second_third_candidate_keys,
+            state.candidate_page_key_scheme) <> state.second_third_candidate_keys) or
+        (nc_resolve_select_character_keys(state.select_character_keys,
+            state.candidate_page_key_scheme, state.second_third_candidate_keys) <> state.select_character_keys) or
+        (state.wubi_mixed and ((state.dictionary_variant <> dv_simplified) or
+            (state.pinyin_scheme <> pis_full_pinyin))) then
         Exit(False);
     if nc_candidate_page_key_conflicts_with_one_key_completion(
         state.candidate_page_key_scheme, state.one_key_completion_key) or
@@ -779,6 +808,8 @@ begin
         (state.input_mode <> FState.input_mode) or
         (state.dictionary_variant <> FState.dictionary_variant) or
         (state.pinyin_scheme <> FState.pinyin_scheme) or
+        (state.wubi_mixed <> FState.wubi_mixed) or
+        (state.wubi_context_order <> FState.wubi_context_order) or
         (state.fuzzy_pinyin_enabled <> FState.fuzzy_pinyin_enabled) or
         (state.fuzzy_pinyin_rules <> FState.fuzzy_pinyin_rules);
     previous_state := FState;
@@ -950,6 +981,11 @@ begin
             Exit;
         if shortcut_action = sa_dictionary_variant_toggle then
         begin
+            if FState.wubi_mixed then
+            begin
+                Result.handled := True;
+                Exit;
+            end;
             next_state := FState;
             if next_state.dictionary_variant = dv_traditional then
                 next_state.dictionary_variant := dv_simplified

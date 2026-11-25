@@ -17,7 +17,27 @@ Both benchmarks are derived from the developer's own novel,
 (Chinese title: **永恒的舞动**). Benchmark cases are kept separate from the
 corresponding model-training data.
 
-## Frozen v2.9.0 Baseline
+## Frozen v2.10.0 Baseline
+
+The [engine](https://github.com/shenmin/cassotis-ime/releases/tag/v2.10.0) and
+[lexicon](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.10.0)
+are frozen at v2.10.0. Compared with v2.9.0, both Pinyin dictionaries changed,
+but the character model, trained ranking parameters and benchmark inputs did
+not. These suites measure Pinyin with Wubi and personal learning off; native
+Wubi tests separately cover code selection, automatic commits and completion.
+
+| Input | Simplified | Traditional |
+| --- | ---: | ---: |
+| Base reading records (including single characters) | 270,463 | 273,220 |
+| Single-character reading records | 24,163 | 24,353 |
+| General / conversational frequency records | 207,856 / 111,390 | 209,740 / 112,078 |
+| Short-promotion records | 1,627 | 1,882 |
+
+The optional simplified Wubi table has 129,839 records and is not part of
+either Pinyin record count. See the [dictionary fingerprints](docs/DICTIONARY.md#dictionary-compatibility)
+and [native measurements](#v2100-native-measurements).
+
+## Previous v2.9.0 Baseline
 
 The [engine](https://github.com/shenmin/cassotis-ime/releases/tag/v2.9.0)
 and [lexicon](https://github.com/shenmin/cassotis-lexicon/releases/tag/v2.9.0)
@@ -309,6 +329,47 @@ latency, and Linux process RSS/high-water marks. Memory events contain only
 the track and case identifier. It writes every non-Top1 result to
 `long-failures.tsv` or `short-failures.tsv`; those files are local diagnostics,
 not ignored failures, and are not included in binary release assets.
+
+## v2.10.0 Native Measurements
+
+Measured 2026-11-25 (UTC+8) on the same two Ubuntu 26.04.1 VMs as v2.9.0, using eight vCPUs and eight model threads. Each host ran its suites sequentially. The deadlines were disabled for these completed-query measurements, not for interactive input.
+
+| Architecture | Suite | Top1 | Top2 | Mean (ms) | P50 | P95 | Max |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | Long | 13871/16300 (85.10%) | 14790/16300 (90.74%) | 176.873 | 170 | 302 | 777 |
+| x86_64 | Short, no context | 61280/65000 (94.28%) | 63836/65000 (98.21%) | 4.818 | 4 | 12 | 67 |
+| x86_64 | Short, with context | 63500/65000 (97.69%) | 64563/65000 (99.33%) | 8.657 | 5 | 24 | 73 |
+| aarch64 | Long | 13871/16300 (85.10%) | 14790/16300 (90.74%) | 119.707 | 112 | 209 | 610 |
+| aarch64 | Short, no context | 61280/65000 (94.28%) | 63836/65000 (98.21%) | 4.844 | 4 | 12 | 40 |
+| aarch64 | Short, with context | 63500/65000 (97.69%) | 64563/65000 (99.33%) | 7.649 | 5 | 20 | 48 |
+
+| Architecture | Contested Top1, no context | Top2, no context | Top1, with context | Top2, with context |
+| --- | ---: | ---: | ---: | ---: |
+| x86_64 | 8930/11685 (76.42%) | 10720/11685 (91.74%) | 10534/11685 (90.15%) | 11313/11685 (96.82%) |
+| aarch64 | 8930/11685 (76.42%) | 10720/11685 (91.74%) | 10534/11685 (90.15%) | 11313/11685 (96.82%) |
+
+Short completion: 12,831 opportunities across 65,000 inputs. Key P95 is the foreground measurement; settled latency includes background evaluation.
+
+| Architecture | Hits | Saved keys | Average saved | Stable pairs | Mean (ms) | P50 | P95 | Max | Key P95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 10561/12831 (82.31%) | 27903 | 2.642 | 2178/2234 (97.49%) | 18.792 | 18.033 | 56.014 | 167.018 | 2.029 |
+| aarch64 | 10561/12831 (82.31%) | 27903 | 2.642 | 2178/2234 (97.49%) | 12.046 | 11.859 | 33.774 | 91.508 | 2.049 |
+
+Long continuation: a correct local continuation does not have to finish the sentence; predictive coverage is the proportion of inputs that received a prediction.
+
+| Architecture | Hits | Predictive coverage | Whole-sentence hits | Saved keys | Mean (ms) | P50 | P95 | Max |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | 4012/16300 (24.61%) | 16217/16300 (99.49%) | 206 | 9836 | 175.851 | 166 | 294 | 649 |
+| aarch64 | 4012/16300 (24.61%) | 16217/16300 (99.49%) | 206 | 9836 | 119.098 | 112 | 202 | 487 |
+
+Change from v2.9.0, in counts on the same cases:
+
+| Architecture | Long Top1 | Long Top2 | Short Top1 with context | Short Top2 with context | Short completion | Long completion | Long saved keys |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| x86_64 | +2 | +1 | 0 | 0 | 0 | 0 | 0 |
+| aarch64 | +2 | +1 | 0 | 0 | 0 | 0 | 0 |
+
+Peak RSS during the candidate benchmark was 417.2 MiB on x86_64 and 399.8 MiB on aarch64, not the idle memory footprint.
 
 ## v2.9.0 Native Measurements
 

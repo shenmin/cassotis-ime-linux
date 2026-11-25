@@ -201,6 +201,9 @@ for binary in "$libexec_path/cassotis-engine" \
 done
 install -m 0644 "$icon" "$(stage_path "$icon_path/cassotis-ime.png")"
 install -m 0644 "$dictionary_path" "$(stage_path "$data_path/dict_sc.db")"
+install -m 0644 "$cassotis_root/data/wubi86_table.txt" "$(stage_path "$data_path/wubi86_table.txt")"
+install -D -m 0644 "$cassotis_root/third_party/wubi_haifeng/LICENSE" \
+    "$(stage_path "$doc_path/third-party/wubi_haifeng/LICENSE")"
 if [[ -n "$traditional_dictionary_path" ]]; then
     install -m 0644 "$traditional_dictionary_path" \
         "$(stage_path "$data_path/dict_tc.db")"

@@ -1,4 +1,5 @@
 *.sh text eol=lf
+data/wubi86_table.txt text eol=lf
 *.bin binary
 *.onnx binary
 *.onnx.[0-9][0-9][0-9] binary

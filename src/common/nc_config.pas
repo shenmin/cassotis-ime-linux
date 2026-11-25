@@ -11,6 +11,13 @@ uses
 
 function get_default_dictionary_path_simplified: string;
 function get_default_dictionary_path_traditional: string;
+// The Wubi 86 code table of the Wubi/pinyin mixed scheme, beside the base
+// dictionaries (the lexicon's data/generated/wubi86_table.txt).
+function get_default_wubi_table_path: string;
+// The mixed scheme types full pinyin and only simplified Chinese: a
+// configuration that has it on together with another pinyin scheme or the
+// traditional variant gets full pinyin and the simplified variant.
+procedure nc_normalize_wubi_mixed_config(var config: TncEngineConfig);
 function get_default_user_dictionary_path: string;
 function nc_default_engine_config: TncEngineConfig;
 function nc_normalize_punctuation_ascii_symbols(const value: string): string;
@@ -133,6 +140,18 @@ begin
     Result := get_base_dictionary_path('CASSOTIS_DICTIONARY_TC', 'dict_tc.db');
 end;
 
+function get_default_wubi_table_path: string;
+begin
+    Result := get_base_dictionary_path('CASSOTIS_WUBI_TABLE', 'wubi86_table.txt');
+end;
+
+procedure nc_normalize_wubi_mixed_config(var config: TncEngineConfig);
+begin
+    if not config.wubi_mixed then Exit;
+    config.pinyin_input_scheme := pis_full_pinyin;
+    config.dictionary_variant := dv_simplified;
+end;
+
 function get_default_user_dictionary_path: string;
 begin
     Result := GetEnvironmentVariable('CASSOTIS_USER_DICTIONARY');
@@ -166,6 +185,8 @@ begin
     Result.candidate_color_scheme := c_default_candidate_color_scheme;
     Result.dictionary_variant := dv_simplified;
     Result.shortcuts := nc_default_shortcut_config;
+    Result.wubi_mixed := False;
+    Result.wubi_context_order := True;
 end;
 
 end.

@@ -16,6 +16,28 @@ preserved. This verifies the installer fix, not full Fedora input-framework or
 application compatibility. It does not repair directory attributes damaged by
 an older installer; see the [system-install warning](README.md#system-installation).
 
+## v2.10.0 Validation
+
+Both Ubuntu 26.04.1 architectures passed the four full Pinyin suites. See the
+[measurements](BENCHMARK.md#v2100-native-measurements) / [中文](BENCHMARK.CN.md#v2100-原生实测).
+
+| Architecture | Core tests | Process-cold first / maximum key (ms) | Blocked-model first / maximum key (ms) | Stress RSS growth (KiB) |
+| --- | ---: | ---: | ---: | ---: |
+| x86_64 | 1,066 | 4.623 / 29.276 | 4.744 / 26.140 | 128 |
+| aarch64 | 1,066 | 4.545 / 76.750 | 4.645 / 25.240 | 0 |
+
+Cold trials used 41 keys in a fresh process, without flushing OS caches.
+RSS growth is the change from the warm measurement to the end of the
+8,300-key IPC stress run, not the process's total memory.
+
+IBus and Fcitx 5 were tested in isolated sessions: selecting a Wubi
+candidate, unique four-key auto-commit, and reverse-code display without
+committing the annotation. The core tests separately cover ambiguous
+codes, continued Pinyin, contextual completion and learning isolation.
+Settings tests cover scheme changes, persistence and mutually exclusive key
+pairs. These checks do not establish pixel-level rendering or compatibility
+with every application and compositor.
+
 ## v2.9.0 Validation
 
 Both Ubuntu 26.04.1 architectures passed all four full-corpus suites with

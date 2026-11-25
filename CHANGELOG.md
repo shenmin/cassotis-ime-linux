@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.10.0
+
+- Add optional Wubi 86 and full-Pinyin mixed input for simplified Chinese.
+  It supports code hints, eligible four-key automatic commits and completion
+  for partial codes. Wubi selections do not create Pinyin user words.
+- Allow separate punctuation pairs for paging, second/third candidate selection
+  and first/last character extraction. The settings dialog shows available pairs.
+- Update both Pinyin dictionaries and ship the independent Wubi code table
+  with its BSD-3-Clause notice. The character model and decision trees are unchanged.
+
 ## 2.9.0 - 2026-11-24
 
 - Refresh the shared character language model and its seven decision trees.

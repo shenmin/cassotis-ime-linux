@@ -172,6 +172,8 @@ stage_icon="$staging_dir/cassotis-ime.png"
 install -d -m 0700 "$stage_libexec" "$stage_data"
 install -m 0644 "$icon_source" "$stage_icon"
 install -m 0644 "$dictionary_path" "$stage_data/dict_sc.db"
+install -m 0644 "$cassotis_root/data/wubi86_table.txt" "$stage_data/wubi86_table.txt"
+install -m 0644 "$cassotis_root/third_party/wubi_haifeng/LICENSE" "$stage_data/wubi.BSD"
 if [[ -n "$traditional_dictionary_path" ]]; then
     install -m 0644 "$traditional_dictionary_path" "$stage_data/dict_tc.db"
 fi
@@ -249,6 +251,9 @@ install -d -m 0700 "$data_dir" "$component_dir" "$libexec_dir" \
     "$environment_dir" "$ibus_dropin_dir"
 install -d -m 0755 "$applications_dir" "$icon_dir"
 cassotis_atomic_install "$stage_data/dict_sc.db" "$data_dir/dict_sc.db" 0644
+install -d -m 0755 "$data_home/doc/cassotis-ime/third-party/wubi_haifeng"
+cassotis_atomic_install "$stage_data/wubi.BSD" "$data_home/doc/cassotis-ime/third-party/wubi_haifeng/LICENSE" 0644
+cassotis_atomic_install "$stage_data/wubi86_table.txt" "$data_dir/wubi86_table.txt" 0644
 if [[ -n "$traditional_dictionary_path" ]]; then
     cassotis_atomic_install "$stage_data/dict_tc.db" "$data_dir/dict_tc.db" 0644
 fi
