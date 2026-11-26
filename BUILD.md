@@ -65,18 +65,31 @@ unchanged; source models are checked and the conversion is verified byte-for-byt
 Keep each complete model directory together, including its generated manifest
 and weight files. The build and installation scripts handle this automatically.
 
+## Base Dictionaries
+
+You can compile the engine and adapters without the base dictionaries. To
+install or package a released version with the same data as the official build:
+
+1. Read `VERSION` in your source checkout. Download either portable
+   `.tar.gz` from the [Linux release](https://github.com/shenmin/cassotis-ime-linux/releases)
+   tagged `v<version>` and verify the archive against that release's
+   `SHA256SUMS` before unpacking it. Both architectures contain the same
+   dictionaries; you do not need to run the installer to use them.
+2. Inside the unpacked `cassotis-ime-linux-<version>-<arch>/` directory,
+   go to `root/usr/share/cassotis-ime/` and run `sha256sum dict_sc.db dict_tc.db`.
+   Compare both hashes with [Dictionary Compatibility](docs/DICTIONARY.md#dictionary-compatibility)
+   in the same source checkout.
+
+If generating the databases yourself, use the Cassotis Lexicon tag linked in
+[the dictionary documentation](docs/DICTIONARY.md). Include the ranking and
+completion tables, not just the base entries: an older database may still open
+but produce different candidates. The character model (`data/models/char_lm/`)
+and the Wubi 86 table (`data/wubi86_table.txt`) are part of the source tree,
+not separate downloads.
+
 ## Install From Source
 
-Obtain matching simplified/traditional SQLite databases from
-[Cassotis Lexicon](https://github.com/shenmin/cassotis-lexicon), then choose
-the installer for your desktop framework:
-
-The current 2.6.0 sources require dictionaries generated from Lexicon v2.6.0
-for their complete ranking behavior. Import the auxiliary signals as well as
-base entries, especially the short-word promotion and word-frequency tables.
-Older databases can still be read, but lack the new frequency evidence and
-cannot be used to build a complete 2.6.0 package. Expected hashes and table
-requirements are listed in [Dictionary Compatibility](docs/DICTIONARY.md#dictionary-compatibility).
+Pass the two verified database paths to the installer for your desktop framework:
 
 ```bash
 ./scripts/install_ibus.sh --dictionary /path/to/dict_sc.db \
@@ -178,6 +191,8 @@ SteamOS Gaming Mode and hardware-specific integration are not validated.
 See [COMPATIBILITY.md](COMPATIBILITY.md) for the tested SteamOS desktop setup.
 
 ## Build Packages
+
+Use the same [base dictionaries](#base-dictionaries) when building packages:
 
 ```bash
 ./scripts/build_release.sh \
