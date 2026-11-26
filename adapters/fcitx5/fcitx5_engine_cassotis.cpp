@@ -150,30 +150,20 @@ std::string defaultSocketPath() {
     return result;
 }
 
-std::string defaultEnginePath() {
+std::string defaultProgramPath(const char *program) {
+#ifdef CASSOTIS_FCITX_LIBEXECDIR
+    return std::string(CASSOTIS_FCITX_LIBEXECDIR) + "/" + program;
+#else
     gchar *userPath = g_build_filename(g_get_home_dir(), ".local", "libexec",
-                                       "cassotis-ime", "cassotis-engine",
-                                       nullptr);
+                                       "cassotis-ime", program, nullptr);
     if (g_file_test(userPath, G_FILE_TEST_IS_EXECUTABLE)) {
         std::string result(userPath);
         g_free(userPath);
         return result;
     }
     g_free(userPath);
-    return "/usr/libexec/cassotis-ime/cassotis-engine";
-}
-
-std::string defaultSettingsPath() {
-    gchar *userPath = g_build_filename(g_get_home_dir(), ".local", "libexec",
-                                       "cassotis-ime", "cassotis-settings",
-                                       nullptr);
-    if (g_file_test(userPath, G_FILE_TEST_IS_EXECUTABLE)) {
-        std::string result(userPath);
-        g_free(userPath);
-        return result;
-    }
-    g_free(userPath);
-    return "/usr/libexec/cassotis-ime/cassotis-settings";
+    return std::string("/usr/libexec/cassotis-ime/") + program;
+#endif
 }
 
 class CassotisSettingsConfig final : public fcitx::Configuration {
@@ -794,9 +784,9 @@ CassotisFcitxEngine::CassotisFcitxEngine(fcitx::Instance *instance)
       socketPath_(environmentOrDefault("CASSOTIS_ENGINE_SOCKET",
                                        defaultSocketPath())),
       enginePath_(environmentOrDefault("CASSOTIS_ENGINE_PATH",
-                                       defaultEnginePath())),
+                                       defaultProgramPath("cassotis-engine"))),
       settingsPath_(environmentOrDefault("CASSOTIS_SETTINGS_PATH",
-                                         defaultSettingsPath())),
+                                         defaultProgramPath("cassotis-settings"))),
       settingsConfig_(settingsPath_),
       factory_([this](fcitx::InputContext &inputContext) {
           return new CassotisFcitxState(this, &inputContext,

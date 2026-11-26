@@ -174,6 +174,9 @@ cassotis_require_executable "$bin_dir/cassotis-control"
 
 printf '[build] libcassotis.so (Fcitx 5)\n'
 fcitx_compat_flags=()
+if [[ -n "${CASSOTIS_FCITX_LIBEXECDIR:-}" ]]; then
+    fcitx_compat_flags+=("-DCASSOTIS_FCITX_LIBEXECDIR=\"$CASSOTIS_FCITX_LIBEXECDIR\"")
+fi
 if pkg-config --atleast-version=5.1.9 Fcitx5Core; then
     fcitx_compat_flags+=(
         -DCASSOTIS_FCITX_HAS_CANDIDATE_COMMENT=1

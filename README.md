@@ -95,6 +95,12 @@ Open settings from the Cassotis preferences entry in GNOME input sources or from
 
 Upgrades reload the active input framework. If an already-open application stops responding to Chinese input after an upgrade, save your work and restart that application to reconnect.
 
+### NixOS with Fcitx 5
+
+Add `fcitx5-cassotis` to `i18n.inputMethod.fcitx5.addons` using the project's
+[flake and configuration example](BUILD.md#nixos-with-fcitx-5). It includes
+the model and both dictionaries. You choose when to enable Cassotis in Fcitx 5.
+
 <a id="user-installation"></a>
 
 ### SteamOS and Other Read-Only Systems: User Installation

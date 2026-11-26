@@ -95,6 +95,11 @@ sudo apt install "./${package}"
 
 升级过程会刷新输入法框架。若升级前已打开的应用暂时无法呼出中文输入，保存内容后重启该应用即可恢复连接。
 
+### NixOS：通过 Fcitx 5 安装
+
+参照 [flake 配置示例](BUILD.md#nixos-with-fcitx-5)，将 `fcitx5-cassotis` 加入
+`i18n.inputMethod.fcitx5.addons`。软件包已包含模型和简繁词库；安装不会改动现有输入法列表，可以自行在 Fcitx 5 中添加言泉。
+
 <a id="user-installation"></a>
 
 ### SteamOS 等只读系统：用户目录安装

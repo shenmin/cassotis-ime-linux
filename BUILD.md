@@ -87,6 +87,43 @@ but produce different candidates. The character model (`data/models/char_lm/`)
 and the Wubi 86 table (`data/wubi86_table.txt`) are part of the source tree,
 not separate downloads.
 
+## NixOS with Fcitx 5
+
+Add Cassotis as an input to your **system flake**. Following the system's
+`nixpkgs` builds the addon against the same Fcitx 5 as the desktop:
+
+```nix
+inputs.cassotis.url = "github:shenmin/cassotis-ime-linux";
+inputs.cassotis.inputs.nixpkgs.follows = "nixpkgs";
+```
+
+Include `cassotis` in your flake's `outputs = { nixpkgs, cassotis, ... }:`
+arguments and add this module to your existing `nixosSystem.modules` list:
+
+```nix
+({ pkgs, ... }: {
+  nixpkgs.overlays = [ cassotis.overlays.default ];
+  i18n.inputMethod = {
+    enable = true;
+    type = "fcitx5";
+    fcitx5.addons = [ pkgs.fcitx5-cassotis ];
+  };
+})
+```
+
+Keep any other addons in your list. Rebuild your NixOS configuration as usual,
+then start a new desktop session and add **Cassotis IME** (中文：**Cassotis 言泉拼音输入法**) in the Fcitx 5
+configuration tool (clear “Only Show Current Language” if needed). Installing
+the addon does not select it or rewrite your input-method groups. There is no
+need to run `install.sh` or copy files into `/usr`.
+
+To build without changing your system, run `nix build .#fcitx5-cassotis`
+from a checkout. `nix flake check -L` also tests committing text in a GTK
+application, opening the settings UI in check mode, and scoring with the model.
+The flake provides the Fcitx 5 addon, not an IBus module. The engine and addon
+build from source; the model is included in that source, and the two
+checksum-pinned dictionaries are extracted from the matching Linux release.
+
 ## Install From Source
 
 Pass the two verified database paths to the installer for your desktop framework:
